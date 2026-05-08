@@ -6,6 +6,7 @@ import { pubgImportedMarkersBySlug } from "@/lib/pubg-map-pois";
 
 type Props = {
   map: PubgMapIntel;
+  isAdmin: boolean;
 };
 
 const DEFAULT_CATEGORY_LABELS: Record<string, string> = {
@@ -188,7 +189,7 @@ function computeRenderBox(containerWidth: number, containerHeight: number, image
   };
 }
 
-export function PubgMapOverlay({ map }: Props) {
+export function PubgMapOverlay({ map, isAdmin }: Props) {
   const [activeTypes, setActiveTypes] = useState<Record<string, boolean>>({
     "hot-drop": true,
     "secret-room": true,
@@ -329,11 +330,16 @@ export function PubgMapOverlay({ map }: Props) {
   }, [imageRatio]);
 
   useEffect(() => {
+    if (!isAdmin) {
+      setAdminMode(false);
+      return;
+    }
+
     const params = new URLSearchParams(window.location.search);
     const urlAdmin = params.get("admin") === "1";
     const savedAdmin = localStorage.getItem("pubg-map-admin-enabled") === "1";
     setAdminMode(urlAdmin || savedAdmin);
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     setCalibration(getBaseCalibration(map.slug));
@@ -536,6 +542,7 @@ export function PubgMapOverlay({ map }: Props) {
   }
 
   function toggleAdminMode() {
+    if (!isAdmin) return;
     setAdminMode((prev) => {
       const next = !prev;
       localStorage.setItem("pubg-map-admin-enabled", next ? "1" : "0");
@@ -759,12 +766,14 @@ export function PubgMapOverlay({ map }: Props) {
             }}
             title="Dark map mode"
           >Dark</button>
-          <button
-            type="button"
-            onClick={toggleAdminMode}
-            className="border border-[#3a3a3a] bg-[#1a1a1a] px-2.5 py-1 text-[11px] uppercase tracking-[0.12em] text-[#c8bda0] hover:border-[#666] hover:text-white"
-            title="Toggle admin pinpoint editor"
-          >{adminMode ? "Admin On" : "Admin"}</button>
+          {isAdmin ? (
+            <button
+              type="button"
+              onClick={toggleAdminMode}
+              className="border border-[#3a3a3a] bg-[#1a1a1a] px-2.5 py-1 text-[11px] uppercase tracking-[0.12em] text-[#c8bda0] hover:border-[#666] hover:text-white"
+              title="Toggle admin pinpoint editor"
+            >{adminMode ? "Admin On" : "Admin"}</button>
+          ) : null}
           <button
             type="button"
             onClick={() => { setZoom((z) => Math.min(MAX_ZOOM, +(z + ZOOM_STEP).toFixed(2))); }}
