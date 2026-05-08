@@ -214,6 +214,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
   const [categoryLabels, setCategoryLabels] = useState<Record<string, string>>(DEFAULT_CATEGORY_LABELS);
   const [newCategoryKey, setNewCategoryKey] = useState("");
   const [newCategoryLabel, setNewCategoryLabel] = useState("");
+  const [categoriesDirty, setCategoriesDirty] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [palette, setPalette] = useState<MarkerPalette>(DEFAULT_MARKER_COLORS);
   const [mapTheme, setMapTheme] = useState<MapTheme>("dark");
@@ -346,6 +347,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
     setCapturedPoint(null);
     setEditableMarkers(mergedMarkers);
     setSaveStatus("idle");
+    setCategoriesDirty(false);
     setPalette({});
     setCategoryLabels({});
     setActiveTypes({});
@@ -476,9 +478,9 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
     void saveServerConfig({ legendColors: nextPalette });
   }
 
-  function persistCategoryLabels(nextLabels: Record<string, string>) {
-    setCategoryLabels(nextLabels);
-    void saveServerConfig({ categoryLabels: nextLabels });
+  function saveCategoryConfiguration() {
+    setCategoriesDirty(false);
+    void saveServerConfig({ categoryLabels, legendColors: palette });
   }
 
   function resetPaletteToDefaults() {
@@ -1064,7 +1066,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
                   setNewCategoryLabel("");
                   setCategoryLabels(nextLabels);
                   setPalette(nextPalette);
-                  void saveServerConfig({ categoryLabels: nextLabels, legendColors: nextPalette });
+                  setCategoriesDirty(true);
                 }}
                 className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
               >Add Category</button>
@@ -1075,8 +1077,10 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
                   <div className="text-xs text-[#8f826a]">{type}</div>
                   <input
                     value={categoryLabels[type] ?? humanizeCategory(type)}
-                    onChange={(e) => setCategoryLabels((prev) => ({ ...prev, [type]: e.target.value }))}
-                    onBlur={() => persistCategoryLabels({ ...categoryLabels, [type]: categoryLabels[type] ?? humanizeCategory(type) })}
+                    onChange={(e) => {
+                      setCategoryLabels((prev) => ({ ...prev, [type]: e.target.value }));
+                      setCategoriesDirty(true);
+                    }}
                     className="w-full border border-[#3a3426] bg-[#0e0c09] px-2 py-1.5 text-xs text-[#e2d2af]"
                   />
                   <button
@@ -1092,7 +1096,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
                       delete nextPalette[type];
                       setCategoryLabels(nextLabels);
                       setPalette(nextPalette);
-                      void saveServerConfig({ categoryLabels: nextLabels, legendColors: nextPalette });
+                      setCategoriesDirty(true);
 
                       setActiveTypes((prev) => {
                         const next = { ...prev };
@@ -1110,6 +1114,14 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
                   >Use</button>
                 </div>
               ))}
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={saveCategoryConfiguration}
+                  disabled={!categoriesDirty}
+                  className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842] disabled:opacity-50"
+                >Save Categories</button>
+              </div>
             </div>
           </div>
 
