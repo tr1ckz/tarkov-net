@@ -6,8 +6,16 @@ import { lookupTarkovProfilesByIgn } from "@/lib/tarkov-player";
 
 const profileSchema = z.object({
   displayName: z.string().trim().min(2).max(40),
-  gameName: z.string().trim().max(15).optional().or(z.literal(""))
+  gameName: z.string().trim().max(15).optional().or(z.literal("")),
+  pubgSteamUser: z.string().trim().max(40).optional().or(z.literal("")),
+  pubgXboxUser: z.string().trim().max(40).optional().or(z.literal("")),
+  pubgPsnUser: z.string().trim().max(40).optional().or(z.literal("")),
+  pubgKakaoUser: z.string().trim().max(40).optional().or(z.literal(""))
 });
+
+function cleanOptional(value: string | undefined) {
+  return value?.trim() ? value.trim() : null;
+}
 
 export async function PATCH(request: Request) {
   const session = await getSession();
@@ -22,7 +30,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Invalid profile payload" }, { status: 400 });
   }
 
-  const gameName = parsed.data.gameName?.trim() ? parsed.data.gameName.trim() : null;
+  const gameName = cleanOptional(parsed.data.gameName);
 
   let lookup = {
     regularProfileId: null as string | null,
@@ -57,7 +65,11 @@ export async function PATCH(request: Request) {
       tarkovProfileId: lookup.regularProfileId,
       tarkovProfileMode: defaultMode,
       tarkovPveProfileId: lookup.pveProfileId,
-      tarkovArenaProfileId: lookup.arenaProfileId
+      tarkovArenaProfileId: lookup.arenaProfileId,
+      pubgSteamUser: cleanOptional(parsed.data.pubgSteamUser),
+      pubgXboxUser: cleanOptional(parsed.data.pubgXboxUser),
+      pubgPsnUser: cleanOptional(parsed.data.pubgPsnUser),
+      pubgKakaoUser: cleanOptional(parsed.data.pubgKakaoUser)
     },
     select: {
       displayName: true,
@@ -65,7 +77,11 @@ export async function PATCH(request: Request) {
       tarkovProfileId: true,
       tarkovProfileMode: true,
       tarkovPveProfileId: true,
-      tarkovArenaProfileId: true
+      tarkovArenaProfileId: true,
+      pubgSteamUser: true,
+      pubgXboxUser: true,
+      pubgPsnUser: true,
+      pubgKakaoUser: true
     }
   });
 

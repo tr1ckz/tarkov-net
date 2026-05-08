@@ -12,6 +12,10 @@ type Props = {
   tarkovProfileId: string | null;
   tarkovPveProfileId: string | null;
   tarkovArenaProfileId: string | null;
+  pubgSteamUser: string | null;
+  pubgXboxUser: string | null;
+  pubgPsnUser: string | null;
+  pubgKakaoUser: string | null;
 };
 
 export function ProfileSettingsForm({
@@ -19,10 +23,18 @@ export function ProfileSettingsForm({
   gameName: initialGameName,
   tarkovProfileId,
   tarkovPveProfileId,
-  tarkovArenaProfileId
+  tarkovArenaProfileId,
+  pubgSteamUser,
+  pubgXboxUser,
+  pubgPsnUser,
+  pubgKakaoUser
 }: Props) {
   const [displayName, setDisplayName] = useState(initialDisplayName);
   const [gameName, setGameName] = useState(initialGameName ?? "");
+  const [steamUser, setSteamUser] = useState(pubgSteamUser ?? "");
+  const [xboxUser, setXboxUser] = useState(pubgXboxUser ?? "");
+  const [psnUser, setPsnUser] = useState(pubgPsnUser ?? "");
+  const [kakaoUser, setKakaoUser] = useState(pubgKakaoUser ?? "");
   const [pvpProfileId, setPvpProfileId] = useState(tarkovProfileId ?? "");
   const [pveProfileId, setPveProfileId] = useState(tarkovPveProfileId ?? "");
   const [arenaProfileId, setArenaProfileId] = useState(tarkovArenaProfileId ?? "");
@@ -42,7 +54,11 @@ export function ProfileSettingsForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           displayName,
-          gameName
+          gameName,
+          pubgSteamUser: steamUser,
+          pubgXboxUser: xboxUser,
+          pubgPsnUser: psnUser,
+          pubgKakaoUser: kakaoUser
         })
       });
 
@@ -55,7 +71,11 @@ export function ProfileSettingsForm({
       setPvpProfileId(data.user?.tarkovProfileId ?? "");
       setPveProfileId(data.user?.tarkovPveProfileId ?? "");
       setArenaProfileId(data.user?.tarkovArenaProfileId ?? "");
-      setSaved("Profile saved and IDs synced from IGN");
+      setSteamUser(data.user?.pubgSteamUser ?? "");
+      setXboxUser(data.user?.pubgXboxUser ?? "");
+      setPsnUser(data.user?.pubgPsnUser ?? "");
+      setKakaoUser(data.user?.pubgKakaoUser ?? "");
+      setSaved("Profile saved and game accounts updated");
       router.refresh();
     });
   };
@@ -75,6 +95,31 @@ export function ProfileSettingsForm({
           placeholder="Your actual in-game name"
           maxLength={15}
         />
+      </div>
+
+      <div className="space-y-2 border border-[#2d2d2d] bg-[#111] p-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#9a9080]">PUBG VOD Accounts</p>
+        <p className="text-xs text-[#7f7768]">
+          Save your platform usernames here so the VOD encounter section can auto-fill platform identities.
+        </p>
+        <div className="grid gap-2 md:grid-cols-2">
+          <div className="space-y-1">
+            <p className="text-[11px] uppercase tracking-[0.08em] text-[#7f7768]">Steam</p>
+            <Input value={steamUser} onChange={(event) => setSteamUser(event.target.value)} maxLength={40} placeholder="steam username" />
+          </div>
+          <div className="space-y-1">
+            <p className="text-[11px] uppercase tracking-[0.08em] text-[#7f7768]">Xbox</p>
+            <Input value={xboxUser} onChange={(event) => setXboxUser(event.target.value)} maxLength={40} placeholder="xbox gamertag" />
+          </div>
+          <div className="space-y-1">
+            <p className="text-[11px] uppercase tracking-[0.08em] text-[#7f7768]">PSN</p>
+            <Input value={psnUser} onChange={(event) => setPsnUser(event.target.value)} maxLength={40} placeholder="psn id" />
+          </div>
+          <div className="space-y-1">
+            <p className="text-[11px] uppercase tracking-[0.08em] text-[#7f7768]">Kakao</p>
+            <Input value={kakaoUser} onChange={(event) => setKakaoUser(event.target.value)} maxLength={40} placeholder="kakao name" />
+          </div>
+        </div>
       </div>
 
       <div className="space-y-2 border border-[#2d2d2d] bg-[#111] p-3">

@@ -17,6 +17,10 @@ model User {
   tarkovProfileMode String?
   tarkovPveProfileId String?
   tarkovArenaProfileId String?
+  pubgSteamUser String?
+  pubgXboxUser  String?
+  pubgPsnUser   String?
+  pubgKakaoUser String?
   role          String     @default("USER")
   isSuspended   Boolean    @default(false)
   createdAt     DateTime   @default(now())
