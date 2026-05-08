@@ -74,7 +74,7 @@ export function GlobalCommandPalette({ mode }: Props) {
   const navigateToResult = (id: string) => {
     setOpen(false);
     setQuery("");
-    router.push(`/item/${id}`);
+    router.push(`/tarkov/item/${id}`);
   };
 
   return (
@@ -127,7 +127,7 @@ export function GlobalCommandPalette({ mode }: Props) {
                 results.map((item, index) => (
                   <Link
                     key={item.id}
-                    href={`/item/${item.id}`}
+                    href={`/tarkov/item/${item.id}`}
                     onClick={() => {
                       setOpen(false);
                       setQuery("");

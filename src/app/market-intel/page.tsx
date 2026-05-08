@@ -20,7 +20,7 @@ export default async function MarketIntelPage() {
         </p>
         <div className="mt-3">
           <Link
-            href="/cultist-circle"
+            href="/tarkov/cultist-circle"
             className="inline-flex items-center border border-[#2d2d2d] bg-[#111] px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-[#c8bda0] hover:border-[#49533a] hover:text-[#e2d2af]"
           >
             Full Cultist Circle Sheet
@@ -37,3 +37,4 @@ export default async function MarketIntelPage() {
     </div>
   );
 }
+

@@ -74,7 +74,7 @@ export function WatchlistTable({ rows, trendByItem }: Props) {
                         loading="lazy"
                       />
                       <div>
-                        <Link href={`/item/${item.id}`} className="font-semibold hover:underline">
+                        <Link href={`/tarkov/item/${item.id}`} className="font-semibold hover:underline">
                           {item.name}
                         </Link>
                         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -116,3 +116,4 @@ export function WatchlistTable({ rows, trendByItem }: Props) {
     </div>
   );
 }
+

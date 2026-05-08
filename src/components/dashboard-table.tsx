@@ -142,7 +142,7 @@ export function DashboardTable({ items, favoriteIds, currentPage, totalPages, to
                         loading="lazy"
                       />
                       <div>
-                        <Link href={`/item/${item.id}`} className="font-semibold text-[#e2d2af] hover:underline">
+                        <Link href={`/tarkov/item/${item.id}`} className="font-semibold text-[#e2d2af] hover:underline">
                           {item.name}
                         </Link>
                         <div className="flex flex-wrap items-center gap-2 text-xs text-[#9a9080]">
@@ -255,3 +255,4 @@ export function DashboardTable({ items, favoriteIds, currentPage, totalPages, to
     </div>
   );
 }
+

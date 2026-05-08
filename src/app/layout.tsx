@@ -1,37 +1,13 @@
-import Link from "next/link";
 import Image from "next/image";
 import type { Metadata } from "next";
-import {
-  BarChart3,
-  BookOpen,
-  CircleDollarSign,
-  Compass,
-  Crosshair,
-  ShieldAlert,
-  type LucideIcon
-} from "lucide-react";
 import "./globals.css";
 import { AuthNav } from "@/components/auth-nav";
 import { AppSessionProvider } from "@/components/session-provider";
-import { GlobalCommandPalette } from "@/components/global-command-palette";
-import { GameModeToggle } from "@/components/game-mode-toggle";
-import { LiveCacheRefresh } from "@/components/live-cache-refresh";
-import { getCacheStatusToken } from "@/lib/cache-status";
-import { gameModeLabel, getGameModeFromCookies } from "@/lib/game-mode";
 import { getSession } from "@/lib/session";
 
-const PRIMARY_NAV = [
-  { href: "/", label: "Dashboard", icon: BarChart3 },
-  { href: "/watchlist", label: "Watchlist", icon: BookOpen },
-  { href: "/ballistics", label: "Ballistics", icon: Crosshair },
-  { href: "/raid-info", label: "Raid Ops", icon: Compass },
-  { href: "/market-intel", label: "Economy", icon: CircleDollarSign },
-  { href: "/cultist-circle", label: "Cultist Circle", icon: ShieldAlert }
-];
-
 export const metadata: Metadata = {
-  title: "TARKOV NET",
-  description: "A dark-web styled Tarkov market network with PvP, PvE, and Arena intelligence",
+  title: "Game Intel Hub",
+  description: "Pick a game and jump into live intelligence and tactical guides",
   icons: {
     icon: "/logo.png"
   }
@@ -43,68 +19,34 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const session = await getSession();
-  const mode = getGameModeFromCookies();
-  const refreshToken = await getCacheStatusToken(mode);
 
   return (
     <html lang="en">
       <body className="font-sans antialiased">
         <AppSessionProvider>
-          <LiveCacheRefresh mode={mode} initialToken={refreshToken} />
-          <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-6 sm:px-6 lg:px-8">
-            <header className="mb-4 border border-[#2d2d2d] bg-[linear-gradient(90deg,#1a1a1a_0%,#171717_45%,#131313_100%)] p-4">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-3">
-                    <Image src="/logo.png" alt="TARKOV NET logo" width={44} height={44} className="h-11 w-11 object-contain" priority />
-                    <h1 className="font-display text-3xl uppercase tracking-[0.12em] text-[#e2d2af]">TARKOV NET</h1>
+          <div className="mx-auto min-h-screen w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+            <header className="mb-6 border border-[#2d2d2d] bg-[linear-gradient(90deg,#1a1a1a_0%,#171717_45%,#131313_100%)] p-4">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-3">
+                  <Image src="/logo.png" alt="Game Intel Hub logo" width={64} height={64} className="h-16 w-16 object-contain" priority />
+                  <div>
+                    <p className="font-display text-xl uppercase tracking-[0.12em] text-[#e2d2af]">Game Intel Hub</p>
+                    <p className="text-xs uppercase tracking-[0.12em] text-[#9a9080]">Tarkov and PUBG tactical intelligence</p>
                   </div>
-                  <p className="text-sm text-[#9a9080]">
-                    Live EFT economy intelligence for {gameModeLabel(mode)} markets
-                  </p>
                 </div>
-
-                <div className="flex flex-wrap items-center gap-3">
-                  <GlobalCommandPalette mode={mode} />
-                  <GameModeToggle currentMode={mode} />
-                  <AuthNav
-                    signedIn={Boolean(session?.user)}
-                    displayName={session?.user?.name ?? undefined}
-                    gameName={session?.user?.gameName ?? null}
-                    role={(session?.user as { role?: string })?.role ?? null}
-                  />
-                </div>
+                <AuthNav
+                  signedIn={Boolean(session?.user)}
+                  displayName={session?.user?.name ?? undefined}
+                  gameName={session?.user?.gameName ?? null}
+                  role={(session?.user as { role?: string })?.role ?? null}
+                  showPlayerStats={false}
+                />
               </div>
             </header>
-
-            <div className="flex flex-1 flex-col gap-4 md:flex-row">
-              <aside className="border border-[#2d2d2d] bg-[#171717] p-2 md:w-56 md:shrink-0">
-                <nav className="flex flex-wrap gap-2 md:flex-col md:gap-1">
-                  {PRIMARY_NAV.map((entry) => (
-                    <NavLink key={entry.href} href={entry.href} label={entry.label} icon={entry.icon} />
-                  ))}
-                </nav>
-              </aside>
-
-              <main className="flex-1">
-                {children}
-              </main>
-            </div>
+            <main>{children}</main>
           </div>
         </AppSessionProvider>
       </body>
     </html>
-  );
-}
-
-function NavLink({ href, label, icon: Icon }: { href: string; label: string; icon: LucideIcon }) {
-  return (
-    <Link
-      href={href}
-      className="flex items-center gap-2 border border-[#2d2d2d] bg-[#121212] px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-[#c8bda0] hover:border-[#49533a] hover:text-[#e2d2af] md:px-4"
-    >
-      <Icon className="h-3.5 w-3.5" />
-      <span>{label}</span>
-    </Link>
   );
 }

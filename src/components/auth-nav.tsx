@@ -11,11 +11,22 @@ type Props = {
   displayName?: string;
   gameName?: string | null;
   role?: string | null;
+  basePath?: string;
+  showPlayerStats?: boolean;
 };
 
-export function AuthNav({ signedIn, displayName, gameName, role }: Props) {
+export function AuthNav({
+  signedIn,
+  displayName,
+  gameName,
+  role,
+  basePath = "",
+  showPlayerStats = true
+}: Props) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const normalizedBasePath = basePath.endsWith("/") ? basePath.slice(0, -1) : basePath;
+  const withBasePath = (path: string) => `${normalizedBasePath}${path}`;
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
@@ -69,7 +80,7 @@ export function AuthNav({ signedIn, displayName, gameName, role }: Props) {
         {open ? (
           <div className="absolute right-0 z-50 mt-1 w-52 border border-[#2d2d2d] bg-[#111] p-1 shadow-[0_8px_20px_rgba(0,0,0,0.5)]">
             <Link
-              href="/profile"
+              href={withBasePath("/profile")}
               className="block border border-transparent px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-[#c8bda0] hover:border-[#49533a] hover:bg-[#161616] hover:text-[#e2d2af]"
               onClick={() => setOpen(false)}
             >
@@ -77,7 +88,7 @@ export function AuthNav({ signedIn, displayName, gameName, role }: Props) {
             </Link>
             {role === "ADMIN" && (
               <Link
-                href="/admin"
+                href={withBasePath("/admin")}
                 className="block border border-transparent px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-[#8fa070] hover:border-[#49533a] hover:bg-[#161616] hover:text-[#e2d2af]"
                 onClick={() => setOpen(false)}
               >
@@ -94,9 +105,11 @@ export function AuthNav({ signedIn, displayName, gameName, role }: Props) {
           </div>
         ) : null}
       </div>
-      <Link href="/player-stats">
-        <Button variant="outline">Player Stats</Button>
-      </Link>
+      {showPlayerStats ? (
+        <Link href={withBasePath("/player-stats")}>
+          <Button variant="outline">Player Stats</Button>
+        </Link>
+      ) : null}
     </div>
   );
 }

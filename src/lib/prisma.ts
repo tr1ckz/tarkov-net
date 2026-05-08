@@ -26,9 +26,9 @@ async function ensureSqlitePragmas() {
 
       try {
         // These pragmas reduce write-lock contention for SQLite under concurrent API traffic.
-        await prismaClient.$executeRawUnsafe("PRAGMA journal_mode = WAL");
-        await prismaClient.$executeRawUnsafe("PRAGMA synchronous = NORMAL");
-        await prismaClient.$executeRawUnsafe("PRAGMA busy_timeout = 15000");
+        await prismaClient.$queryRawUnsafe("PRAGMA journal_mode = WAL");
+        await prismaClient.$queryRawUnsafe("PRAGMA synchronous = NORMAL");
+        await prismaClient.$queryRawUnsafe("PRAGMA busy_timeout = 15000");
       } catch (error) {
         console.error("Failed to initialize SQLite pragmas", error);
       } finally {

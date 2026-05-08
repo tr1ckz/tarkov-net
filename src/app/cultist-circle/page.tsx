@@ -285,7 +285,7 @@ export default async function CultistCirclePage() {
             </p>
           </div>
           <Link
-            href="/market-intel"
+            href="/tarkov/market-intel"
             className="border border-[#2d2d2d] bg-[#111] px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-[#c8bda0] hover:border-[#49533a] hover:text-[#e2d2af]"
           >
             Back to Economy
@@ -329,3 +329,4 @@ export default async function CultistCirclePage() {
     </div>
   );
 }
+

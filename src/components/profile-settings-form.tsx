@@ -103,7 +103,7 @@ export function ProfileSettingsForm({
 
       <div className="flex flex-wrap gap-2">
         <Button type="submit" disabled={pending}>{pending ? "Saving" : "Save Profile"}</Button>
-        <Link href="/player-stats">
+        <Link href="/tarkov/player-stats">
           <Button type="button" variant="outline">View Player Stats</Button>
         </Link>
         <Link href="https://tarkov.dev/players" target="_blank" rel="noreferrer">

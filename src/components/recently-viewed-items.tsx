@@ -33,7 +33,7 @@ export function RecentlyViewedItems() {
         {items.map((item) => (
           <Link
             key={item.itemId}
-            href={`/item/${item.itemId}`}
+            href={`/tarkov/item/${item.itemId}`}
             className="border border-[#2d2d2d] bg-[#111] p-3 transition-colors hover:border-[#49533a]"
           >
             <div className="mb-1 text-sm font-semibold text-[#e2d2af]">{item.itemName}</div>

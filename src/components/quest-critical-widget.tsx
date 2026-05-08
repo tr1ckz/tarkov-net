@@ -18,7 +18,7 @@ export async function QuestCriticalWidget({ mode }: Props) {
         <div className="space-y-2 text-sm">
           {rows.map((row) => (
             <div key={row.itemId} className="border border-[#2d2d2d] bg-[#111] p-2.5">
-              <Link href={`/item/${row.itemId}`} className="font-semibold text-[#e2d2af] hover:underline">
+              <Link href={`/tarkov/item/${row.itemId}`} className="font-semibold text-[#e2d2af] hover:underline">
                 {row.name}
               </Link>
               <div className="mt-1 flex items-center justify-between gap-2 text-xs">
@@ -37,3 +37,4 @@ export async function QuestCriticalWidget({ mode }: Props) {
     </Card>
   );
 }
+

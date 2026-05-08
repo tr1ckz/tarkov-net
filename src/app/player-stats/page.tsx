@@ -102,7 +102,7 @@ export default async function PlayerStatsPage({
             {(user.tarkovProfileId || user.tarkovPveProfileId || user.tarkovArenaProfileId) && (
               <>
                 <Link
-                  href="/player-stats"
+                  href="/tarkov/player-stats"
                   className={`border px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] ${
                     requestedMode === "pvp"
                       ? "border-[#e2d2af] bg-[#1a1a1a] text-[#e2d2af]"
@@ -113,7 +113,7 @@ export default async function PlayerStatsPage({
                 </Link>
                 {user.tarkovPveProfileId && (
                   <Link
-                    href="/player-stats?mode=pve"
+                    href="/tarkov/player-stats?mode=pve"
                     className={`border px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] ${
                       requestedMode === "pve"
                         ? "border-[#e2d2af] bg-[#1a1a1a] text-[#e2d2af]"
@@ -125,7 +125,7 @@ export default async function PlayerStatsPage({
                 )}
                 {user.tarkovArenaProfileId && (
                   <Link
-                    href="/player-stats?mode=arena"
+                    href="/tarkov/player-stats?mode=arena"
                     className={`border px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] ${
                       requestedMode === "arena"
                         ? "border-[#e2d2af] bg-[#1a1a1a] text-[#e2d2af]"
@@ -138,7 +138,7 @@ export default async function PlayerStatsPage({
               </>
             )}
             <Link
-              href="/profile"
+              href="/tarkov/profile"
               className="border border-[#2d2d2d] bg-[#111] px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-[#c8bda0] hover:border-[#49533a] hover:text-[#e2d2af]"
             >
               Edit Profile

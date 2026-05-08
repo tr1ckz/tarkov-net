@@ -7,8 +7,8 @@ out
 .item-icon-cache
 tmp-mode-probe.cjs
 utputFormat
-prisma/dev.db
-prisma/dev.db-journal
+prisma/games.db
+prisma/games.db-journal
 prisma/*.db
 prisma/*.db-journal
 prisma/*.db-shm

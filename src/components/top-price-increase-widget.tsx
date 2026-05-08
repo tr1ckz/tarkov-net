@@ -28,7 +28,7 @@ export async function TopPriceIncreaseWidget({ mode }: Props) {
                 <span className="text-xs font-semibold text-[#e2d2af]">+{item.percentChange.toFixed(1)}%</span>
               </div>
 
-              <Link href={`/item/${item.itemId}`} className="block text-sm font-semibold text-[#e2d2af] hover:underline">
+              <Link href={`/tarkov/item/${item.itemId}`} className="block text-sm font-semibold text-[#e2d2af] hover:underline">
                 {item.name}
               </Link>
 
@@ -59,3 +59,4 @@ export async function TopPriceIncreaseWidget({ mode }: Props) {
     </Card>
   );
 }
+
