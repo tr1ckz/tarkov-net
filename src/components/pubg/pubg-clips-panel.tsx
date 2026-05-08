@@ -36,6 +36,33 @@ type ClipsResponse = {
 
 type Mode = "pubg" | "streamer" | "encounters";
 
+async function fetchJsonWithTimeout<T>(url: string, timeoutMs = 20000): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      cache: "no-store",
+      signal: controller.signal
+    });
+    const payload = (await response.json()) as T;
+
+    if (!response.ok) {
+      const err = payload as { error?: string };
+      throw new Error(err.error ?? "Request failed");
+    }
+
+    return payload;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("Request timed out. Try Lookup Player first, then rerun.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function formatRelativeTime(iso: string) {
   const date = new Date(iso);
   const now = Date.now();
@@ -123,27 +150,23 @@ export function PubgClipsPanel() {
       setResultMeta(null);
 
       try {
-        const response = await fetch(query, { cache: "no-store" });
-        const payload = (await response.json()) as ClipsResponse;
+        const payload = await fetchJsonWithTimeout<ClipsResponse>(query, 30000);
 
         if (cancelled) return;
 
-        if (!response.ok) {
-          setClips([]);
-          setError(payload.error ?? "Failed to load clips");
-          setSetupHint(payload.setup ?? null);
-          return;
-        }
-
         setClips(payload.clips ?? []);
         setResultMeta({ encountersScanned: payload.encountersScanned, debug: payload.debug });
-        if (payload.profile?.shard) {
-          setResolvedShard(payload.profile.shard);
+        if (mode === "encounters") {
+          const shard = payload.profile?.shard || payload.debug?.resolvedShard || "unresolved";
+          setResolvedShard(shard);
         }
       } catch (err) {
         if (cancelled) return;
         setClips([]);
         setError(err instanceof Error ? err.message : "Failed to load clips");
+        if (mode === "encounters") {
+          setResolvedShard("unresolved");
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -194,22 +217,24 @@ export function PubgClipsPanel() {
         playerName: nextName,
         platform: pendingPlatform
       });
-      const response = await fetch(`/api/pubg/player-lookup?${params.toString()}`, {
-        cache: "no-store"
-      });
-      const payload = await response.json();
+      const payload = await fetchJsonWithTimeout<{
+        found?: boolean;
+        error?: string;
+        setup?: string;
+        profile?: {
+          playerName: string;
+          shard: string;
+          matchCount: number;
+        };
+      }>(`/api/pubg/player-lookup?${params.toString()}`);
 
-      if (!response.ok || !payload?.found) {
+      if (!payload?.found || !payload.profile) {
         setError(payload?.error ?? "Player lookup failed");
         setSetupHint(payload?.setup ?? null);
         return;
       }
 
-      const profile = payload.profile as {
-        playerName: string;
-        shard: string;
-        matchCount: number;
-      };
+      const profile = payload.profile;
 
       setPendingPlayerName(profile.playerName);
       setPlayerName(profile.playerName);
@@ -226,6 +251,7 @@ export function PubgClipsPanel() {
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Player lookup failed");
+      setResolvedShard("unresolved");
     } finally {
       setLookupLoading(false);
     }
@@ -328,7 +354,7 @@ export function PubgClipsPanel() {
 
       {mode === "encounters" && playerName && (
         <div className="border border-[#2d2d2d] bg-[#111] px-3 py-2 text-xs uppercase tracking-[0.12em] text-[#9a9080]">
-          My account: <span className="text-[#e2d2af]">{playerName}</span> · {platform} · {resolvedShard || "resolving..."}
+          My account: <span className="text-[#e2d2af]">{playerName}</span> · {platform} · {loading ? "resolving..." : (resolvedShard || "unresolved")}
           {typeof resultMeta?.encountersScanned === "number" && (
             <span className="ml-2 text-[#7f7768]">(encounters scanned: {resultMeta.encountersScanned})</span>
           )}

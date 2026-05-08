@@ -21,6 +21,8 @@ type MapCalibration = {
   yScale: number;
 };
 
+type CalibrationOverrides = Partial<Record<PubgMapIntel["slug"], MapCalibration>>;
+
 const MAP_CALIBRATION: Partial<Record<PubgMapIntel["slug"], MapCalibration>> = {
   sanhok: { xOffset: 2.2, yOffset: 2.3, xScale: 95.4, yScale: 95.0 },
   miramar: { xOffset: 1.4, yOffset: 1.3, xScale: 97.2, yScale: 97.1 },
@@ -29,20 +31,48 @@ const MAP_CALIBRATION: Partial<Record<PubgMapIntel["slug"], MapCalibration>> = {
   vikendi: { xOffset: 1.6, yOffset: 1.8, xScale: 96.6, yScale: 96.4 },
 };
 
+const DEFAULT_CALIBRATION: MapCalibration = {
+  xOffset: 0,
+  yOffset: 0,
+  xScale: 100,
+  yScale: 100,
+};
+
+function getBaseCalibration(slug: PubgMapIntel["slug"]): MapCalibration {
+  return MAP_CALIBRATION[slug] ?? DEFAULT_CALIBRATION;
+}
+
 function clampPercent(value: number) {
   return Math.max(0.2, Math.min(99.8, value));
 }
 
-function applyCalibration(slug: PubgMapIntel["slug"], x: number, y: number) {
-  const c = MAP_CALIBRATION[slug];
-  if (!c) {
-    return { x: clampPercent(x), y: clampPercent(y) };
-  }
+function applyCalibration(x: number, y: number, calibration: MapCalibration) {
+  const c = calibration;
 
   return {
     x: clampPercent(c.xOffset + (x * c.xScale) / 100),
     y: clampPercent(c.yOffset + (y * c.yScale) / 100),
   };
+}
+
+function removeCalibration(x: number, y: number, calibration: MapCalibration) {
+  const safeXScale = Math.abs(calibration.xScale) < 0.01 ? 100 : calibration.xScale;
+  const safeYScale = Math.abs(calibration.yScale) < 0.01 ? 100 : calibration.yScale;
+  return {
+    x: clampPercent(((x - calibration.xOffset) * 100) / safeXScale),
+    y: clampPercent(((y - calibration.yOffset) * 100) / safeYScale),
+  };
+}
+
+function readOverrides(): CalibrationOverrides {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem("pubg-map-calibration-overrides");
+    if (!raw) return {};
+    return JSON.parse(raw) as CalibrationOverrides;
+  } catch {
+    return {};
+  }
 }
 
 const MIN_ZOOM = 1;
@@ -57,6 +87,14 @@ export function PubgMapOverlay({ map }: Props) {
     "vehicle-route": true,
   });
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
+  const [adminMode, setAdminMode] = useState(false);
+  const [calibration, setCalibration] = useState<MapCalibration>(getBaseCalibration(map.slug));
+  const [capturedPoint, setCapturedPoint] = useState<{
+    rawX: number;
+    rawY: number;
+    calibratedX: number;
+    calibratedY: number;
+  } | null>(null);
 
   // pan/zoom state
   const [zoom, setZoom] = useState(1);
@@ -106,6 +144,44 @@ export function PubgMapOverlay({ map }: Props) {
 
   const activeMarker = visibleMarkers.find((m) => m.id === activeMarkerId) ?? null;
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlAdmin = params.get("admin") === "1";
+    const savedAdmin = localStorage.getItem("pubg-map-admin-enabled") === "1";
+    setAdminMode(urlAdmin || savedAdmin);
+  }, []);
+
+  useEffect(() => {
+    const overrides = readOverrides();
+    setCalibration(overrides[map.slug] ?? getBaseCalibration(map.slug));
+    setCapturedPoint(null);
+  }, [map.slug]);
+
+  function persistCalibration(nextCalibration: MapCalibration) {
+    const overrides = readOverrides();
+    const nextOverrides: CalibrationOverrides = {
+      ...overrides,
+      [map.slug]: nextCalibration,
+    };
+    localStorage.setItem("pubg-map-calibration-overrides", JSON.stringify(nextOverrides));
+    setCalibration(nextCalibration);
+  }
+
+  function resetCalibration() {
+    const overrides = readOverrides();
+    delete overrides[map.slug];
+    localStorage.setItem("pubg-map-calibration-overrides", JSON.stringify(overrides));
+    setCalibration(getBaseCalibration(map.slug));
+  }
+
+  function toggleAdminMode() {
+    setAdminMode((prev) => {
+      const next = !prev;
+      localStorage.setItem("pubg-map-admin-enabled", next ? "1" : "0");
+      return next;
+    });
+  }
+
   const toggleType = (type: PubgMapMarker["type"]) => {
     setActiveTypes((prev) => ({ ...prev, [type]: !prev[type] }));
     setActiveMarkerId(null);
@@ -151,6 +227,35 @@ export function PubgMapOverlay({ map }: Props) {
   }, []);
 
   const onMouseUp = useCallback(() => { dragging.current = false; }, []);
+
+  const onMapClick = useCallback(
+    async (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!adminMode) return;
+      if ((e.target as HTMLElement).tagName === "BUTTON") return;
+
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect || rect.width <= 0 || rect.height <= 0) return;
+
+      const calibratedX = clampPercent(((e.clientX - rect.left - pan.x) / (zoom * rect.width)) * 100);
+      const calibratedY = clampPercent(((e.clientY - rect.top - pan.y) / (zoom * rect.height)) * 100);
+      const raw = removeCalibration(calibratedX, calibratedY, calibration);
+
+      const captured = {
+        rawX: Number(raw.x.toFixed(2)),
+        rawY: Number(raw.y.toFixed(2)),
+        calibratedX: Number(calibratedX.toFixed(2)),
+        calibratedY: Number(calibratedY.toFixed(2)),
+      };
+      setCapturedPoint(captured);
+
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(captured));
+      } catch {
+        // ignore clipboard permission failures
+      }
+    },
+    [adminMode, calibration, pan.x, pan.y, zoom]
+  );
 
   const resetView = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
 
@@ -203,6 +308,12 @@ export function PubgMapOverlay({ map }: Props) {
         <div className="ml-auto flex items-center gap-1">
           <button
             type="button"
+            onClick={toggleAdminMode}
+            className="border border-[#3a3a3a] bg-[#1a1a1a] px-2.5 py-1 text-[11px] uppercase tracking-[0.12em] text-[#c8bda0] hover:border-[#666] hover:text-white"
+            title="Toggle admin pinpoint editor"
+          >{adminMode ? "Admin On" : "Admin"}</button>
+          <button
+            type="button"
             onClick={() => { setZoom((z) => Math.min(MAX_ZOOM, +(z + ZOOM_STEP).toFixed(2))); }}
             className="border border-[#3a3a3a] bg-[#1a1a1a] px-2.5 py-1 text-sm text-[#c8bda0] hover:border-[#666] hover:text-white"
             title="Zoom in"
@@ -233,6 +344,7 @@ export function PubgMapOverlay({ map }: Props) {
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
         onMouseLeave={onMouseUp}
+        onClick={onMapClick}
       >
         {/* header badge */}
         <div className="pointer-events-none absolute left-2 top-2 z-20 border border-[#2d2d2d] bg-[#111]/90 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-[#7f7768]">
@@ -259,7 +371,7 @@ export function PubgMapOverlay({ map }: Props) {
           {visibleMarkers.map((marker) => {
             const cfg = MARKER_CONFIG[marker.type];
             const isActive = activeMarkerId === marker.id;
-            const calibrated = applyCalibration(map.slug, marker.x, marker.y);
+            const calibrated = applyCalibration(marker.x, marker.y, calibration);
             return (
               <button
                 key={marker.id}
@@ -291,6 +403,89 @@ export function PubgMapOverlay({ map }: Props) {
           </div>
         )}
       </div>
+
+      {adminMode && (
+        <div className="border border-[#3a3426] bg-[#14110b] p-3">
+          <p className="text-[11px] uppercase tracking-[0.14em] text-[#d2b277]">Admin Pinpoint Editor (Local)</p>
+          <p className="mt-1 text-xs text-[#a69475]">
+            Tune calibration for {map.name}. Click anywhere on map to capture coordinates (copied to clipboard).
+          </p>
+
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <label className="text-xs text-[#b8aa90]">
+              X Offset
+              <input
+                type="range"
+                min={-8}
+                max={8}
+                step={0.1}
+                value={calibration.xOffset}
+                onChange={(e) => setCalibration((prev) => ({ ...prev, xOffset: Number(e.target.value) }))}
+                className="mt-1 w-full"
+              />
+              <span className="text-[11px] text-[#8f826a]">{calibration.xOffset.toFixed(2)}</span>
+            </label>
+            <label className="text-xs text-[#b8aa90]">
+              Y Offset
+              <input
+                type="range"
+                min={-8}
+                max={8}
+                step={0.1}
+                value={calibration.yOffset}
+                onChange={(e) => setCalibration((prev) => ({ ...prev, yOffset: Number(e.target.value) }))}
+                className="mt-1 w-full"
+              />
+              <span className="text-[11px] text-[#8f826a]">{calibration.yOffset.toFixed(2)}</span>
+            </label>
+            <label className="text-xs text-[#b8aa90]">
+              X Scale (%)
+              <input
+                type="range"
+                min={90}
+                max={110}
+                step={0.1}
+                value={calibration.xScale}
+                onChange={(e) => setCalibration((prev) => ({ ...prev, xScale: Number(e.target.value) }))}
+                className="mt-1 w-full"
+              />
+              <span className="text-[11px] text-[#8f826a]">{calibration.xScale.toFixed(2)}</span>
+            </label>
+            <label className="text-xs text-[#b8aa90]">
+              Y Scale (%)
+              <input
+                type="range"
+                min={90}
+                max={110}
+                step={0.1}
+                value={calibration.yScale}
+                onChange={(e) => setCalibration((prev) => ({ ...prev, yScale: Number(e.target.value) }))}
+                className="mt-1 w-full"
+              />
+              <span className="text-[11px] text-[#8f826a]">{calibration.yScale.toFixed(2)}</span>
+            </label>
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => persistCalibration(calibration)}
+              className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
+            >Save Calibration</button>
+            <button
+              type="button"
+              onClick={resetCalibration}
+              className="border border-[#3a3a3a] bg-[#1a1a1a] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#9a9080] hover:border-[#666] hover:text-white"
+            >Reset Map</button>
+          </div>
+
+          {capturedPoint && (
+            <p className="mt-3 text-xs text-[#b8aa90]">
+              Captured raw ({capturedPoint.rawX}, {capturedPoint.rawY}) · rendered ({capturedPoint.calibratedX}, {capturedPoint.calibratedY})
+            </p>
+          )}
+        </div>
+      )}
 
       {/* ── legend ── */}
       <div className="border border-[#2d2d2d] bg-[#0e0e0e] px-4 py-3">
