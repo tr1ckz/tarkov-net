@@ -277,11 +277,229 @@ async function maybeAutoLinkKnownPlayer(event: StreamOnlineEvent) {
   });
 
   return {
+    source: "known_player",
     platform: best.row.platform,
     shard,
     pubgPlayerName: resolved?.playerName ?? best.row.playerName,
     similarity: Math.round(best.similarity * 100),
     verified: Boolean(resolved)
+  };
+}
+
+function parseUserPubgClaims(user: {
+  pubgSteamUser?: string | null;
+  pubgXboxUser?: string | null;
+  pubgPsnUser?: string | null;
+  pubgKakaoUser?: string | null;
+}) {
+  const claims: Array<{ platform: string; playerName: string; normalized: string }> = [];
+
+  if (user.pubgSteamUser?.trim()) {
+    const playerName = user.pubgSteamUser.trim();
+    claims.push({ platform: "steam", playerName, normalized: normalizeForLinking(playerName) });
+  }
+  if (user.pubgXboxUser?.trim()) {
+    const playerName = user.pubgXboxUser.trim();
+    claims.push({ platform: "xbox", playerName, normalized: normalizeForLinking(playerName) });
+  }
+  if (user.pubgPsnUser?.trim()) {
+    const playerName = user.pubgPsnUser.trim();
+    claims.push({ platform: "psn", playerName, normalized: normalizeForLinking(playerName) });
+  }
+  if (user.pubgKakaoUser?.trim()) {
+    const playerName = user.pubgKakaoUser.trim();
+    claims.push({ platform: "kakao", playerName, normalized: normalizeForLinking(playerName) });
+  }
+
+  return claims.filter((c) => c.normalized.length >= 4);
+}
+
+async function maybeAutoLinkByUserClaims(event: StreamOnlineEvent) {
+  const twitchUserId = event.broadcaster_user_id;
+  const twitchUserLogin = event.broadcaster_user_login;
+  const twitchUserName = event.broadcaster_user_name;
+  if (!twitchUserId || !twitchUserLogin || !twitchUserName) return null;
+
+  const users = await db.user.findMany({
+    where: {
+      OR: [
+        { pubgSteamUser: { not: null } },
+        { pubgXboxUser: { not: null } },
+        { pubgPsnUser: { not: null } },
+        { pubgKakaoUser: { not: null } }
+      ]
+    },
+    select: {
+      pubgSteamUser: true,
+      pubgXboxUser: true,
+      pubgPsnUser: true,
+      pubgKakaoUser: true
+    },
+    take: 1200
+  });
+
+  const loginNorm = normalizeForLinking(twitchUserLogin);
+  const displayNorm = normalizeForLinking(twitchUserName);
+
+  let best: { platform: string; playerName: string; normalized: string; score: number } | null = null;
+  let second: { platform: string; playerName: string; normalized: string; score: number } | null = null;
+
+  for (const user of users) {
+    const claims = parseUserPubgClaims(user);
+    for (const claim of claims) {
+      const score = Math.max(
+        loginNorm ? stringSimilarity.compareTwoStrings(loginNorm, claim.normalized) : 0,
+        displayNorm ? stringSimilarity.compareTwoStrings(displayNorm, claim.normalized) : 0
+      );
+      if (score < 0.9) continue;
+
+      const candidate = { ...claim, score };
+      if (!best || candidate.score > best.score) {
+        second = best;
+        best = candidate;
+      } else if (!second || candidate.score > second.score) {
+        second = candidate;
+      }
+    }
+  }
+
+  if (!best) return null;
+  if (second && best.score - second.score < 0.03) return null;
+
+  const fallbackShard = getCandidateShards(best.platform)[0] ?? "pc-na";
+  const fallbackPlayerId = `profile-claim:${best.platform}:${best.normalized}`;
+
+  await db.pubgStreamerIdentityLink.upsert({
+    where: {
+      twitchUserId_platform: {
+        twitchUserId,
+        platform: best.platform
+      }
+    },
+    create: {
+      twitchUserId,
+      twitchUserLogin,
+      twitchUserName,
+      platform: best.platform,
+      shard: fallbackShard,
+      pubgPlayerId: fallbackPlayerId,
+      pubgPlayerName: best.playerName,
+      pubgNameNormalized: best.normalized,
+      confidenceScore: Math.round(best.score * 100),
+      confidenceReasonsJson: JSON.stringify([
+        "eventsub_profile_claim",
+        `similarity_${Math.round(best.score * 100)}pct`,
+        "unverified_fallback"
+      ]),
+      source: "eventsub_profile_claim",
+      firstLinkedAt: new Date(),
+      lastLinkedAt: new Date()
+    },
+    update: {
+      twitchUserLogin,
+      twitchUserName,
+      shard: fallbackShard,
+      pubgPlayerId: fallbackPlayerId,
+      pubgPlayerName: best.playerName,
+      pubgNameNormalized: best.normalized,
+      confidenceScore: Math.round(best.score * 100),
+      confidenceReasonsJson: JSON.stringify([
+        "eventsub_profile_claim",
+        `similarity_${Math.round(best.score * 100)}pct`,
+        "unverified_fallback"
+      ]),
+      source: "eventsub_profile_claim",
+      lastLinkedAt: new Date()
+    }
+  });
+
+  await upsertIdentityLinkEvent({
+    platform: best.platform,
+    shard: fallbackShard,
+    pubgNameNormalized: best.normalized,
+    pubgPlayerName: best.playerName,
+    twitchUserId,
+    twitchUserLogin,
+    twitchUserName
+  });
+
+  return {
+    source: "profile_claim",
+    platform: best.platform,
+    shard: fallbackShard,
+    pubgPlayerName: best.playerName,
+    similarity: Math.round(best.score * 100),
+    verified: false
+  };
+}
+
+async function maybeAutoLinkByLoginHeuristic(event: StreamOnlineEvent) {
+  const twitchUserId = event.broadcaster_user_id;
+  const twitchUserLogin = event.broadcaster_user_login;
+  const twitchUserName = event.broadcaster_user_name;
+  if (!twitchUserId || !twitchUserLogin || !twitchUserName) return null;
+
+  const normalized = normalizeForLinking(twitchUserLogin);
+  if (normalized.length < 4) return null;
+
+  const platform = "steam";
+  const shard = "pc-na";
+  const playerName = twitchUserLogin;
+  const playerId = `login-heuristic:${platform}:${normalized}`;
+
+  await db.pubgStreamerIdentityLink.upsert({
+    where: {
+      twitchUserId_platform: {
+        twitchUserId,
+        platform
+      }
+    },
+    create: {
+      twitchUserId,
+      twitchUserLogin,
+      twitchUserName,
+      platform,
+      shard,
+      pubgPlayerId: playerId,
+      pubgPlayerName: playerName,
+      pubgNameNormalized: normalized,
+      confidenceScore: 60,
+      confidenceReasonsJson: JSON.stringify(["eventsub_login_heuristic", "unverified_fallback"]),
+      source: "eventsub_login_heuristic",
+      firstLinkedAt: new Date(),
+      lastLinkedAt: new Date()
+    },
+    update: {
+      twitchUserLogin,
+      twitchUserName,
+      shard,
+      pubgPlayerId: playerId,
+      pubgPlayerName: playerName,
+      pubgNameNormalized: normalized,
+      confidenceScore: 60,
+      confidenceReasonsJson: JSON.stringify(["eventsub_login_heuristic", "unverified_fallback"]),
+      source: "eventsub_login_heuristic",
+      lastLinkedAt: new Date()
+    }
+  });
+
+  await upsertIdentityLinkEvent({
+    platform,
+    shard,
+    pubgNameNormalized: normalized,
+    pubgPlayerName: playerName,
+    twitchUserId,
+    twitchUserLogin,
+    twitchUserName
+  });
+
+  return {
+    source: "login_heuristic",
+    platform,
+    shard,
+    pubgPlayerName: playerName,
+    similarity: 60,
+    verified: false
   };
 }
 
@@ -375,7 +593,7 @@ async function processStreamOnlineNotification(input: {
       }
     });
 
-    const autoLink = await maybeAutoLinkKnownPlayer(event).catch((error) => {
+    let autoLink = await maybeAutoLinkKnownPlayer(event).catch((error) => {
       console.warn("[twitch-eventsub] known-player auto-link failed", {
         broadcasterId: event.broadcaster_user_id,
         broadcasterLogin: event.broadcaster_user_login,
@@ -383,6 +601,28 @@ async function processStreamOnlineNotification(input: {
       });
       return null;
     });
+
+    if (!autoLink) {
+      autoLink = await maybeAutoLinkByUserClaims(event).catch((error) => {
+        console.warn("[twitch-eventsub] profile-claim auto-link failed", {
+          broadcasterId: event.broadcaster_user_id,
+          broadcasterLogin: event.broadcaster_user_login,
+          error: error instanceof Error ? error.message : String(error)
+        });
+        return null;
+      });
+    }
+
+    if (!autoLink) {
+      autoLink = await maybeAutoLinkByLoginHeuristic(event).catch((error) => {
+        console.warn("[twitch-eventsub] login-heuristic auto-link failed", {
+          broadcasterId: event.broadcaster_user_id,
+          broadcasterLogin: event.broadcaster_user_login,
+          error: error instanceof Error ? error.message : String(error)
+        });
+        return null;
+      });
+    }
 
     console.info("[twitch-eventsub] stream.online processed", {
       messageId,

@@ -346,8 +346,9 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
     setCapturedPoint(null);
     setEditableMarkers(mergedMarkers);
     setSaveStatus("idle");
-    setPalette(DEFAULT_MARKER_COLORS);
-    setCategoryLabels(DEFAULT_CATEGORY_LABELS);
+    setPalette({});
+    setCategoryLabels({});
+    setActiveTypes({});
     const storedTheme = localStorage.getItem(`pubg-map-theme-${map.slug}`);
     if (storedTheme === "dark" || storedTheme === "light") {
       setMapTheme(storedTheme);
@@ -1061,8 +1062,9 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
                   setNewEntityType(key);
                   setNewCategoryKey("");
                   setNewCategoryLabel("");
-                  persistCategoryLabels(nextLabels);
-                  persistPalette(nextPalette);
+                  setCategoryLabels(nextLabels);
+                  setPalette(nextPalette);
+                  void saveServerConfig({ categoryLabels: nextLabels, legendColors: nextPalette });
                 }}
                 className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
               >Add Category</button>
@@ -1086,11 +1088,11 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
 
                       const nextLabels = { ...categoryLabels };
                       delete nextLabels[type];
-                      persistCategoryLabels(nextLabels);
-
                       const nextPalette = { ...palette };
                       delete nextPalette[type];
-                      persistPalette(nextPalette);
+                      setCategoryLabels(nextLabels);
+                      setPalette(nextPalette);
+                      void saveServerConfig({ categoryLabels: nextLabels, legendColors: nextPalette });
 
                       setActiveTypes((prev) => {
                         const next = { ...prev };
