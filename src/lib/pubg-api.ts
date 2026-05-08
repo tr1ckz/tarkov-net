@@ -66,6 +66,59 @@ export type PubgEncounterEvent = {
 
 export type PubgPlatform = "steam" | "xbox" | "psn" | "kakao";
 
+// Async context key for propagating triggeredBy through the call stack
+const triggeredByStorage = new Map<string, string>();
+let _triggeredByContext: string | undefined;
+
+export function setPubgCallContext(triggeredBy: string) {
+  _triggeredByContext = triggeredBy;
+}
+
+export function clearPubgCallContext() {
+  _triggeredByContext = undefined;
+}
+
+async function logPubgApiCall(opts: {
+  callType: string;
+  endpoint: string;
+  shard?: string | null;
+  statusCode?: number | null;
+  durationMs: number;
+  success: boolean;
+}) {
+  try {
+    const { prisma } = await import("@/lib/prisma");
+    await prisma.pubgApiCallLog.create({
+      data: {
+        callType: opts.callType,
+        endpoint: opts.endpoint,
+        shard: opts.shard ?? null,
+        statusCode: opts.statusCode ?? null,
+        durationMs: Math.round(opts.durationMs),
+        success: opts.success,
+        triggeredBy: _triggeredByContext ?? null,
+      }
+    });
+  } catch {
+    // Non-critical — never let logging failures break the API call
+  }
+}
+
+/**
+ * Public helper for modules that make raw PUBG API calls outside of pubgGet.
+ * E.g. pubg-streamer-linking.ts which has its own fetch wrapper.
+ */
+export async function recordPubgApiCall(opts: {
+  callType: string;
+  endpoint: string;
+  shard?: string | null;
+  statusCode?: number | null;
+  durationMs: number;
+  success: boolean;
+}) {
+  return logPubgApiCall(opts);
+}
+
 function getPubgApiKey() {
   const apiKey = process.env.PUBG_DEV_API ?? process.env.PUBG_API_KEY;
   if (!apiKey) {
@@ -74,29 +127,55 @@ function getPubgApiKey() {
   return apiKey;
 }
 
+function shardFromPath(path: string): string | null {
+  const m = path.match(/\/shards\/([^/]+)\//);
+  return m ? m[1] : null;
+}
+
+function callTypeFromPath(path: string): string {
+  if (path.includes("/players")) return "player_lookup";
+  if (path.includes("/matches")) return "match_fetch";
+  if (path.includes("/samples")) return "samples_fetch";
+  return "api_fetch";
+}
+
 async function pubgGet<T>(path: string): Promise<T> {
   const apiKey = getPubgApiKey();
-  const response = await fetch(`https://api.pubg.com${path}`, {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      Accept: "application/vnd.api+json"
-    },
-    cache: "no-store"
-  });
-
-  if (!response.ok) {
-    throw new Error(`PUBG API error (${response.status})`);
+  const start = Date.now();
+  let statusCode: number | undefined;
+  let success = false;
+  try {
+    const response = await fetch(`https://api.pubg.com${path}`, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: "application/vnd.api+json"
+      },
+      cache: "no-store"
+    });
+    statusCode = response.status;
+    success = response.ok;
+    if (!response.ok) {
+      void logPubgApiCall({ callType: callTypeFromPath(path), endpoint: path, shard: shardFromPath(path), statusCode, durationMs: Date.now() - start, success: false });
+      throw new Error(`PUBG API error (${response.status})`);
+    }
+    const data = (await response.json()) as T;
+    void logPubgApiCall({ callType: callTypeFromPath(path), endpoint: path, shard: shardFromPath(path), statusCode, durationMs: Date.now() - start, success: true });
+    return data;
+  } catch (err) {
+    if (statusCode === undefined) {
+      void logPubgApiCall({ callType: callTypeFromPath(path), endpoint: path, shard: shardFromPath(path), statusCode: null, durationMs: Date.now() - start, success: false });
+    }
+    throw err;
   }
-
-  return (await response.json()) as T;
 }
 
 async function fetchTelemetryEvents(url: string) {
+  const start = Date.now();
   const response = await fetch(url, { cache: "no-store" });
+  void logPubgApiCall({ callType: "telemetry_fetch", endpoint: "telemetry", shard: null, statusCode: response.status, durationMs: Date.now() - start, success: response.ok });
   if (!response.ok) {
     throw new Error(`PUBG telemetry fetch error (${response.status})`);
   }
-
   return (await response.json()) as PubgTelemetryEvent[];
 }
 

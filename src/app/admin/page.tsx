@@ -687,8 +687,15 @@ export default function AdminPage() {
           </p>
           <p className="text-[10px] uppercase tracking-widest text-[#555]">Auto-refresh: stats 15s, jobs 10s, log tail 5s while this tab is open.</p>
 
+          <a
+            href="/admin/pubg-api-metrics"
+            className="inline-block rounded border border-[#c8a96e]/40 bg-[#1a1508] px-3 py-1.5 text-xs font-medium text-[#c8a96e] hover:border-[#c8a96e]"
+          >
+            View PUBG API Call Metrics →
+          </a>
+
           <div className="border border-[#2d2d2d] bg-[#111] p-3">
-            <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">What's Going On</h2>
+            <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">What&apos;s Going On</h2>
             <p className="mt-2 text-xs text-[#8b816f]">
               This panel exposes live linker activity and crawler/EventSub health. If mappings are missing, start with ACTIVE JOBS status and then inspect LOG TAIL errors.
             </p>

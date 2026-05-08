@@ -1,5 +1,6 @@
 import stringSimilarity from "string-similarity";
 import { prisma } from "@/lib/prisma";
+import { recordPubgApiCall, setPubgCallContext, clearPubgCallContext } from "@/lib/pubg-api";
 
 const db = prisma as any;
 
@@ -33,8 +34,10 @@ async function getPlayerWithMatches(shard: string, playerName: string) {
   const apiKey = getPubgApiKey();
   if (!apiKey) return null;
 
+  const endpoint = `/shards/${shard}/players?filter[playerNames]=${encodeURIComponent(playerName)}`;
+  const start = Date.now();
   const response = await fetch(
-    `https://api.pubg.com/shards/${encodeURIComponent(shard)}/players?filter[playerNames]=${encodeURIComponent(playerName)}`,
+    `https://api.pubg.com${endpoint}`,
     {
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -43,6 +46,7 @@ async function getPlayerWithMatches(shard: string, playerName: string) {
       cache: "no-store"
     }
   );
+  void recordPubgApiCall({ callType: "player_lookup", endpoint, shard, statusCode: response.status, durationMs: Date.now() - start, success: response.ok });
 
   if (!response.ok) return null;
   const payload = (await response.json()) as {
@@ -446,6 +450,8 @@ export async function autoLinkPubgStreamerProfiles(options?: { liveOnly?: boolea
   const prioritizeVods = options?.prioritizeVods ?? true;
   const limit = options?.limit ?? 60;
 
+  setPubgCallContext("batch_linker");
+
   const candidateProfiles = await db.pubgStreamerProfile.findMany({
     where: {
       ...(liveOnly ? { isLive: true } : {}),
@@ -477,25 +483,29 @@ export async function autoLinkPubgStreamerProfiles(options?: { liveOnly?: boolea
   let vodPriorityAttempted = 0;
   const results: Array<{ twitchUserId: string; twitchUserLogin: string; vodsEnabled: boolean; autoLink: unknown | null }> = [];
 
-  for (const profile of profiles) {
-    attempted += 1;
-    if (profile.vodsEnabled) {
-      vodPriorityAttempted += 1;
-    }
-    const autoLink = await autoLinkPubgStreamerIdentity({
-      twitchUserId: profile.twitchUserId,
+  try {
+    for (const profile of profiles) {
+      attempted += 1;
+      if (profile.vodsEnabled) {
+        vodPriorityAttempted += 1;
+      }
+      const autoLink = await autoLinkPubgStreamerIdentity({
+        twitchUserId: profile.twitchUserId,
       twitchUserLogin: profile.userLogin,
       twitchUserName: profile.userName
     });
     if (autoLink) {
       linked += 1;
     }
-    results.push({
-      twitchUserId: profile.twitchUserId,
-      twitchUserLogin: profile.userLogin,
-      vodsEnabled: profile.vodsEnabled,
-      autoLink
-    });
+      results.push({
+        twitchUserId: profile.twitchUserId,
+        twitchUserLogin: profile.userLogin,
+        vodsEnabled: profile.vodsEnabled,
+        autoLink
+      });
+    }
+  } finally {
+    clearPubgCallContext();
   }
 
   return {

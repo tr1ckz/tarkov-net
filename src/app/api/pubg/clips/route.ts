@@ -9,10 +9,12 @@ import {
   searchChannelsByName
 } from "@/lib/twitch";
 import {
+  clearPubgCallContext,
   getCandidateShards,
   getPlayerWithMatches,
   getRecentEncounterNames,
   lookupPlayerAcrossShards,
+  setPubgCallContext,
   type PubgEncounterEvent,
   type PubgPlatform
 } from "@/lib/pubg-api";
@@ -289,6 +291,7 @@ export async function GET(request: Request) {
     `request start mode=${playerName ? "encounters" : streamer ? "streamer" : "pubg"} player=${playerName || "-"} streamer=${streamer || "-"} platform=${platform} requestedShard=${requestedShard || "-"} limit=${limit} probe=${probeMode ? "1" : "0"}`
   );
 
+  setPubgCallContext(playerName ? "clips_encounters" : streamer ? "clips_streamer" : "clips_pubg");
   try {
     if (playerName) {
       pushVerbose(`encounters lookup start player=${playerName}`);
@@ -846,5 +849,7 @@ export async function GET(request: Request) {
       },
       { status: 500 }
     );
+  } finally {
+    clearPubgCallContext();
   }
 }

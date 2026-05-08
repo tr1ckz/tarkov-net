@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyTwitchEventSubSignature } from "@/lib/twitch";
 import { autoLinkPubgStreamerIdentity } from "@/lib/pubg-streamer-linking";
+import { clearPubgCallContext, setPubgCallContext } from "@/lib/pubg-api";
 
 export const dynamic = "force-dynamic";
 const db = prisma as any;
@@ -163,6 +164,7 @@ async function processStreamOnlineNotification(input: {
       }
     });
 
+    setPubgCallContext("stream_online");
     const autoLink = await autoLinkPubgStreamerIdentity({
       twitchUserId,
       twitchUserLogin,
@@ -219,6 +221,8 @@ async function processStreamOnlineNotification(input: {
         backgroundProcessed: true
       }
     });
+  } finally {
+    clearPubgCallContext();
   }
 }
 

@@ -258,6 +258,23 @@ model PubgStreamerIdentityLink {
   @@index([lastLinkedAt])
 }
 
+model PubgApiCallLog {
+  id          String   @id @default(cuid())
+  callType    String   // "player_lookup", "match_fetch", "telemetry_fetch"
+  endpoint    String
+  shard       String?
+  statusCode  Int?
+  durationMs  Int?
+  success     Boolean
+  triggeredBy String?  // "stream_online", "clips_route", "batch_linker", "indexer", "manual"
+  calledAt    DateTime @default(now())
+
+  @@index([calledAt])
+  @@index([callType])
+  @@index([success])
+  @@index([triggeredBy])
+}
+
 // Player name index built from PUBG /samples endpoint (hourly discovery worker)
 model PubgKnownPlayer {
   id              String   @id @default(cuid())
