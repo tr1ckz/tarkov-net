@@ -10,6 +10,7 @@ import {
 } from "@/lib/twitch";
 import {
   getCandidateShards,
+  getPlayerWithMatches,
   getRecentEncounterNames,
   lookupPlayerAcrossShards,
   type PubgEncounterEvent,
@@ -23,6 +24,8 @@ import {
   normalizePubgNameForStreamerMatch
 } from "@/lib/pubg-streamer-index";
 import { prisma } from "@/lib/prisma";
+
+const db = prisma as any;
 
 export const dynamic = "force-dynamic";
 
@@ -161,6 +164,61 @@ async function writePubgLinkRunLog(input: PubgLinkRunLogInput) {
   } catch (error) {
     console.error("[pubg-clips] failed to write run log", error);
   }
+}
+
+function isHighConfidenceIdentityMatch(match: { score: number; reasons: string[] }) {
+  if (match.score < 100) return false;
+  return match.reasons.includes("exact_login") || match.reasons.includes("exact_display");
+}
+
+async function upsertStreamerIdentityLink(input: {
+  twitchUserId: string;
+  twitchUserLogin: string;
+  twitchUserName: string;
+  platform: string;
+  shard: string;
+  pubgPlayerId: string;
+  pubgPlayerName: string;
+  pubgNameNormalized: string;
+  confidenceScore: number;
+  confidenceReasons: string[];
+  source?: string;
+}) {
+  await db.pubgStreamerIdentityLink.upsert({
+    where: {
+      twitchUserId_platform: {
+        twitchUserId: input.twitchUserId,
+        platform: input.platform
+      }
+    },
+    create: {
+      twitchUserId: input.twitchUserId,
+      twitchUserLogin: input.twitchUserLogin,
+      twitchUserName: input.twitchUserName,
+      platform: input.platform,
+      shard: input.shard,
+      pubgPlayerId: input.pubgPlayerId,
+      pubgPlayerName: input.pubgPlayerName,
+      pubgNameNormalized: input.pubgNameNormalized,
+      confidenceScore: input.confidenceScore,
+      confidenceReasonsJson: JSON.stringify(input.confidenceReasons),
+      source: input.source ?? "encounter_match",
+      firstLinkedAt: new Date(),
+      lastLinkedAt: new Date()
+    },
+    update: {
+      twitchUserLogin: input.twitchUserLogin,
+      twitchUserName: input.twitchUserName,
+      shard: input.shard,
+      pubgPlayerId: input.pubgPlayerId,
+      pubgPlayerName: input.pubgPlayerName,
+      pubgNameNormalized: input.pubgNameNormalized,
+      confidenceScore: input.confidenceScore,
+      confidenceReasonsJson: JSON.stringify(input.confidenceReasons),
+      source: input.source ?? "encounter_match",
+      lastLinkedAt: new Date()
+    }
+  });
 }
 
 function pickClosestVodMoment(
@@ -304,6 +362,8 @@ export async function GET(request: Request) {
         platform: string;
         encounterAt?: Date;
       }> = [];
+      const playerIdentityCache = new Map<string, Awaited<ReturnType<typeof getPlayerWithMatches>> | null>();
+      let identityLinksUpserted = 0;
 
       await ensurePubgStreamerIndexFresh();
       pushVerbose("active streamer index ensured fresh");
@@ -373,6 +433,45 @@ export async function GET(request: Request) {
         if (matchedLiveStreamers.length) {
           pushVerbose(`active index matches for ${encounter.name}: ${matchedLiveStreamers.length}`);
           debug.activeIndexMatches += matchedLiveStreamers.length;
+
+          const topMatch = matchedLiveStreamers[0];
+          const secondMatch = matchedLiveStreamers[1];
+          const distinctTop = !secondMatch || topMatch.score - secondMatch.score >= 20;
+          if (isHighConfidenceIdentityMatch(topMatch) && distinctTop) {
+            if (!playerIdentityCache.has(encounter.name)) {
+              const resolvedEncounterPlayer = await getPlayerWithMatches(resolvedPlayer.shard, encounter.name);
+              playerIdentityCache.set(encounter.name, resolvedEncounterPlayer);
+            }
+
+            const resolvedEncounterPlayer = playerIdentityCache.get(encounter.name);
+            if (resolvedEncounterPlayer) {
+              try {
+                await upsertStreamerIdentityLink({
+                  twitchUserId: topMatch.streamer.twitchUserId,
+                  twitchUserLogin: topMatch.streamer.userLogin,
+                  twitchUserName: topMatch.streamer.userName,
+                  platform,
+                  shard: resolvedPlayer.shard,
+                  pubgPlayerId: resolvedEncounterPlayer.playerId,
+                  pubgPlayerName: resolvedEncounterPlayer.playerName,
+                  pubgNameNormalized: encounterNormalized,
+                  confidenceScore: topMatch.score,
+                  confidenceReasons: topMatch.reasons
+                });
+                identityLinksUpserted += 1;
+                pushVerbose(
+                  `identity link upserted twitch=${topMatch.streamer.userLogin} pubg=${resolvedEncounterPlayer.playerName} playerId=${resolvedEncounterPlayer.playerId} score=${topMatch.score}`
+                );
+              } catch (error) {
+                pushVerbose(
+                  `identity link upsert failed twitch=${topMatch.streamer.userLogin} pubg=${encounter.name} error=${error instanceof Error ? error.message : String(error)}`
+                );
+              }
+            } else {
+              pushVerbose(`identity link skipped pubg lookup not found name=${encounter.name} shard=${resolvedPlayer.shard}`);
+            }
+          }
+
           for (const match of matchedLiveStreamers) {
             const streamerMatch = match.streamer;
             candidates.add(streamerMatch.userLogin.toLowerCase());
@@ -629,6 +728,7 @@ export async function GET(request: Request) {
         metadata: {
           resolvedShard: debug.resolvedShard,
           encountersScanned: filteredEncounters.length,
+          identityLinksUpserted,
           probeMode,
           restrictToKnown,
           knownNormalizedSize: knownNormalized.size,

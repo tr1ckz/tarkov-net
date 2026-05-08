@@ -60,6 +60,7 @@ export async function GET() {
     activeIndexerCount,
     streamerProfileCount,
     streamerProfileLiveCount,
+    streamerIdentityLinkCount,
     uniquePairRows
   ] = await Promise.all([
     prisma.pubgLinkEvent.count(),
@@ -128,6 +129,7 @@ export async function GET() {
     prisma.pubgActiveStreamer.count(),
     prisma.pubgStreamerProfile.count(),
     prisma.pubgStreamerProfile.count({ where: { isLive: true } }),
+    prisma.pubgStreamerIdentityLink.count(),
     prisma.$queryRaw<CountRow[]>`
       SELECT COUNT(*) as count
       FROM (
@@ -194,7 +196,8 @@ export async function GET() {
       runs24hError,
       activeIndexerCount,
       streamerProfileCount,
-      streamerProfileLiveCount
+      streamerProfileLiveCount,
+      streamerIdentityLinkCount
     },
     sourceBreakdown: sourceBreakdown.map((row) => ({
       eventType: row.eventType,

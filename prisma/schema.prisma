@@ -229,3 +229,27 @@ model PubgLinkRunLog {
   @@index([source])
   @@index([status])
 }
+
+model PubgStreamerIdentityLink {
+  id                    String   @id @default(cuid())
+  twitchUserId          String
+  twitchUserLogin       String
+  twitchUserName        String
+  platform              String
+  shard                 String
+  pubgPlayerId          String
+  pubgPlayerName        String
+  pubgNameNormalized    String
+  confidenceScore       Int      @default(0)
+  confidenceReasonsJson String?
+  source                String   @default("encounter_match")
+  firstLinkedAt         DateTime @default(now())
+  lastLinkedAt          DateTime @default(now())
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([twitchUserId, platform], name: "twitchUserId_platform")
+  @@index([pubgPlayerId])
+  @@index([pubgNameNormalized])
+  @@index([lastLinkedAt])
+}
