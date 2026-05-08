@@ -35,6 +35,7 @@ COPY --from=builder /app/prisma /opt/prisma
 
 # Verify schema is present at build time — fail loudly if not
 RUN test -f /opt/prisma/schema.prisma || (echo "ERROR: /opt/prisma/schema.prisma missing from image" && exit 1)
+RUN chmod +x /app/scripts/start-tarkovnet.sh
 
 EXPOSE 3000
-CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy --schema /opt/prisma/schema.prisma && node_modules/.bin/next start"]
+CMD ["sh", "/app/scripts/start-tarkovnet.sh"]

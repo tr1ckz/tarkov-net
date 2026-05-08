@@ -13,21 +13,7 @@ services:
       NEXTAUTH_URL: http://YOUR_UNRAID_IP:3000
       NEXTAUTH_SECRET: change-me
       DATABASE_URL: file:/app/data/games.db?connection_limit=1
-    volumes:
-      - ./data:/app/data
-
-  pubg-crawler:
-    container_name: pubg-crawler
-    build:
-      context: .
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    depends_on:
-      - tarkov-net
-    environment:
-      NODE_ENV: production
-      NEXTAUTH_URL: http://YOUR_UNRAID_IP:3000
-      DATABASE_URL: file:/app/data/games.db?connection_limit=1
+      ENABLE_PUBG_CRAWLER: "1"
       TWITCH_CLIENT_ID: change-me
       TWITCH_CLIENT_SECRET: change-me
       TWITCH_EVENTSUB_SECRET: change-me
@@ -38,4 +24,3 @@ services:
       EVENTSUB_CREATE_LIMIT_PER_SYNC: "80"
     volumes:
       - ./data:/app/data
-    command: ["node", "scripts/pubg-twitch-crawler.mjs"]
