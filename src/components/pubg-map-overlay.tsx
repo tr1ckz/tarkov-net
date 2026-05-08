@@ -15,6 +15,7 @@ const DEFAULT_CATEGORY_LABELS: Record<string, string> = {
 };
 
 type MarkerPalette = Record<string, string>;
+type MapTheme = "dark" | "light";
 
 const DEFAULT_MARKER_COLORS: MarkerPalette = {
   "hot-drop": "#e85555",
@@ -50,6 +51,57 @@ function fallbackColorForCategory(type: string) {
   }
   const normalized = Math.abs(hash) % 0xffffff;
   return `#${normalized.toString(16).padStart(6, "0")}`;
+}
+
+function MarkerIcon({ type, className }: { type: string; className?: string }) {
+  const normalized = type.toLowerCase();
+
+  if (normalized.includes("secret-room")) {
+    return (
+      <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M7 3h10v18H7z" />
+        <path d="M10 7h4" />
+        <circle cx="13" cy="13" r="1" fill="currentColor" stroke="none" />
+      </svg>
+    );
+  }
+
+  if (normalized.includes("secret-key")) {
+    return (
+      <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <circle cx="8" cy="12" r="3" />
+        <path d="M11 12h8" />
+        <path d="M16 12v3" />
+        <path d="M19 12v2" />
+      </svg>
+    );
+  }
+
+  if (normalized.includes("vehicle") || normalized.includes("route") || normalized.includes("glider")) {
+    return (
+      <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <circle cx="12" cy="12" r="7" />
+        <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+        <path d="M12 10V5" />
+        <path d="M12 14l-4 3" />
+        <path d="M12 14l4 3" />
+      </svg>
+    );
+  }
+
+  if (normalized.includes("hot") || normalized.includes("drop")) {
+    return (
+      <svg viewBox="0 0 24 24" className={className} fill="currentColor" stroke="none" aria-hidden>
+        <path d="M12 2C9.3 5.6 6.2 8 6.2 12.4A5.8 5.8 0 0012 18.2a5.8 5.8 0 005.8-5.8c0-3.8-2.5-6.1-5.8-10.4zm0 7.3c1.5 1.7 2.5 2.9 2.5 4.3A2.5 2.5 0 019.5 13.6c0-1.3.8-2.4 2.5-4.3z" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 3l6 6-6 12L6 9z" fill="currentColor" stroke="none" />
+    </svg>
+  );
 }
 
 type MapCalibration = {
@@ -162,6 +214,7 @@ export function PubgMapOverlay({ map }: Props) {
   const [newCategoryLabel, setNewCategoryLabel] = useState("");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [palette, setPalette] = useState<MarkerPalette>(DEFAULT_MARKER_COLORS);
+  const [mapTheme, setMapTheme] = useState<MapTheme>("dark");
   const [mapImageUrl, setMapImageUrl] = useState(map.mapImage);
   const [lastLoadedMapUrl, setLastLoadedMapUrl] = useState(map.mapImage);
 
@@ -280,6 +333,12 @@ export function PubgMapOverlay({ map }: Props) {
     setSaveStatus("idle");
     setPalette(DEFAULT_MARKER_COLORS);
     setCategoryLabels(DEFAULT_CATEGORY_LABELS);
+    const storedTheme = localStorage.getItem(`pubg-map-theme-${map.slug}`);
+    if (storedTheme === "dark" || storedTheme === "light") {
+      setMapTheme(storedTheme);
+    } else {
+      setMapTheme("dark");
+    }
     setMapImageUrl(map.mapImage);
     setLastLoadedMapUrl(map.mapImage);
 
@@ -294,6 +353,7 @@ export function PubgMapOverlay({ map }: Props) {
           entities?: PubgMapMarker[] | null;
           legendColors?: MarkerPalette | null;
           categoryLabels?: Record<string, string> | null;
+          mapTheme?: MapTheme | null;
           mapImageUrl?: string | null;
         };
 
@@ -315,6 +375,10 @@ export function PubgMapOverlay({ map }: Props) {
           setCategoryLabels((prev) => ({ ...prev, ...payload.categoryLabels }));
         }
 
+        if (payload.mapTheme === "dark" || payload.mapTheme === "light") {
+          setMapTheme(payload.mapTheme);
+        }
+
         if (payload.mapImageUrl) {
           setMapImageUrl(payload.mapImageUrl);
           setLastLoadedMapUrl(payload.mapImageUrl);
@@ -332,6 +396,10 @@ export function PubgMapOverlay({ map }: Props) {
   }, [map.slug, mergedMarkers]);
 
   useEffect(() => {
+    localStorage.setItem(`pubg-map-theme-${map.slug}`, mapTheme);
+  }, [map.slug, mapTheme]);
+
+  useEffect(() => {
     markersRef.current = editableMarkers;
   }, [editableMarkers]);
 
@@ -344,6 +412,7 @@ export function PubgMapOverlay({ map }: Props) {
     entities?: PubgMapMarker[] | null;
     legendColors?: MarkerPalette | null;
     categoryLabels?: Record<string, string> | null;
+    mapTheme?: MapTheme | null;
     mapImageUrl?: string | null;
   }) {
     setSaveStatus("saving");
@@ -403,6 +472,11 @@ export function PubgMapOverlay({ map }: Props) {
     }
     setPalette(next);
     void saveServerConfig({ legendColors: next });
+  }
+
+  function persistMapTheme(nextTheme: MapTheme) {
+    setMapTheme(nextTheme);
+    void saveServerConfig({ mapTheme: nextTheme });
   }
 
   function saveMapImageOverride() {
@@ -638,14 +712,15 @@ export function PubgMapOverlay({ map }: Props) {
               }}
             >
               <span
-                className="inline-block rounded-full"
+                className="inline-flex h-4 w-4 items-center justify-center rounded-full"
                 style={{
-                  width: 10,
-                  height: 10,
                   border: `2px solid ${active ? color : "#444"}`,
                   background: "transparent",
+                  color: active ? color : "#444",
                 }}
-              />
+              >
+                <MarkerIcon type={type} className="h-[70%] w-[70%]" />
+              </span>
               {label}
             </button>
           );
@@ -653,6 +728,28 @@ export function PubgMapOverlay({ map }: Props) {
 
         {/* zoom controls */}
         <div className="ml-auto flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setMapTheme("light")}
+            className="border px-2.5 py-1 text-[11px] uppercase tracking-[0.12em]"
+            style={{
+              borderColor: mapTheme === "light" ? "#f5c842" : "#3a3a3a",
+              background: mapTheme === "light" ? "#2a2314" : "#1a1a1a",
+              color: mapTheme === "light" ? "#f5c842" : "#c8bda0",
+            }}
+            title="Light map mode"
+          >Light</button>
+          <button
+            type="button"
+            onClick={() => setMapTheme("dark")}
+            className="border px-2.5 py-1 text-[11px] uppercase tracking-[0.12em]"
+            style={{
+              borderColor: mapTheme === "dark" ? "#f5c842" : "#3a3a3a",
+              background: mapTheme === "dark" ? "#2a2314" : "#1a1a1a",
+              color: mapTheme === "dark" ? "#f5c842" : "#c8bda0",
+            }}
+            title="Dark map mode"
+          >Dark</button>
           <button
             type="button"
             onClick={toggleAdminMode}
@@ -685,7 +782,10 @@ export function PubgMapOverlay({ map }: Props) {
       <div
         ref={containerRef}
         className="relative mx-auto aspect-square w-full max-w-[85vh] overflow-hidden border border-[#2d2d2d] bg-[#0a0a0a]"
-        style={{ cursor: dragging.current ? "grabbing" : "grab" }}
+        style={{
+          cursor: dragging.current ? "grabbing" : "grab",
+          background: mapTheme === "dark" ? "#070707" : "#d6d8db"
+        }}
         onWheel={onWheel}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
@@ -694,7 +794,13 @@ export function PubgMapOverlay({ map }: Props) {
         onClick={onMapClick}
       >
         {/* header badge */}
-        <div className="pointer-events-none absolute left-2 top-2 z-20 border border-[#2d2d2d] bg-[#111]/90 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-[#7f7768]">
+        <div className="pointer-events-none absolute left-2 top-2 z-20 border px-2 py-1 text-[10px] uppercase tracking-[0.14em]"
+          style={{
+            borderColor: mapTheme === "dark" ? "#2d2d2d" : "#7a7f86",
+            background: mapTheme === "dark" ? "rgba(17,17,17,0.9)" : "rgba(245,247,250,0.86)",
+            color: mapTheme === "dark" ? "#7f7768" : "#384250"
+          }}
+        >
           {map.name} · Scroll/Drag to Navigate · {visibleMarkers.length} markers
         </div>
 
@@ -711,6 +817,12 @@ export function PubgMapOverlay({ map }: Props) {
             src={mapImageUrl}
             alt={`${map.name} map`}
             className="h-full w-full object-contain select-none"
+            style={{
+              filter:
+                mapTheme === "dark"
+                  ? "brightness(0.72) contrast(1.05) saturate(0.9)"
+                  : "brightness(1.06) contrast(1.02) saturate(1.08)",
+            }}
             draggable={false}
             loading="eager"
             onError={() => {
@@ -758,15 +870,18 @@ export function PubgMapOverlay({ map }: Props) {
                   top: `${renderBox.top + (calibrated.y / 100) * renderBox.height}px`,
                   width: markerSize,
                   height: markerSize,
-                  transform: `translate(-50%, -50%) ${isActive ? "scale(1.4)" : ""}`,
-                  background: "transparent",
+                  transform: `translate(-50%, -50%) ${isActive ? "scale(1.35)" : ""}`,
+                  background: mapTheme === "dark" ? "rgba(8,8,8,0.16)" : "rgba(255,255,255,0.16)",
                   border: `2px solid ${color}`,
                   boxShadow: isActive
-                    ? `0 0 0 2px #fff, 0 0 8px 2px ${color}`
-                    : `0 0 4px 1px ${color}55`,
+                    ? `0 0 0 2px ${mapTheme === "dark" ? "#fff" : "#101010"}, 0 0 10px 2px ${color}`
+                    : `0 0 6px 1px ${color}66`,
                   zIndex: isActive ? 30 : 10,
+                  color,
                 }}
-              />
+              >
+                <MarkerIcon type={marker.type} className="h-[62%] w-[62%]" />
+              </button>
             );
           })}
         </div>
@@ -981,6 +1096,7 @@ export function PubgMapOverlay({ map }: Props) {
           <div className="mt-4 border-t border-[#2a2418] pt-3">
             <p className="text-[11px] uppercase tracking-[0.1em] text-[#8f826a]">Map Image Source</p>
             <p className="mt-1 text-xs text-[#8f826a]">Use a higher-resolution URL if available; fallback returns to default map texture.</p>
+            <p className="mt-1 text-xs text-[#8f826a]">Map theme currently set to {mapTheme.toUpperCase()}.</p>
             <div className="mt-2 grid gap-2 sm:grid-cols-4">
               <input
                 value={mapImageUrl}
@@ -1019,6 +1135,11 @@ export function PubgMapOverlay({ map }: Props) {
                 onClick={resetMapImageOverride}
                 className="border border-[#3a3a3a] bg-[#1a1a1a] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#9a9080] hover:border-[#666] hover:text-white"
               >Reset Map Image</button>
+              <button
+                type="button"
+                onClick={() => persistMapTheme(mapTheme)}
+                className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
+              >Save Theme</button>
             </div>
           </div>
 
@@ -1064,23 +1185,30 @@ export function PubgMapOverlay({ map }: Props) {
           {categoryKeys.map((type) => (
             <div key={type} className="flex items-center gap-2">
               <span
-                className="shrink-0 rounded-full"
-                style={{ width: 16, height: 16, border: `2px solid ${palette[type] ?? fallbackColorForCategory(type)}`, background: "transparent" }}
-              />
+                className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
+                style={{
+                  border: `2px solid ${palette[type] ?? fallbackColorForCategory(type)}`,
+                  background: "transparent",
+                  color: palette[type] ?? fallbackColorForCategory(type)
+                }}
+              >
+                <MarkerIcon type={type} className="h-[70%] w-[70%]" />
+              </span>
               <span className="text-xs text-[#9a9080]">{categoryLabels[type] ?? humanizeCategory(type)}</span>
             </div>
           ))}
           <div className="flex items-center gap-2">
             <span
-              className="shrink-0 rounded-full"
+              className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
               style={{
-                width: 16,
-                height: 16,
                 border: `2px solid #f5c842`,
                 background: "transparent",
                 boxShadow: `0 0 0 2px #fff, 0 0 6px 2px #f5c842`,
+                color: "#f5c842"
               }}
-            />
+            >
+              <MarkerIcon type="selected" className="h-[70%] w-[70%]" />
+            </span>
             <span className="text-xs text-[#9a9080]">Selected</span>
           </div>
         </div>
@@ -1093,14 +1221,15 @@ export function PubgMapOverlay({ map }: Props) {
           <div className="mt-2">
           <div className="flex items-center gap-2">
             <span
-              className="shrink-0 rounded-full"
+              className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
               style={{
-                width: 16,
-                height: 16,
                 border: `2px solid ${palette[activeMarker.type] ?? fallbackColorForCategory(activeMarker.type)}`,
                 background: "transparent",
+                color: palette[activeMarker.type] ?? fallbackColorForCategory(activeMarker.type)
               }}
-            />
+            >
+              <MarkerIcon type={activeMarker.type} className="h-[70%] w-[70%]" />
+            </span>
               <p className="text-sm font-semibold uppercase tracking-[0.08em] text-[#e2d2af]">
                 {activeMarker.label}
               </p>

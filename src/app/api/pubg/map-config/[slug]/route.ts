@@ -24,18 +24,21 @@ const colorSchema = z.string().regex(/^#([0-9a-fA-F]{6})$/, "Expected 6-digit he
 
 const legendColorsSchema = z.record(z.string().min(1).max(64), colorSchema);
 const categoryLabelsSchema = z.record(z.string().min(1).max(64), z.string().trim().min(1).max(80));
+const mapThemeSchema = z.enum(["dark", "light"]);
 
 const patchSchema = z.object({
   calibration: calibrationSchema.nullable().optional(),
   entities: z.array(markerSchema).nullable().optional(),
   legendColors: legendColorsSchema.nullable().optional(),
   categoryLabels: categoryLabelsSchema.nullable().optional(),
+  mapTheme: mapThemeSchema.nullable().optional(),
   mapImageUrl: z.string().trim().min(1).max(500).nullable().optional()
 });
 
 type LegendPayload = {
   colors?: Record<string, string>;
   labels?: Record<string, string>;
+  theme?: "dark" | "light";
 };
 
 function parseLegend(value: string | null | undefined): LegendPayload | null {
@@ -50,10 +53,11 @@ function parseLegend(value: string | null | undefined): LegendPayload | null {
     return { colors: parsed as Record<string, string>, labels: {} };
   }
 
-  const obj = parsed as { colors?: unknown; labels?: unknown };
+  const obj = parsed as { colors?: unknown; labels?: unknown; theme?: unknown };
   const colors = obj.colors && typeof obj.colors === "object" ? (obj.colors as Record<string, string>) : {};
   const labels = obj.labels && typeof obj.labels === "object" ? (obj.labels as Record<string, string>) : {};
-  return { colors, labels };
+  const theme = obj.theme === "dark" || obj.theme === "light" ? obj.theme : undefined;
+  return { colors, labels, theme };
 }
 
 function requireAdmin(session: Session | null) {
@@ -99,6 +103,7 @@ export async function GET(_: Request, { params }: { params: { slug: string } }) 
     entities: safeParseJson(config?.entitiesJson),
     legendColors: legend?.colors ?? null,
     categoryLabels: legend?.labels ?? null,
+    mapTheme: legend?.theme ?? null,
     mapImageUrl: config?.mapImageUrl ?? null,
     updatedAt: config?.updatedAt ?? null,
     updatedByUserId: config?.updatedByUserId ?? null
@@ -125,9 +130,10 @@ export async function PATCH(request: Request, { params }: { params: { slug: stri
   const hasEntities = Object.prototype.hasOwnProperty.call(parsed.data, "entities");
   const hasLegend = Object.prototype.hasOwnProperty.call(parsed.data, "legendColors");
   const hasLabels = Object.prototype.hasOwnProperty.call(parsed.data, "categoryLabels");
+  const hasMapTheme = Object.prototype.hasOwnProperty.call(parsed.data, "mapTheme");
   const hasMapImage = Object.prototype.hasOwnProperty.call(parsed.data, "mapImageUrl");
 
-  if (!hasCalibration && !hasEntities && !hasLegend && !hasLabels && !hasMapImage) {
+  if (!hasCalibration && !hasEntities && !hasLegend && !hasLabels && !hasMapTheme && !hasMapImage) {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }
 
@@ -149,7 +155,7 @@ export async function PATCH(request: Request, { params }: { params: { slug: stri
     updateData.entitiesJson = parsed.data.entities ? JSON.stringify(parsed.data.entities) : null;
   }
 
-  if (hasLegend || hasLabels) {
+  if (hasLegend || hasLabels || hasMapTheme) {
     const current = await prisma.pubgMapConfig.findUnique({
       where: { mapSlug: slug },
       select: { legendJson: true }
@@ -157,12 +163,14 @@ export async function PATCH(request: Request, { params }: { params: { slug: stri
     const existing = parseLegend(current?.legendJson);
     const colors = hasLegend ? (parsed.data.legendColors ?? null) : (existing?.colors ?? null);
     const labels = hasLabels ? (parsed.data.categoryLabels ?? null) : (existing?.labels ?? null);
+    const theme = hasMapTheme ? (parsed.data.mapTheme ?? null) : (existing?.theme ?? null);
 
     updateData.legendJson =
-      colors || labels
+      colors || labels || theme
         ? JSON.stringify({
             colors: colors ?? {},
-            labels: labels ?? {}
+            labels: labels ?? {},
+            theme: theme ?? null
           })
         : null;
   }
@@ -200,6 +208,7 @@ export async function PATCH(request: Request, { params }: { params: { slug: stri
     entities: safeParseJson(saved.entitiesJson),
     legendColors: parseLegend(saved.legendJson)?.colors ?? null,
     categoryLabels: parseLegend(saved.legendJson)?.labels ?? null,
+    mapTheme: parseLegend(saved.legendJson)?.theme ?? null,
     mapImageUrl: saved.mapImageUrl,
     updatedAt: saved.updatedAt,
     updatedByUserId: saved.updatedByUserId
