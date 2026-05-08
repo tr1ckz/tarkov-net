@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import stringSimilarity from "string-similarity";
 
 const prisma = new PrismaClient();
 const DEFAULT_PUBG_GAME_IDS = ["493057", "27971"];
@@ -8,6 +9,9 @@ const EVENTSUB_SYNC_INTERVAL_MS = Math.max(300000, Number(process.env.EVENTSUB_S
 const EVENTSUB_SYNC_LIMIT = Math.max(1, Math.min(2000, Number(process.env.EVENTSUB_SYNC_LIMIT ?? "400")));
 const EVENTSUB_CREATE_LIMIT_PER_SYNC = Math.max(1, Math.min(500, Number(process.env.EVENTSUB_CREATE_LIMIT_PER_SYNC ?? "80")));
 const PROFILE_MAPPING_LIMIT = Math.max(1, Math.min(500, Number(process.env.PUBG_PROFILE_MAPPING_LIMIT ?? "200")));
+const KNOWN_PLAYER_MAPPING_LIMIT = Math.max(1, Math.min(500, Number(process.env.PUBG_KNOWN_PLAYER_MAPPING_LIMIT ?? "120")));
+const KNOWN_PLAYER_CANDIDATES_LIMIT = Math.max(1000, Math.min(100000, Number(process.env.PUBG_KNOWN_PLAYER_CANDIDATES_LIMIT ?? "30000")));
+const KNOWN_PLAYER_SIMILARITY_MIN = Math.max(0.75, Math.min(0.99, Number(process.env.PUBG_KNOWN_PLAYER_SIMILARITY_MIN ?? "0.91")));
 
 let tokenState = null;
 let lastEventSubSyncMs = 0;
@@ -123,6 +127,10 @@ function normalizeForCompare(value) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+function normalizeForLinking(value) {
+  return normalizeForCompare(stripGamingPrefix(value));
+}
+
 function stripGamingPrefix(value) {
   return value
     .toLowerCase()
@@ -216,7 +224,7 @@ function parseUserPubgClaims(user) {
 }
 
 function getBestExactStreamerMatch(streamers, playerName) {
-  const normalizedClaim = normalizeForCompare(stripGamingPrefix(playerName));
+  const normalizedClaim = normalizeForLinking(playerName);
   if (!normalizedClaim) {
     return { status: "none", streamer: null };
   }
@@ -238,6 +246,81 @@ function getBestExactStreamerMatch(streamers, playerName) {
   }
 
   return { status: "none", streamer: null, normalizedClaim };
+}
+
+async function upsertIdentityLinkEvent(input) {
+  const dedupeKey = [
+    "identity_map",
+    input.platform,
+    normalizeForCompare(input.pubgNameNormalized || input.pubgPlayerName || ""),
+    input.twitchUserId
+  ].join(":");
+
+  try {
+    await prisma.pubgLinkEvent.upsert({
+      where: { dedupeKey },
+      create: {
+        dedupeKey,
+        eventType: "identity_map",
+        pubgNameRaw: input.pubgPlayerName,
+        pubgNameNormalized: input.pubgNameNormalized,
+        twitchUserId: input.twitchUserId,
+        twitchUserLogin: input.twitchUserLogin,
+        twitchUserName: input.twitchUserName,
+        shard: input.shard,
+        platform: input.platform
+      },
+      update: {
+        pubgNameRaw: input.pubgPlayerName,
+        pubgNameNormalized: input.pubgNameNormalized,
+        twitchUserLogin: input.twitchUserLogin,
+        twitchUserName: input.twitchUserName,
+        shard: input.shard,
+        platform: input.platform
+      }
+    });
+  } catch (error) {
+    log("warn", "identity map link event upsert failed", {
+      twitchUserId: input.twitchUserId,
+      twitchUserLogin: input.twitchUserLogin,
+      pubgPlayerName: input.pubgPlayerName,
+      platform: input.platform,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
+async function resolvePubgPlayerIdentity({ playerName, platform, preferredShard }, cache) {
+  const lowerName = String(playerName ?? "").toLowerCase();
+  const scopedKey = `${platform}:${preferredShard || "*"}:${lowerName}`;
+  if (cache.has(scopedKey)) {
+    return cache.get(scopedKey);
+  }
+
+  let resolved = null;
+
+  if (preferredShard) {
+    try {
+      const scoped = await getPlayerWithMatches(preferredShard, playerName);
+      if (scoped) {
+        resolved = {
+          shard: preferredShard,
+          playerId: scoped.playerId,
+          playerName: scoped.playerName,
+          matchCount: scoped.matchIds.length
+        };
+      }
+    } catch {
+      // fallback below
+    }
+  }
+
+  if (!resolved) {
+    resolved = await lookupPlayerAcrossShards(playerName, platform);
+  }
+
+  cache.set(scopedKey, resolved);
+  return resolved;
 }
 
 async function reconcileProfileIdentityLinks(streams) {
@@ -266,6 +349,7 @@ async function reconcileProfileIdentityLinks(streams) {
   let ambiguousMatches = 0;
   let lookupMisses = 0;
   let identityLinksUpserted = 0;
+  let linkEventsUpserted = 0;
 
   for (const user of users) {
     const claims = parseUserPubgClaims(user);
@@ -282,21 +366,19 @@ async function reconcileProfileIdentityLinks(streams) {
       }
 
       exactMatches += 1;
-      const cacheKey = `${claim.platform}:${claim.playerName.toLowerCase()}`;
-      let resolved = lookupCache.get(cacheKey);
-      if (resolved === undefined) {
-        try {
-          resolved = await lookupPlayerAcrossShards(claim.playerName, claim.platform);
-        } catch (error) {
-          log("warn", "profile mapping pubg lookup failed", {
-            userId: user.id,
-            platform: claim.platform,
-            playerName: claim.playerName,
-            error: error instanceof Error ? error.message : String(error)
-          });
-          resolved = null;
-        }
-        lookupCache.set(cacheKey, resolved);
+      let resolved = null;
+      try {
+        resolved = await resolvePubgPlayerIdentity(
+          { playerName: claim.playerName, platform: claim.platform },
+          lookupCache
+        );
+      } catch (error) {
+        log("warn", "profile mapping pubg lookup failed", {
+          userId: user.id,
+          platform: claim.platform,
+          playerName: claim.playerName,
+          error: error instanceof Error ? error.message : String(error)
+        });
       }
 
       if (!resolved) {
@@ -341,6 +423,17 @@ async function reconcileProfileIdentityLinks(streams) {
       });
 
       identityLinksUpserted += 1;
+
+      await upsertIdentityLinkEvent({
+        twitchUserId: match.streamer.user_id,
+        twitchUserLogin: match.streamer.user_login,
+        twitchUserName: match.streamer.user_name,
+        platform: claim.platform,
+        shard: resolved.shard,
+        pubgPlayerName: resolved.playerName,
+        pubgNameNormalized: match.normalizedClaim
+      });
+      linkEventsUpserted += 1;
     }
   }
 
@@ -351,6 +444,7 @@ async function reconcileProfileIdentityLinks(streams) {
     ambiguousMatches,
     lookupMisses,
     identityLinksUpserted,
+    linkEventsUpserted,
     limit: PROFILE_MAPPING_LIMIT
   });
 
@@ -361,7 +455,220 @@ async function reconcileProfileIdentityLinks(streams) {
     ambiguousMatches,
     lookupMisses,
     identityLinksUpserted,
+    linkEventsUpserted,
     limit: PROFILE_MAPPING_LIMIT
+  };
+}
+
+function chooseBestKnownPlayerMatch(stream, knownPlayersByPrefix) {
+  const loginNorm = normalizeForLinking(stream.user_login || "");
+  const nameNorm = normalizeForLinking(stream.user_name || "");
+  const keys = Array.from(new Set([loginNorm.slice(0, 2), nameNorm.slice(0, 2)].filter((k) => k.length === 2)));
+
+  const candidates = [];
+  for (const key of keys) {
+    const rows = knownPlayersByPrefix.get(key);
+    if (rows && rows.length) candidates.push(...rows);
+  }
+
+  if (!candidates.length) return null;
+
+  let best = null;
+  let second = null;
+  for (const row of candidates) {
+    const scoreLogin = loginNorm ? stringSimilarity.compareTwoStrings(loginNorm, row.normalized) : 0;
+    const scoreName = nameNorm ? stringSimilarity.compareTwoStrings(nameNorm, row.normalized) : 0;
+    const similarity = Math.max(scoreLogin, scoreName);
+    if (similarity < KNOWN_PLAYER_SIMILARITY_MIN) continue;
+
+    const candidate = {
+      row,
+      similarity,
+      matcher: scoreLogin >= scoreName ? "login" : "display"
+    };
+
+    if (!best || candidate.similarity > best.similarity) {
+      second = best;
+      best = candidate;
+    } else if (!second || candidate.similarity > second.similarity) {
+      second = candidate;
+    }
+  }
+
+  if (!best) return null;
+  if (second && best.similarity - second.similarity < 0.04) {
+    return null;
+  }
+
+  return best;
+}
+
+async function reconcileKnownPlayerIdentityLinks(streams) {
+  const [knownPlayers, existingLinks] = await Promise.all([
+    prisma.pubgKnownPlayer.findMany({
+      orderBy: [{ lastSeenAt: "desc" }, { seenCount: "desc" }],
+      take: KNOWN_PLAYER_CANDIDATES_LIMIT,
+      select: {
+        playerName: true,
+        platform: true,
+        shard: true,
+        seenCount: true,
+        lastSeenAt: true
+      }
+    }),
+    prisma.pubgStreamerIdentityLink.findMany({
+      select: { twitchUserId: true, platform: true }
+    })
+  ]);
+
+  const existing = new Set(existingLinks.map((row) => `${row.twitchUserId}:${row.platform}`));
+
+  const knownPlayersByPrefix = new Map();
+  for (const row of knownPlayers) {
+    const normalized = normalizeForLinking(row.playerName);
+    if (!normalized || normalized.length < 4) continue;
+    const key = normalized.slice(0, 2);
+    const next = {
+      ...row,
+      normalized
+    };
+    if (!knownPlayersByPrefix.has(key)) {
+      knownPlayersByPrefix.set(key, [next]);
+    } else {
+      knownPlayersByPrefix.get(key).push(next);
+    }
+  }
+
+  const lookupCache = new Map();
+  let scanned = 0;
+  let candidatesFound = 0;
+  let ambiguousSkipped = 0;
+  let lookupMisses = 0;
+  let upserted = 0;
+  let linkEventsUpserted = 0;
+
+  const boundedStreams = streams.slice(0, KNOWN_PLAYER_MAPPING_LIMIT);
+  for (const stream of boundedStreams) {
+    scanned += 1;
+    const best = chooseBestKnownPlayerMatch(stream, knownPlayersByPrefix);
+    if (!best) {
+      ambiguousSkipped += 1;
+      continue;
+    }
+
+    candidatesFound += 1;
+    const existingKey = `${stream.user_id}:${best.row.platform}`;
+    if (existing.has(existingKey)) {
+      continue;
+    }
+
+    let resolved = null;
+    try {
+      resolved = await resolvePubgPlayerIdentity(
+        {
+          playerName: best.row.playerName,
+          platform: best.row.platform,
+          preferredShard: best.row.shard
+        },
+        lookupCache
+      );
+    } catch (error) {
+      log("warn", "known-player mapping pubg lookup failed", {
+        twitchUserId: stream.user_id,
+        twitchUserLogin: stream.user_login,
+        pubgPlayerName: best.row.playerName,
+        platform: best.row.platform,
+        shard: best.row.shard,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+
+    if (!resolved) {
+      lookupMisses += 1;
+      continue;
+    }
+
+    const normalizedPubg = normalizeForLinking(resolved.playerName || best.row.playerName);
+    await prisma.pubgStreamerIdentityLink.upsert({
+      where: {
+        twitchUserId_platform: {
+          twitchUserId: stream.user_id,
+          platform: best.row.platform
+        }
+      },
+      create: {
+        twitchUserId: stream.user_id,
+        twitchUserLogin: stream.user_login,
+        twitchUserName: stream.user_name,
+        platform: best.row.platform,
+        shard: resolved.shard,
+        pubgPlayerId: resolved.playerId,
+        pubgPlayerName: resolved.playerName,
+        pubgNameNormalized: normalizedPubg,
+        confidenceScore: Math.round(best.similarity * 100),
+        confidenceReasonsJson: JSON.stringify([
+          "known_player_index",
+          `matcher_${best.matcher}`,
+          `similarity_${Math.round(best.similarity * 100)}pct`
+        ]),
+        source: "known_player_index",
+        firstLinkedAt: new Date(),
+        lastLinkedAt: new Date()
+      },
+      update: {
+        twitchUserLogin: stream.user_login,
+        twitchUserName: stream.user_name,
+        shard: resolved.shard,
+        pubgPlayerId: resolved.playerId,
+        pubgPlayerName: resolved.playerName,
+        pubgNameNormalized: normalizedPubg,
+        confidenceScore: Math.round(best.similarity * 100),
+        confidenceReasonsJson: JSON.stringify([
+          "known_player_index",
+          `matcher_${best.matcher}`,
+          `similarity_${Math.round(best.similarity * 100)}pct`
+        ]),
+        source: "known_player_index",
+        lastLinkedAt: new Date()
+      }
+    });
+    existing.add(existingKey);
+    upserted += 1;
+
+    await upsertIdentityLinkEvent({
+      twitchUserId: stream.user_id,
+      twitchUserLogin: stream.user_login,
+      twitchUserName: stream.user_name,
+      platform: best.row.platform,
+      shard: resolved.shard,
+      pubgPlayerName: resolved.playerName,
+      pubgNameNormalized: normalizedPubg
+    });
+    linkEventsUpserted += 1;
+  }
+
+  log("info", "known-player mapping completed", {
+    scanned,
+    candidatesFound,
+    ambiguousSkipped,
+    lookupMisses,
+    upserted,
+    linkEventsUpserted,
+    streamLimit: KNOWN_PLAYER_MAPPING_LIMIT,
+    candidatePool: KNOWN_PLAYER_CANDIDATES_LIMIT,
+    similarityMin: KNOWN_PLAYER_SIMILARITY_MIN
+  });
+
+  return {
+    scanned,
+    candidatesFound,
+    ambiguousSkipped,
+    lookupMisses,
+    upserted,
+    linkEventsUpserted,
+    streamLimit: KNOWN_PLAYER_MAPPING_LIMIT,
+    candidatePool: KNOWN_PLAYER_CANDIDATES_LIMIT,
+    similarityMin: KNOWN_PLAYER_SIMILARITY_MIN
   };
 }
 
@@ -621,7 +928,19 @@ async function indexStreams() {
     ambiguousMatches: 0,
     lookupMisses: 0,
     identityLinksUpserted: 0,
+    linkEventsUpserted: 0,
     limit: PROFILE_MAPPING_LIMIT
+  };
+  let knownPlayerMappingSummary = {
+    scanned: 0,
+    candidatesFound: 0,
+    ambiguousSkipped: 0,
+    lookupMisses: 0,
+    upserted: 0,
+    linkEventsUpserted: 0,
+    streamLimit: KNOWN_PLAYER_MAPPING_LIMIT,
+    candidatePool: KNOWN_PLAYER_CANDIDATES_LIMIT,
+    similarityMin: KNOWN_PLAYER_SIMILARITY_MIN
   };
 
   for (const stream of streams) {
@@ -696,6 +1015,14 @@ async function indexStreams() {
     });
   }
 
+  try {
+    knownPlayerMappingSummary = await reconcileKnownPlayerIdentityLinks(streams);
+  } catch (error) {
+    log("error", "known-player mapping failed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+
   // Run discovery worker (self-throttled to DISCOVERY_INTERVAL_MS, default 1 hour)
   try {
     await runDiscoveryWorker();
@@ -724,7 +1051,8 @@ async function indexStreams() {
       indexedAt: indexedAt.toISOString(),
       durationMs: Date.now() - startedAt,
       eventSubSyncIntervalMs: EVENTSUB_SYNC_INTERVAL_MS,
-      profileMapping: profileMappingSummary
+      profileMapping: profileMappingSummary,
+      knownPlayerMapping: knownPlayerMappingSummary
     }
   });
 }
