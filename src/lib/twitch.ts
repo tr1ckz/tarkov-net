@@ -75,6 +75,26 @@ type TwitchSearchChannelsResponse = {
   data: TwitchSearchChannel[];
 };
 
+export type TwitchStream = {
+  id: string;
+  user_id: string;
+  user_login: string;
+  user_name: string;
+  game_id: string;
+  game_name: string;
+  type: string;
+  title: string;
+  viewer_count: number;
+  started_at: string;
+  language: string;
+  thumbnail_url: string;
+};
+
+type TwitchStreamsResponse = {
+  data: TwitchStream[];
+  pagination?: { cursor?: string };
+};
+
 let tokenState: TwitchTokenState | null = null;
 
 function getCredentials() {
@@ -189,4 +209,33 @@ export async function getVideosByUserId(userId: string, first = 8): Promise<Twit
     `/videos?user_id=${encodeURIComponent(userId)}&type=archive&first=${capped}`
   );
   return payload.data;
+}
+
+export async function getStreamsByGameId(gameId: string, first = 100, after?: string): Promise<TwitchStreamsResponse> {
+  const capped = Math.max(1, Math.min(first, 100));
+  const cursorPart = after ? `&after=${encodeURIComponent(after)}` : "";
+  return twitchGet<TwitchStreamsResponse>(
+    `/streams?game_id=${encodeURIComponent(gameId)}&first=${capped}${cursorPart}`
+  );
+}
+
+export async function getAllLiveStreamsByGameId(gameId: string, maxPages = 10): Promise<TwitchStream[]> {
+  const pages = Math.max(1, Math.min(maxPages, 20));
+  const all: TwitchStream[] = [];
+  let cursor: string | undefined;
+
+  for (let i = 0; i < pages; i += 1) {
+    const payload = await getStreamsByGameId(gameId, 100, cursor);
+    if (!payload.data.length) {
+      break;
+    }
+
+    all.push(...payload.data);
+    cursor = payload.pagination?.cursor;
+    if (!cursor) {
+      break;
+    }
+  }
+
+  return all;
 }

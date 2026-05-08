@@ -20,9 +20,20 @@ const markerSchema = z.object({
   notes: z.string().min(1)
 });
 
+const colorSchema = z.string().regex(/^#([0-9a-fA-F]{6})$/, "Expected 6-digit hex color");
+
+const legendSchema = z.object({
+  "hot-drop": colorSchema,
+  "secret-room": colorSchema,
+  "secret-key": colorSchema,
+  "vehicle-route": colorSchema
+});
+
 const patchSchema = z.object({
   calibration: calibrationSchema.nullable().optional(),
-  entities: z.array(markerSchema).nullable().optional()
+  entities: z.array(markerSchema).nullable().optional(),
+  legendColors: legendSchema.nullable().optional(),
+  mapImageUrl: z.string().trim().min(1).max(500).nullable().optional()
 });
 
 function requireAdmin(session: Session | null) {
@@ -53,6 +64,8 @@ export async function GET(_: Request, { params }: { params: { slug: string } }) 
       mapSlug: true,
       calibrationJson: true,
       entitiesJson: true,
+      legendJson: true,
+      mapImageUrl: true,
       updatedAt: true,
       updatedByUserId: true
     }
@@ -62,6 +75,8 @@ export async function GET(_: Request, { params }: { params: { slug: string } }) 
     mapSlug: slug,
     calibration: safeParseJson(config?.calibrationJson),
     entities: safeParseJson(config?.entitiesJson),
+    legendColors: safeParseJson(config?.legendJson),
+    mapImageUrl: config?.mapImageUrl ?? null,
     updatedAt: config?.updatedAt ?? null,
     updatedByUserId: config?.updatedByUserId ?? null
   });
@@ -85,8 +100,10 @@ export async function PATCH(request: Request, { params }: { params: { slug: stri
 
   const hasCalibration = Object.prototype.hasOwnProperty.call(parsed.data, "calibration");
   const hasEntities = Object.prototype.hasOwnProperty.call(parsed.data, "entities");
+  const hasLegend = Object.prototype.hasOwnProperty.call(parsed.data, "legendColors");
+  const hasMapImage = Object.prototype.hasOwnProperty.call(parsed.data, "mapImageUrl");
 
-  if (!hasCalibration && !hasEntities) {
+  if (!hasCalibration && !hasEntities && !hasLegend && !hasMapImage) {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }
 
@@ -94,6 +111,8 @@ export async function PATCH(request: Request, { params }: { params: { slug: stri
     updatedByUserId: string;
     calibrationJson?: string | null;
     entitiesJson?: string | null;
+    legendJson?: string | null;
+    mapImageUrl?: string | null;
   } = {
     updatedByUserId: session!.user.id
   };
@@ -106,19 +125,31 @@ export async function PATCH(request: Request, { params }: { params: { slug: stri
     updateData.entitiesJson = parsed.data.entities ? JSON.stringify(parsed.data.entities) : null;
   }
 
+  if (hasLegend) {
+    updateData.legendJson = parsed.data.legendColors ? JSON.stringify(parsed.data.legendColors) : null;
+  }
+
+  if (hasMapImage) {
+    updateData.mapImageUrl = parsed.data.mapImageUrl ? parsed.data.mapImageUrl : null;
+  }
+
   const saved = await prisma.pubgMapConfig.upsert({
     where: { mapSlug: slug },
     create: {
       mapSlug: slug,
       updatedByUserId: updateData.updatedByUserId,
       calibrationJson: updateData.calibrationJson ?? null,
-      entitiesJson: updateData.entitiesJson ?? null
+      entitiesJson: updateData.entitiesJson ?? null,
+      legendJson: updateData.legendJson ?? null,
+      mapImageUrl: updateData.mapImageUrl ?? null
     },
     update: updateData,
     select: {
       mapSlug: true,
       calibrationJson: true,
       entitiesJson: true,
+      legendJson: true,
+      mapImageUrl: true,
       updatedAt: true,
       updatedByUserId: true
     }
@@ -129,6 +160,8 @@ export async function PATCH(request: Request, { params }: { params: { slug: stri
     mapSlug: saved.mapSlug,
     calibration: safeParseJson(saved.calibrationJson),
     entities: safeParseJson(saved.entitiesJson),
+    legendColors: safeParseJson(saved.legendJson),
+    mapImageUrl: saved.mapImageUrl,
     updatedAt: saved.updatedAt,
     updatedByUserId: saved.updatedByUserId
   });

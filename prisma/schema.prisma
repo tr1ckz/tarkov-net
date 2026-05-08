@@ -130,9 +130,29 @@ model PubgMapConfig {
   mapSlug         String   @unique
   calibrationJson String?
   entitiesJson    String?
+  legendJson      String?
+  mapImageUrl     String?
   updatedByUserId String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@index([mapSlug])
+}
+
+model PubgActiveStreamer {
+  twitchUserId    String   @id
+  streamId        String   @unique
+  userLogin       String   @unique
+  userName        String
+  gameId          String
+  streamStartedAt DateTime
+  title           String
+  normalizedLogin String
+  normalizedName  String
+  indexedAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([indexedAt])
+  @@index([normalizedLogin])
+  @@index([normalizedName])
 }

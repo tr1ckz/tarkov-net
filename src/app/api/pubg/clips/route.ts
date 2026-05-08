@@ -14,6 +14,11 @@ import {
   lookupPlayerAcrossShards,
   type PubgPlatform
 } from "@/lib/pubg-api";
+import {
+  computeVodOffsetSeconds,
+  ensurePubgStreamerIndexFresh,
+  findMatchedActiveStreamers
+} from "@/lib/pubg-streamer-index";
 
 export const dynamic = "force-dynamic";
 
@@ -69,7 +74,7 @@ function pickClosestVodMoment(
     if (durationSeconds <= 0) continue;
 
     const end = start + durationSeconds * 1000;
-    const rawOffset = Math.floor((encounterTime - start) / 1000);
+    const rawOffset = Math.floor((encounterTime - start) / 1000) - 20;
     const offsetSeconds = Math.max(0, Math.min(rawOffset, Math.max(0, durationSeconds - 1)));
 
     const outside = encounterTime < start || encounterTime > end;
@@ -124,8 +129,12 @@ export async function GET(request: Request) {
         searchChannelMatches: 0,
         channelsWithClips: 0,
         vodMoments: 0,
+        activeIndexMatches: 0,
+        activeOverlapMatches: 0,
         resolvedShard: resolvedPlayer.shard
       };
+
+      await ensurePubgStreamerIndexFresh();
 
       const clips = [] as Array<{
         id: string;
@@ -150,6 +159,44 @@ export async function GET(request: Request) {
       for (const encounter of encounters) {
         const candidates = new Set<string>(getLoginCandidates(encounter.name));
         const encounterNormalized = normalizeName(encounter.name);
+
+        const matchedLiveStreamers = await findMatchedActiveStreamers(encounter.name);
+        if (matchedLiveStreamers.length) {
+          debug.activeIndexMatches += matchedLiveStreamers.length;
+          for (const streamerMatch of matchedLiveStreamers) {
+            candidates.add(streamerMatch.userLogin.toLowerCase());
+
+            const encounterMs = encounter.lastSeenAt ? Date.parse(encounter.lastSeenAt) : Number.NaN;
+            const streamStartMs = streamerMatch.streamStartedAt.getTime();
+            if (!Number.isNaN(encounterMs) && encounterMs >= streamStartMs) {
+              debug.activeOverlapMatches += 1;
+              const offset = computeVodOffsetSeconds(encounter.lastSeenAt!, streamerMatch.streamStartedAt.toISOString());
+              const liveUrl = `https://www.twitch.tv/${streamerMatch.userLogin}?t=${offset}s`;
+              clips.push({
+                id: `live-${streamerMatch.streamId}-${encounter.name}`,
+                url: liveUrl,
+                embed_url: liveUrl,
+                broadcaster_id: streamerMatch.twitchUserId,
+                broadcaster_name: streamerMatch.userName,
+                creator_id: streamerMatch.twitchUserId,
+                creator_name: streamerMatch.userName,
+                video_id: "",
+                game_id: "27971",
+                language: "",
+                title: `[Live POV] ${streamerMatch.title}`,
+                view_count: 0,
+                created_at: streamerMatch.streamStartedAt.toISOString(),
+                thumbnail_url: `https://static-cdn.jtvnw.net/previews-ttv/live_user_${streamerMatch.userLogin}-640x360.jpg`,
+                duration: 0,
+                encounterWith: encounter.name,
+                sourceType: "vod"
+              });
+              if (clips.length >= limit) break;
+            }
+          }
+        }
+
+        if (clips.length >= limit) break;
 
         const searched = await searchChannelsByName(encounter.name, 8);
         for (const channel of searched) {

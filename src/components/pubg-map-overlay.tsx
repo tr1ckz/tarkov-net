@@ -7,11 +7,20 @@ type Props = {
   map: PubgMapIntel;
 };
 
-const MARKER_CONFIG: Record<PubgMapMarker["type"], { label: string; color: string }> = {
-  "hot-drop":      { label: "Hot Drop",      color: "#e85555" },
-  "secret-room":   { label: "Secret Room",   color: "#f5c842" },
-  "secret-key":    { label: "Key Location",  color: "#9fd46a" },
-  "vehicle-route": { label: "Vehicle Route", color: "#5599ee" },
+const MARKER_META: Record<PubgMapMarker["type"], { label: string }> = {
+  "hot-drop": { label: "Hot Drop" },
+  "secret-room": { label: "Secret Room" },
+  "secret-key": { label: "Key Location" },
+  "vehicle-route": { label: "Vehicle Route" },
+};
+
+type MarkerPalette = Record<PubgMapMarker["type"], string>;
+
+const DEFAULT_MARKER_COLORS: MarkerPalette = {
+  "hot-drop": "#e85555",
+  "secret-room": "#f5c842",
+  "secret-key": "#9fd46a",
+  "vehicle-route": "#5599ee",
 };
 
 type MapCalibration = {
@@ -120,6 +129,8 @@ export function PubgMapOverlay({ map }: Props) {
   const [newEntityType, setNewEntityType] = useState<PubgMapMarker["type"]>("hot-drop");
   const [newEntityNotes, setNewEntityNotes] = useState("Added in admin editor");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [palette, setPalette] = useState<MarkerPalette>(DEFAULT_MARKER_COLORS);
+  const [mapImageUrl, setMapImageUrl] = useState(map.mapImage);
 
   // pan/zoom state
   const [zoom, setZoom] = useState(1);
@@ -193,6 +204,8 @@ export function PubgMapOverlay({ map }: Props) {
     setCapturedPoint(null);
     setEditableMarkers(mergedMarkers);
     setSaveStatus("idle");
+    setPalette(DEFAULT_MARKER_COLORS);
+    setMapImageUrl(map.mapImage);
 
     let cancelled = false;
 
@@ -203,6 +216,8 @@ export function PubgMapOverlay({ map }: Props) {
         const payload = (await response.json()) as {
           calibration?: MapCalibration | null;
           entities?: PubgMapMarker[] | null;
+          legendColors?: MarkerPalette | null;
+          mapImageUrl?: string | null;
         };
 
         if (cancelled) return;
@@ -213,6 +228,14 @@ export function PubgMapOverlay({ map }: Props) {
 
         if (payload.entities && payload.entities.length) {
           setEditableMarkers(payload.entities);
+        }
+
+        if (payload.legendColors) {
+          setPalette(payload.legendColors);
+        }
+
+        if (payload.mapImageUrl) {
+          setMapImageUrl(payload.mapImageUrl);
         }
       } catch {
         // fall back to defaults if server config cannot be loaded
@@ -234,7 +257,12 @@ export function PubgMapOverlay({ map }: Props) {
     recomputeRenderBox();
   }, [recomputeRenderBox, zoom]);
 
-  async function saveServerConfig(payload: { calibration?: MapCalibration | null; entities?: PubgMapMarker[] | null }) {
+  async function saveServerConfig(payload: {
+    calibration?: MapCalibration | null;
+    entities?: PubgMapMarker[] | null;
+    legendColors?: MarkerPalette | null;
+    mapImageUrl?: string | null;
+  }) {
     setSaveStatus("saving");
     try {
       const response = await fetch(`/api/pubg/map-config/${map.slug}`, {
@@ -273,6 +301,40 @@ export function PubgMapOverlay({ map }: Props) {
   function resetCalibration() {
     setCalibration(getBaseCalibration(map.slug));
     void saveServerConfig({ calibration: null });
+  }
+
+  function persistPalette(nextPalette: MarkerPalette) {
+    setPalette(nextPalette);
+    void saveServerConfig({ legendColors: nextPalette });
+  }
+
+  function resetPaletteToDefaults() {
+    setPalette(DEFAULT_MARKER_COLORS);
+    void saveServerConfig({ legendColors: DEFAULT_MARKER_COLORS });
+  }
+
+  function saveMapImageOverride() {
+    const next = mapImageUrl.trim();
+    if (!next) {
+      setMapImageUrl(map.mapImage);
+      void saveServerConfig({ mapImageUrl: null });
+      return;
+    }
+
+    setMapImageUrl(next);
+    void saveServerConfig({ mapImageUrl: next });
+  }
+
+  function resetMapImageOverride() {
+    setMapImageUrl(map.mapImage);
+    void saveServerConfig({ mapImageUrl: null });
+  }
+
+  function guessHighResVariant(url: string) {
+    if (url.includes("_Low_Res")) {
+      return url.replace("_Low_Res", "_High_Res");
+    }
+    return url;
   }
 
   function toggleAdminMode() {
@@ -444,8 +506,9 @@ export function PubgMapOverlay({ map }: Props) {
     <div className="space-y-4">
       {/* ── controls bar ── */}
       <div className="flex flex-wrap items-center gap-2">
-        {(Object.keys(MARKER_CONFIG) as PubgMapMarker["type"][]).map((type) => {
-          const cfg = MARKER_CONFIG[type];
+        {(Object.keys(MARKER_META) as PubgMapMarker["type"][]).map((type) => {
+          const label = MARKER_META[type].label;
+          const color = palette[type] ?? DEFAULT_MARKER_COLORS[type];
           const active = activeTypes[type];
           return (
             <button
@@ -454,7 +517,7 @@ export function PubgMapOverlay({ map }: Props) {
               onClick={() => toggleType(type)}
               className="flex items-center gap-1.5 border px-3 py-1.5 text-xs uppercase tracking-[0.12em] transition-opacity"
               style={{
-                borderColor: active ? cfg.color : "#2d2d2d",
+                borderColor: active ? color : "#2d2d2d",
                 color: active ? "#e2d2af" : "#7f7768",
                 opacity: active ? 1 : 0.45,
               }}
@@ -464,11 +527,11 @@ export function PubgMapOverlay({ map }: Props) {
                 style={{
                   width: 10,
                   height: 10,
-                  border: `2px solid ${active ? cfg.color : "#444"}`,
+                  border: `2px solid ${active ? color : "#444"}`,
                   background: "transparent",
                 }}
               />
-              {cfg.label}
+              {label}
             </button>
           );
         })}
@@ -530,11 +593,16 @@ export function PubgMapOverlay({ map }: Props) {
           }}
         >
           <img
-            src={map.mapImage}
+            src={mapImageUrl}
             alt={`${map.name} map`}
             className="h-full w-full object-contain select-none"
             draggable={false}
             loading="eager"
+            onError={() => {
+              if (mapImageUrl !== map.mapImage) {
+                setMapImageUrl(map.mapImage);
+              }
+            }}
             onLoad={(e) => {
               const img = e.currentTarget;
               if (img.naturalWidth > 0 && img.naturalHeight > 0) {
@@ -545,7 +613,7 @@ export function PubgMapOverlay({ map }: Props) {
           />
 
           {visibleMarkers.map((marker) => {
-            const cfg = MARKER_CONFIG[marker.type];
+            const color = palette[marker.type] ?? DEFAULT_MARKER_COLORS[marker.type];
             const isActive = activeMarkerId === marker.id;
             const calibrated = applyCalibration(marker.x, marker.y, calibration);
             return (
@@ -577,10 +645,10 @@ export function PubgMapOverlay({ map }: Props) {
                   height: markerSize,
                   transform: `translate(-50%, -50%) ${isActive ? "scale(1.4)" : ""}`,
                   background: "transparent",
-                  border: `2px solid ${cfg.color}`,
+                  border: `2px solid ${color}`,
                   boxShadow: isActive
-                    ? `0 0 0 2px #fff, 0 0 8px 2px ${cfg.color}`
-                    : `0 0 4px 1px ${cfg.color}55`,
+                    ? `0 0 0 2px #fff, 0 0 8px 2px ${color}`
+                    : `0 0 4px 1px ${color}55`,
                   zIndex: isActive ? 30 : 10,
                 }}
               />
@@ -690,6 +758,65 @@ export function PubgMapOverlay({ map }: Props) {
             >Reset Entities</button>
           </div>
 
+          <div className="mt-4 border-t border-[#2a2418] pt-3">
+            <p className="text-[11px] uppercase tracking-[0.1em] text-[#8f826a]">Legend/Icon Color Groups</p>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              {(Object.keys(MARKER_META) as PubgMapMarker["type"][]).map((type) => (
+                <label key={`color-${type}`} className="flex items-center justify-between gap-3 text-xs text-[#b8aa90]">
+                  <span>{MARKER_META[type].label}</span>
+                  <input
+                    type="color"
+                    value={palette[type]}
+                    onChange={(e) => setPalette((prev) => ({ ...prev, [type]: e.target.value }))}
+                    className="h-8 w-10 border border-[#3a3426] bg-[#0e0c09]"
+                  />
+                </label>
+              ))}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => persistPalette(palette)}
+                className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
+              >Save Colors</button>
+              <button
+                type="button"
+                onClick={resetPaletteToDefaults}
+                className="border border-[#3a3a3a] bg-[#1a1a1a] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#9a9080] hover:border-[#666] hover:text-white"
+              >Reset Colors</button>
+            </div>
+          </div>
+
+          <div className="mt-4 border-t border-[#2a2418] pt-3">
+            <p className="text-[11px] uppercase tracking-[0.1em] text-[#8f826a]">Map Image Source</p>
+            <p className="mt-1 text-xs text-[#8f826a]">Use a higher-resolution URL if available; fallback returns to default map texture.</p>
+            <div className="mt-2 grid gap-2 sm:grid-cols-4">
+              <input
+                value={mapImageUrl}
+                onChange={(e) => setMapImageUrl(e.target.value)}
+                className="sm:col-span-4 w-full border border-[#3a3426] bg-[#0e0c09] px-2 py-1.5 text-xs text-[#e2d2af]"
+                placeholder="/pubg/maps/Erangel_Main_No_Text_High_Res.png"
+              />
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={saveMapImageOverride}
+                className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
+              >Save Map Image</button>
+              <button
+                type="button"
+                onClick={() => setMapImageUrl(guessHighResVariant(mapImageUrl || map.mapImage))}
+                className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
+              >Try High-Res Variant</button>
+              <button
+                type="button"
+                onClick={resetMapImageOverride}
+                className="border border-[#3a3a3a] bg-[#1a1a1a] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#9a9080] hover:border-[#666] hover:text-white"
+              >Reset Map Image</button>
+            </div>
+          </div>
+
           <div className="mt-3 grid gap-2 sm:grid-cols-3">
             <input
               value={newEntityLabel}
@@ -702,8 +829,8 @@ export function PubgMapOverlay({ map }: Props) {
               onChange={(e) => setNewEntityType(e.target.value as PubgMapMarker["type"])}
               className="w-full border border-[#3a3426] bg-[#0e0c09] px-2 py-1.5 text-xs text-[#e2d2af]"
             >
-              {(Object.keys(MARKER_CONFIG) as PubgMapMarker["type"][]).map((type) => (
-                <option key={type} value={type}>{MARKER_CONFIG[type].label}</option>
+              {(Object.keys(MARKER_META) as PubgMapMarker["type"][]).map((type) => (
+                <option key={type} value={type}>{MARKER_META[type].label}</option>
               ))}
             </select>
             <input
@@ -729,13 +856,13 @@ export function PubgMapOverlay({ map }: Props) {
       <div className="border border-[#2d2d2d] bg-[#0e0e0e] px-4 py-3">
         <p className="mb-2.5 text-[10px] uppercase tracking-[0.16em] text-[#5a5450]">Legend</p>
         <div className="flex flex-wrap gap-6">
-          {(Object.keys(MARKER_CONFIG) as PubgMapMarker["type"][]).map((type) => (
+          {(Object.keys(MARKER_META) as PubgMapMarker["type"][]).map((type) => (
             <div key={type} className="flex items-center gap-2">
               <span
                 className="shrink-0 rounded-full"
-                style={{ width: 16, height: 16, border: `2px solid ${MARKER_CONFIG[type].color}`, background: "transparent" }}
+                style={{ width: 16, height: 16, border: `2px solid ${palette[type]}`, background: "transparent" }}
               />
-              <span className="text-xs text-[#9a9080]">{MARKER_CONFIG[type].label}</span>
+              <span className="text-xs text-[#9a9080]">{MARKER_META[type].label}</span>
             </div>
           ))}
           <div className="flex items-center gap-2">
@@ -765,7 +892,7 @@ export function PubgMapOverlay({ map }: Props) {
               style={{
                 width: 16,
                 height: 16,
-                border: `2px solid ${MARKER_CONFIG[activeMarker.type].color}`,
+                border: `2px solid ${palette[activeMarker.type]}`,
                 background: "transparent",
               }}
             />

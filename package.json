@@ -12,7 +12,9 @@
     "lint": "next lint",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "pubg:twitch:crawler": "node scripts/pubg-twitch-crawler.mjs",
+    "pubg:twitch:refresh": "node scripts/pubg-twitch-crawler.mjs --once"
   },
   "dependencies": {
     "@prisma/client": "^5.14.0",
