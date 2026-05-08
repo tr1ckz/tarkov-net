@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { getAllLiveStreamsByGameId } from "@/lib/twitch";
+import stringSimilarity from "string-similarity";
 
 const DEFAULT_PUBG_TWITCH_GAME_IDS = ["493057", "27971"];
 const INDEX_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
@@ -48,8 +49,12 @@ function normalizeForCompare(value: string) {
 function stripGamingPrefix(value: string) {
   return value
     .toLowerCase()
-    .replace(/^(ttv|tv|yt|twitch|tt|live)[\s._-]*/g, "")
-    .replace(/[\s._-]*(ttv|tv|yt|twitch|tt|live)$/g, "");
+    // Strip well-known streaming/gaming prefix tags
+    .replace(/^(ttv|tv|yt|youtube|twitch|tt|live|stream|gaming|gamer|plays|official)[\s._-]*/g, "")
+    // Strip well-known streaming/gaming suffix tags
+    .replace(/[\s._-]*(ttv|tv|yt|youtube|twitch|tt|live|stream|gaming|gamer|plays|official|tv)$/g, "")
+    // Strip trailing numbers (e.g. player123 → player)
+    .replace(/\d+$/, "");
 }
 
 export function normalizePubgNameForStreamerMatch(pubgName: string) {
@@ -109,6 +114,18 @@ export function scorePubgNameAgainstStreamer(pubgName: string, streamer: ActiveS
   if (tokenOverlap) {
     score += 20;
     reasons.push("token_overlap");
+  }
+
+  // Fuzzy ratio scoring — boost score when names are ≥90% similar
+  const fuzzyVsLogin = stringSimilarity.compareTwoStrings(pubg, login);
+  const fuzzyVsDisplay = stringSimilarity.compareTwoStrings(pubg, display);
+  const bestFuzzy = Math.max(fuzzyVsLogin, fuzzyVsDisplay);
+  if (bestFuzzy >= 0.9) {
+    score += 80;
+    reasons.push(`fuzzy_${Math.round(bestFuzzy * 100)}pct`);
+  } else if (bestFuzzy >= 0.75) {
+    score += 35;
+    reasons.push(`fuzzy_${Math.round(bestFuzzy * 100)}pct`);
   }
 
   if (score <= 0) {

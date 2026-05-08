@@ -168,7 +168,9 @@ async function writePubgLinkRunLog(input: PubgLinkRunLogInput) {
 
 function isHighConfidenceIdentityMatch(match: { score: number; reasons: string[] }) {
   if (match.score < 100) return false;
-  return match.reasons.includes("exact_login") || match.reasons.includes("exact_display");
+  if (match.reasons.includes("exact_login") || match.reasons.includes("exact_display")) return true;
+  // Accept fuzzy matches at >=90% similarity as high confidence
+  return match.reasons.some((r) => /^fuzzy_9\d|fuzzy_100/.test(r));
 }
 
 async function upsertStreamerIdentityLink(input: {

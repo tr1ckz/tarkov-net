@@ -126,8 +126,12 @@ function normalizeForCompare(value) {
 function stripGamingPrefix(value) {
   return value
     .toLowerCase()
-    .replace(/^(ttv|tv|yt|twitch)[\s._-]*/g, "")
-    .replace(/[\s._-]*(ttv|tv|yt|twitch)$/g, "");
+    // Strip well-known streaming/gaming prefix tags
+    .replace(/^(ttv|tv|yt|youtube|twitch|tt|live|stream|gaming|gamer|plays|official)[\s._-]*/g, "")
+    // Strip well-known streaming/gaming suffix tags
+    .replace(/[\s._-]*(ttv|tv|yt|youtube|twitch|tt|live|stream|gaming|gamer|plays|official|tv)$/g, "")
+    // Strip trailing numbers (e.g. player123 → player)
+    .replace(/\d+$/, "");
 }
 
 function getPubgApiKey() {
