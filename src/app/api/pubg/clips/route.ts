@@ -3,11 +3,26 @@ import {
   findBroadcasterIdByLogin,
   findGameIdByName,
   getClipsByBroadcasterId,
-  getClipsByGameId
+  getClipsByGameId,
+  searchChannelsByName
 } from "@/lib/twitch";
 import { getRecentEncounterNames } from "@/lib/pubg-api";
 
 export const dynamic = "force-dynamic";
+
+function normalizeName(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function getLoginCandidates(pubgName: string) {
+  const raw = pubgName.trim();
+  const lower = raw.toLowerCase();
+  const compact = lower.replace(/\s+/g, "");
+  const underscore = lower.replace(/\s+/g, "_");
+  const stripped = lower.replace(/[^a-z0-9_]/g, "");
+
+  return Array.from(new Set([lower, compact, underscore, stripped])).filter(Boolean);
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -25,6 +40,13 @@ export async function GET(request: Request) {
         maxMatches: 7,
         maxOpponents: 25
       });
+
+      const debug = {
+        encountersFound: encounters.length,
+        directLoginMatches: 0,
+        searchChannelMatches: 0,
+        channelsWithClips: 0
+      };
 
       const clips = [] as Array<{
         id: string;
@@ -46,16 +68,40 @@ export async function GET(request: Request) {
       }>;
 
       for (const encounter of encounters) {
-        const login = encounter.name.toLowerCase();
-        const broadcasterId = await findBroadcasterIdByLogin(login);
-        if (!broadcasterId) continue;
+        const candidates = new Set<string>(getLoginCandidates(encounter.name));
+        const encounterNormalized = normalizeName(encounter.name);
 
-        const found = await getClipsByBroadcasterId(broadcasterId, 3);
-        for (const clip of found) {
-          clips.push({
-            ...clip,
-            encounterWith: encounter.name
-          });
+        const searched = await searchChannelsByName(encounter.name, 8);
+        for (const channel of searched) {
+          const loginNormalized = normalizeName(channel.broadcaster_login);
+          const displayNormalized = normalizeName(channel.display_name);
+          if (
+            loginNormalized.includes(encounterNormalized) ||
+            encounterNormalized.includes(loginNormalized) ||
+            displayNormalized.includes(encounterNormalized) ||
+            encounterNormalized.includes(displayNormalized)
+          ) {
+            candidates.add(channel.broadcaster_login.toLowerCase());
+            debug.searchChannelMatches += 1;
+          }
+        }
+
+        for (const login of candidates) {
+          const broadcasterId = await findBroadcasterIdByLogin(login);
+          if (!broadcasterId) continue;
+          debug.directLoginMatches += 1;
+
+          const found = await getClipsByBroadcasterId(broadcasterId, 2);
+          if (found.length) debug.channelsWithClips += 1;
+
+          for (const clip of found) {
+            clips.push({
+              ...clip,
+              encounterWith: encounter.name
+            });
+            if (clips.length >= limit) break;
+          }
+
           if (clips.length >= limit) break;
         }
 
@@ -66,7 +112,8 @@ export async function GET(request: Request) {
         clips,
         source: "encounters",
         profile: { playerName, shard, platform },
-        encountersScanned: encounters.length
+        encountersScanned: encounters.length,
+        debug
       });
     }
 

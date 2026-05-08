@@ -20,6 +20,12 @@ type ClipsResponse = {
   streamer?: string;
   profile?: { playerName: string; shard: string; platform: string };
   encountersScanned?: number;
+  debug?: {
+    encountersFound: number;
+    directLoginMatches: number;
+    searchChannelMatches: number;
+    channelsWithClips: number;
+  };
   error?: string;
   setup?: string;
 };
@@ -53,7 +59,15 @@ export function PubgClipsPanel() {
   const [error, setError] = useState<string | null>(null);
   const [setupHint, setSetupHint] = useState<string | null>(null);
   const [clips, setClips] = useState<Clip[]>([]);
-  const [resultMeta, setResultMeta] = useState<{ encountersScanned?: number } | null>(null);
+  const [resultMeta, setResultMeta] = useState<{
+    encountersScanned?: number;
+    debug?: {
+      encountersFound: number;
+      directLoginMatches: number;
+      searchChannelMatches: number;
+      channelsWithClips: number;
+    };
+  } | null>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem("pubg-clips-profile");
@@ -123,7 +137,7 @@ export function PubgClipsPanel() {
         }
 
         setClips(payload.clips ?? []);
-        setResultMeta({ encountersScanned: payload.encountersScanned });
+        setResultMeta({ encountersScanned: payload.encountersScanned, debug: payload.debug });
       } catch (err) {
         if (cancelled) return;
         setClips([]);
@@ -319,6 +333,11 @@ export function PubgClipsPanel() {
       ) : (
         <div className="border border-[#2d2d2d] bg-[#111] p-4 text-sm text-[#9a9080]">
           No clips found for this filter.
+          {mode === "encounters" && resultMeta?.debug && (
+            <p className="mt-2 text-xs uppercase tracking-[0.1em] text-[#6f675a]">
+              Debug: encounters {resultMeta.debug.encountersFound}, candidate channels {resultMeta.debug.directLoginMatches}, clips channels {resultMeta.debug.channelsWithClips}
+            </p>
+          )}
         </div>
       )}
     </section>

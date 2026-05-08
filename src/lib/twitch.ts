@@ -41,6 +41,18 @@ type TwitchClipsResponse = {
   data: TwitchClip[];
 };
 
+type TwitchSearchChannel = {
+  id: string;
+  broadcaster_login: string;
+  display_name: string;
+  game_name: string;
+  is_live: boolean;
+};
+
+type TwitchSearchChannelsResponse = {
+  data: TwitchSearchChannel[];
+};
+
 let tokenState: TwitchTokenState | null = null;
 
 function getCredentials() {
@@ -120,5 +132,15 @@ export async function getClipsByBroadcasterId(broadcasterId: string, first = 20)
   const capped = Math.max(1, Math.min(first, 40));
   const startedAt = new Date(Date.now() - 1000 * 60 * 60 * 24 * 30).toISOString();
   const payload = await twitchGet<TwitchClipsResponse>(`/clips?broadcaster_id=${encodeURIComponent(broadcasterId)}&first=${capped}&started_at=${encodeURIComponent(startedAt)}`);
+  return payload.data;
+}
+
+export async function searchChannelsByName(query: string, first = 8): Promise<TwitchSearchChannel[]> {
+  const cleaned = query.trim();
+  if (!cleaned) return [];
+  const capped = Math.max(1, Math.min(first, 20));
+  const payload = await twitchGet<TwitchSearchChannelsResponse>(
+    `/search/channels?query=${encodeURIComponent(cleaned)}&first=${capped}`
+  );
   return payload.data;
 }
