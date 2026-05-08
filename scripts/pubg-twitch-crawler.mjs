@@ -7,6 +7,7 @@ const MAX_RETRIES = 3;
 const EVENTSUB_SYNC_INTERVAL_MS = Math.max(300000, Number(process.env.EVENTSUB_SYNC_INTERVAL_MS ?? "1800000"));
 const EVENTSUB_SYNC_LIMIT = Math.max(1, Math.min(2000, Number(process.env.EVENTSUB_SYNC_LIMIT ?? "400")));
 const EVENTSUB_CREATE_LIMIT_PER_SYNC = Math.max(1, Math.min(500, Number(process.env.EVENTSUB_CREATE_LIMIT_PER_SYNC ?? "80")));
+const PROFILE_MAPPING_LIMIT = Math.max(1, Math.min(500, Number(process.env.PUBG_PROFILE_MAPPING_LIMIT ?? "200")));
 
 let tokenState = null;
 let lastEventSubSyncMs = 0;
@@ -127,6 +128,237 @@ function stripGamingPrefix(value) {
     .toLowerCase()
     .replace(/^(ttv|tv|yt|twitch)[\s._-]*/g, "")
     .replace(/[\s._-]*(ttv|tv|yt|twitch)$/g, "");
+}
+
+function getPubgApiKey() {
+  const apiKey = process.env.PUBG_DEV_API ?? process.env.PUBG_API_KEY;
+  if (!apiKey) {
+    throw new Error("Missing PUBG API key (PUBG_DEV_API or PUBG_API_KEY)");
+  }
+  return apiKey;
+}
+
+async function pubgGet(path) {
+  const response = await fetch(`https://api.pubg.com${path}`, {
+    headers: {
+      Authorization: `Bearer ${getPubgApiKey()}`,
+      Accept: "application/vnd.api+json"
+    },
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(`PUBG API error (${response.status})`);
+  }
+
+  return response.json();
+}
+
+function getCandidateShards(platform) {
+  if (platform === "xbox") return ["xbox-na", "xbox-eu", "xbox-as", "xbox-oc", "xbox-sa"];
+  if (platform === "psn") return ["psn-na", "psn-eu", "psn-as", "psn-oc", "psn-sa"];
+  if (platform === "kakao") return ["pc-kakao", "pc-krjp", "pc-as"];
+  return ["pc-na", "pc-eu", "pc-as", "pc-kakao", "pc-krjp", "pc-sa", "pc-oc"];
+}
+
+async function getPlayerWithMatches(shard, playerName) {
+  const payload = await pubgGet(
+    `/shards/${encodeURIComponent(shard)}/players?filter[playerNames]=${encodeURIComponent(playerName)}`
+  );
+
+  const player = payload.data?.[0];
+  if (!player) return null;
+
+  return {
+    playerId: player.id,
+    playerName: player.attributes?.name ?? playerName,
+    matchIds: player.relationships?.matches?.data?.map((entry) => entry.id) ?? []
+  };
+}
+
+async function lookupPlayerAcrossShards(playerName, platform) {
+  const shards = getCandidateShards(platform);
+  for (const shard of shards) {
+    const player = await getPlayerWithMatches(shard, playerName);
+    if (player) {
+      return {
+        shard,
+        playerId: player.playerId,
+        playerName: player.playerName,
+        matchCount: player.matchIds.length
+      };
+    }
+  }
+  return null;
+}
+
+function parseUserPubgClaims(user) {
+  const claims = [];
+
+  if (user.pubgSteamUser?.trim()) {
+    claims.push({ platform: "steam", playerName: user.pubgSteamUser.trim() });
+  }
+  if (user.pubgXboxUser?.trim()) {
+    claims.push({ platform: "xbox", playerName: user.pubgXboxUser.trim() });
+  }
+  if (user.pubgPsnUser?.trim()) {
+    claims.push({ platform: "psn", playerName: user.pubgPsnUser.trim() });
+  }
+  if (user.pubgKakaoUser?.trim()) {
+    claims.push({ platform: "kakao", playerName: user.pubgKakaoUser.trim() });
+  }
+
+  return claims;
+}
+
+function getBestExactStreamerMatch(streamers, playerName) {
+  const normalizedClaim = normalizeForCompare(stripGamingPrefix(playerName));
+  if (!normalizedClaim) {
+    return { status: "none", streamer: null };
+  }
+
+  const loginExact = streamers.filter((stream) => stream.normalizedLogin === normalizedClaim);
+  if (loginExact.length === 1) {
+    return { status: "matched", streamer: loginExact[0], normalizedClaim, reason: "exact_login" };
+  }
+  if (loginExact.length > 1) {
+    return { status: "ambiguous", streamer: null, normalizedClaim, reason: "exact_login_collision" };
+  }
+
+  const displayExact = streamers.filter((stream) => stream.normalizedName === normalizedClaim);
+  if (displayExact.length === 1) {
+    return { status: "matched", streamer: displayExact[0], normalizedClaim, reason: "exact_display" };
+  }
+  if (displayExact.length > 1) {
+    return { status: "ambiguous", streamer: null, normalizedClaim, reason: "exact_display_collision" };
+  }
+
+  return { status: "none", streamer: null, normalizedClaim };
+}
+
+async function reconcileProfileIdentityLinks(streams) {
+  const users = await prisma.user.findMany({
+    where: {
+      OR: [
+        { pubgSteamUser: { not: null } },
+        { pubgXboxUser: { not: null } },
+        { pubgPsnUser: { not: null } },
+        { pubgKakaoUser: { not: null } }
+      ]
+    },
+    select: {
+      id: true,
+      pubgSteamUser: true,
+      pubgXboxUser: true,
+      pubgPsnUser: true,
+      pubgKakaoUser: true
+    },
+    take: PROFILE_MAPPING_LIMIT
+  });
+
+  const lookupCache = new Map();
+  let claimsScanned = 0;
+  let exactMatches = 0;
+  let ambiguousMatches = 0;
+  let lookupMisses = 0;
+  let identityLinksUpserted = 0;
+
+  for (const user of users) {
+    const claims = parseUserPubgClaims(user);
+    for (const claim of claims) {
+      claimsScanned += 1;
+
+      const match = getBestExactStreamerMatch(streams, claim.playerName);
+      if (match.status === "ambiguous") {
+        ambiguousMatches += 1;
+        continue;
+      }
+      if (match.status !== "matched" || !match.streamer) {
+        continue;
+      }
+
+      exactMatches += 1;
+      const cacheKey = `${claim.platform}:${claim.playerName.toLowerCase()}`;
+      let resolved = lookupCache.get(cacheKey);
+      if (resolved === undefined) {
+        try {
+          resolved = await lookupPlayerAcrossShards(claim.playerName, claim.platform);
+        } catch (error) {
+          log("warn", "profile mapping pubg lookup failed", {
+            userId: user.id,
+            platform: claim.platform,
+            playerName: claim.playerName,
+            error: error instanceof Error ? error.message : String(error)
+          });
+          resolved = null;
+        }
+        lookupCache.set(cacheKey, resolved);
+      }
+
+      if (!resolved) {
+        lookupMisses += 1;
+        continue;
+      }
+
+      await prisma.pubgStreamerIdentityLink.upsert({
+        where: {
+          twitchUserId_platform: {
+            twitchUserId: match.streamer.user_id,
+            platform: claim.platform
+          }
+        },
+        create: {
+          twitchUserId: match.streamer.user_id,
+          twitchUserLogin: match.streamer.user_login,
+          twitchUserName: match.streamer.user_name,
+          platform: claim.platform,
+          shard: resolved.shard,
+          pubgPlayerId: resolved.playerId,
+          pubgPlayerName: resolved.playerName,
+          pubgNameNormalized: match.normalizedClaim,
+          confidenceScore: 130,
+          confidenceReasonsJson: JSON.stringify(["profile_claim", match.reason]),
+          source: "profile_claim",
+          firstLinkedAt: new Date(),
+          lastLinkedAt: new Date()
+        },
+        update: {
+          twitchUserLogin: match.streamer.user_login,
+          twitchUserName: match.streamer.user_name,
+          shard: resolved.shard,
+          pubgPlayerId: resolved.playerId,
+          pubgPlayerName: resolved.playerName,
+          pubgNameNormalized: match.normalizedClaim,
+          confidenceScore: 130,
+          confidenceReasonsJson: JSON.stringify(["profile_claim", match.reason]),
+          source: "profile_claim",
+          lastLinkedAt: new Date()
+        }
+      });
+
+      identityLinksUpserted += 1;
+    }
+  }
+
+  log("info", "profile mapping completed", {
+    usersScanned: users.length,
+    claimsScanned,
+    exactMatches,
+    ambiguousMatches,
+    lookupMisses,
+    identityLinksUpserted,
+    limit: PROFILE_MAPPING_LIMIT
+  });
+
+  return {
+    usersScanned: users.length,
+    claimsScanned,
+    exactMatches,
+    ambiguousMatches,
+    lookupMisses,
+    identityLinksUpserted,
+    limit: PROFILE_MAPPING_LIMIT
+  };
 }
 
 async function fetchAllStreamsForGameId(gameId) {
@@ -378,6 +610,15 @@ async function indexStreams() {
   const streamPayload = await fetchAllStreams();
   const streams = streamPayload.streams;
   const indexedAt = new Date();
+  let profileMappingSummary = {
+    usersScanned: 0,
+    claimsScanned: 0,
+    exactMatches: 0,
+    ambiguousMatches: 0,
+    lookupMisses: 0,
+    identityLinksUpserted: 0,
+    limit: PROFILE_MAPPING_LIMIT
+  };
 
   for (const stream of streams) {
     await prisma.pubgActiveStreamer.upsert({
@@ -443,6 +684,14 @@ async function indexStreams() {
     });
   }
 
+  try {
+    profileMappingSummary = await reconcileProfileIdentityLinks(streams);
+  } catch (error) {
+    log("error", "profile mapping failed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+
   log("info", "index run completed", {
     runId,
     gameIds: streamPayload.gameIds,
@@ -461,7 +710,8 @@ async function indexStreams() {
       indexedCount: streams.length,
       indexedAt: indexedAt.toISOString(),
       durationMs: Date.now() - startedAt,
-      eventSubSyncIntervalMs: EVENTSUB_SYNC_INTERVAL_MS
+      eventSubSyncIntervalMs: EVENTSUB_SYNC_INTERVAL_MS,
+      profileMapping: profileMappingSummary
     }
   });
 }
