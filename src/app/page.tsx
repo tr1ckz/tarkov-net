@@ -19,37 +19,53 @@ export default function HomePage() {
       <section className="grid gap-4 md:grid-cols-2">
         <Link
           href="/tarkov"
-          className="group border border-[#49533a] bg-[linear-gradient(145deg,#1a2115_0%,#141a12_50%,#111_100%)] p-5 transition hover:-translate-y-0.5 hover:border-[#8fa070]"
+          className="group relative overflow-hidden border border-[#49533a] transition hover:-translate-y-0.5 hover:border-[#8fa070]"
         >
-          <div className="flex items-center gap-4">
-            <Image src="/tarkov.jpg" alt="Escape from Tarkov" width={72} height={72} className="h-[72px] w-[72px] rounded object-cover" />
+          <Image
+            src="/tarkov.jpg"
+            alt="Escape from Tarkov"
+            fill
+            sizes="(max-width: 768px) 100vw, 50vw"
+            className="object-cover opacity-85 transition duration-500 group-hover:scale-[1.03]"
+          />
+          <div className="absolute inset-0 bg-[linear-gradient(110deg,rgba(8,16,9,0.9)_12%,rgba(9,14,10,0.8)_40%,rgba(6,7,7,0.62)_72%,rgba(6,7,7,0.84)_100%)]" />
+
+          <div className="relative z-10 flex min-h-[225px] flex-col justify-end p-5">
             <div>
               <p className="text-xs uppercase tracking-[0.12em] text-[#8fa070]">Escape from Tarkov</p>
               <h2 className="font-display text-2xl uppercase tracking-[0.08em] text-[#e2d2af]">Tarkov Intel</h2>
             </div>
-          </div>
-          <p className="mt-4 text-sm text-[#b4ab9b]">Economy, watchlist, raid ops, cultist circle, and live player profile intelligence.</p>
-          <div className="mt-4 inline-flex items-center gap-2 border border-[#49533a] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#c8bda0] group-hover:border-[#8fa070]">
-            <Crosshair className="h-3.5 w-3.5" />
-            Enter Tarkov
+            <p className="mt-4 text-sm text-[#d7d0c2]">Economy, watchlist, raid ops, cultist circle, and live player profile intelligence.</p>
+            <div className="mt-4 inline-flex w-fit items-center gap-2 border border-[#697e52] bg-black/25 px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#d8cfbe] group-hover:border-[#a6c07f]">
+              <Crosshair className="h-3.5 w-3.5" />
+              Enter Tarkov
+            </div>
           </div>
         </Link>
 
         <Link
           href="/pubg"
-          className="group border border-[#4f4330] bg-[linear-gradient(145deg,#231c12_0%,#1a1711_50%,#111_100%)] p-5 transition hover:-translate-y-0.5 hover:border-[#d7b67a]"
+          className="group relative overflow-hidden border border-[#4f4330] transition hover:-translate-y-0.5 hover:border-[#d7b67a]"
         >
-          <div className="flex items-center gap-4">
-            <Image src="/pubg.avif" alt="PUBG" width={72} height={72} className="h-[72px] w-[72px] rounded object-cover" />
+          <Image
+            src="/pubg.avif"
+            alt="PUBG"
+            fill
+            sizes="(max-width: 768px) 100vw, 50vw"
+            className="object-cover opacity-90 transition duration-500 group-hover:scale-[1.03]"
+          />
+          <div className="absolute inset-0 bg-[linear-gradient(110deg,rgba(19,14,8,0.9)_10%,rgba(17,13,9,0.78)_39%,rgba(9,8,7,0.58)_74%,rgba(9,8,7,0.84)_100%)]" />
+
+          <div className="relative z-10 flex min-h-[225px] flex-col justify-end p-5">
             <div>
               <p className="text-xs uppercase tracking-[0.12em] text-[#d7b67a]">PlayerUnknown's Battlegrounds</p>
               <h2 className="font-display text-2xl uppercase tracking-[0.08em] text-[#e2d2af]">PUBG Tactical Hub</h2>
             </div>
-          </div>
-          <p className="mt-4 text-sm text-[#b4ab9b]">Maps, hot drops, secret room key routes, and objective-specific rotation plans.</p>
-          <div className="mt-4 inline-flex items-center gap-2 border border-[#5e4d34] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#c8bda0] group-hover:border-[#d7b67a]">
-            <MapPinned className="h-3.5 w-3.5" />
-            Enter PUBG
+            <p className="mt-4 text-sm text-[#d7d0c2]">Maps, hot drops, secret room key routes, and objective-specific rotation plans.</p>
+            <div className="mt-4 inline-flex w-fit items-center gap-2 border border-[#7f6740] bg-black/25 px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#d8cfbe] group-hover:border-[#e0bd7c]">
+              <MapPinned className="h-3.5 w-3.5" />
+              Enter PUBG
+            </div>
           </div>
         </Link>
       </section>
