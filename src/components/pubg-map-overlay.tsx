@@ -7,13 +7,11 @@ type Props = {
   map: PubgMapIntel;
 };
 
-const MARKER_CONFIG: Record<PubgMapMarker["type"], { label: string }> = {
-  "hot-drop":      { label: "Hot Drop" },
-  "secret-room":   { label: "Secret Room" },
-  "vehicle-route": { label: "Vehicle Route" },
+const MARKER_CONFIG: Record<PubgMapMarker["type"], { label: string; color: string }> = {
+  "hot-drop":      { label: "Hot Drop",      color: "#e85555" },
+  "secret-room":   { label: "Secret Room",   color: "#f5c842" },
+  "vehicle-route": { label: "Vehicle Route", color: "#5599ee" },
 };
-
-const CIRCLE_COLOR = "#f5c842";
 
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 6;
@@ -137,7 +135,7 @@ export function PubgMapOverlay({ map }: Props) {
               onClick={() => toggleType(type)}
               className="flex items-center gap-1.5 border px-3 py-1.5 text-xs uppercase tracking-[0.12em] transition-opacity"
               style={{
-                borderColor: active ? CIRCLE_COLOR : "#2d2d2d",
+                borderColor: active ? cfg.color : "#2d2d2d",
                 color: active ? "#e2d2af" : "#7f7768",
                 opacity: active ? 1 : 0.45,
               }}
@@ -147,7 +145,7 @@ export function PubgMapOverlay({ map }: Props) {
                 style={{
                   width: 10,
                   height: 10,
-                  border: `2px solid ${active ? CIRCLE_COLOR : "#444"}`,
+                  border: `2px solid ${active ? cfg.color : "#444"}`,
                   background: "transparent",
                 }}
               />
@@ -214,6 +212,7 @@ export function PubgMapOverlay({ map }: Props) {
           />
 
           {visibleMarkers.map((marker) => {
+            const cfg = MARKER_CONFIG[marker.type];
             const isActive = activeMarkerId === marker.id;
             return (
               <button
@@ -229,10 +228,10 @@ export function PubgMapOverlay({ map }: Props) {
                   height: markerSize,
                   transform: `translate(-50%, -50%) ${isActive ? "scale(1.4)" : ""}`,
                   background: "transparent",
-                  border: `2px solid ${CIRCLE_COLOR}`,
+                  border: `2px solid ${cfg.color}`,
                   boxShadow: isActive
-                    ? `0 0 0 2px #fff, 0 0 8px 2px ${CIRCLE_COLOR}`
-                    : `0 0 4px 1px rgba(245,200,66,0.35)`,
+                    ? `0 0 0 2px #fff, 0 0 8px 2px ${cfg.color}`
+                    : `0 0 4px 1px ${cfg.color}55`,
                   zIndex: isActive ? 30 : 10,
                 }}
               />
@@ -255,7 +254,7 @@ export function PubgMapOverlay({ map }: Props) {
             <div key={type} className="flex items-center gap-2">
               <span
                 className="shrink-0 rounded-full"
-                style={{ width: 16, height: 16, border: `2px solid ${CIRCLE_COLOR}`, background: "transparent" }}
+                style={{ width: 16, height: 16, border: `2px solid ${MARKER_CONFIG[type].color}`, background: "transparent" }}
               />
               <span className="text-xs text-[#9a9080]">{MARKER_CONFIG[type].label}</span>
             </div>
@@ -266,9 +265,9 @@ export function PubgMapOverlay({ map }: Props) {
               style={{
                 width: 16,
                 height: 16,
-                border: `2px solid ${CIRCLE_COLOR}`,
+                border: `2px solid #f5c842`,
                 background: "transparent",
-                boxShadow: `0 0 0 2px #fff, 0 0 6px 2px ${CIRCLE_COLOR}`,
+                boxShadow: `0 0 0 2px #fff, 0 0 6px 2px #f5c842`,
               }}
             />
             <span className="text-xs text-[#9a9080]">Selected</span>
@@ -281,16 +280,16 @@ export function PubgMapOverlay({ map }: Props) {
         <p className="text-xs uppercase tracking-[0.12em] text-[#9a9080]">Marker Intel</p>
         {activeMarker ? (
           <div className="mt-2">
-            <div className="flex items-center gap-2">
-              <span
-                className="shrink-0 rounded-full"
-                style={{
-                  width: 16,
-                  height: 16,
-                  border: `2px solid ${CIRCLE_COLOR}`,
-                  background: "transparent",
-                }}
-              />
+          <div className="flex items-center gap-2">
+            <span
+              className="shrink-0 rounded-full"
+              style={{
+                width: 16,
+                height: 16,
+                border: `2px solid ${MARKER_CONFIG[activeMarker.type].color}`,
+                background: "transparent",
+              }}
+            />
               <p className="text-sm font-semibold uppercase tracking-[0.08em] text-[#e2d2af]">
                 {activeMarker.label}
               </p>
