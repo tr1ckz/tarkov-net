@@ -11,15 +11,20 @@ type Clip = {
   thumbnail_url: string;
   created_at: string;
   view_count: number;
+  encounterWith?: string;
 };
 
 type ClipsResponse = {
   clips: Clip[];
-  source: "pubg" | "streamer";
+  source: "pubg" | "streamer" | "encounters";
   streamer?: string;
+  profile?: { playerName: string; shard: string; platform: string };
+  encountersScanned?: number;
   error?: string;
   setup?: string;
 };
+
+type Mode = "pubg" | "streamer" | "encounters";
 
 function formatRelativeTime(iso: string) {
   const date = new Date(iso);
@@ -35,19 +40,65 @@ function formatRelativeTime(iso: string) {
 }
 
 export function PubgClipsPanel() {
+  const [mode, setMode] = useState<Mode>("pubg");
   const [streamer, setStreamer] = useState("");
   const [pendingStreamer, setPendingStreamer] = useState("");
+  const [playerName, setPlayerName] = useState("");
+  const [pendingPlayerName, setPendingPlayerName] = useState("");
+  const [platform, setPlatform] = useState("steam");
+  const [pendingPlatform, setPendingPlatform] = useState("steam");
+  const [shard, setShard] = useState("pc-na");
+  const [pendingShard, setPendingShard] = useState("pc-na");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [setupHint, setSetupHint] = useState<string | null>(null);
   const [clips, setClips] = useState<Clip[]>([]);
+  const [resultMeta, setResultMeta] = useState<{ encountersScanned?: number } | null>(null);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("pubg-clips-profile");
+    if (!saved) return;
+
+    try {
+      const parsed = JSON.parse(saved) as {
+        playerName?: string;
+        platform?: string;
+        shard?: string;
+      };
+
+      if (parsed.playerName) {
+        setPendingPlayerName(parsed.playerName);
+        setPlayerName(parsed.playerName);
+        setMode("encounters");
+      }
+
+      if (parsed.platform) {
+        setPendingPlatform(parsed.platform);
+        setPlatform(parsed.platform);
+      }
+
+      if (parsed.shard) {
+        setPendingShard(parsed.shard);
+        setShard(parsed.shard);
+      }
+    } catch {
+      // ignore malformed local cache
+    }
+  }, []);
 
   const query = useMemo(() => {
     const params = new URLSearchParams();
     params.set("limit", "24");
-    if (streamer) params.set("streamer", streamer);
+    if (mode === "streamer" && streamer) {
+      params.set("streamer", streamer);
+    }
+    if (mode === "encounters" && playerName) {
+      params.set("playerName", playerName);
+      params.set("platform", platform);
+      params.set("shard", shard);
+    }
     return `/api/pubg/clips?${params.toString()}`;
-  }, [streamer]);
+  }, [mode, playerName, platform, shard, streamer]);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,6 +107,7 @@ export function PubgClipsPanel() {
       setLoading(true);
       setError(null);
       setSetupHint(null);
+      setResultMeta(null);
 
       try {
         const response = await fetch(query, { cache: "no-store" });
@@ -71,6 +123,7 @@ export function PubgClipsPanel() {
         }
 
         setClips(payload.clips ?? []);
+        setResultMeta({ encountersScanned: payload.encountersScanned });
       } catch (err) {
         if (cancelled) return;
         setClips([]);
@@ -89,12 +142,43 @@ export function PubgClipsPanel() {
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setMode("streamer");
     setStreamer(pendingStreamer.trim().toLowerCase());
+  }
+
+  function onAccountSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextName = pendingPlayerName.trim();
+    if (!nextName) return;
+
+    setMode("encounters");
+    setPlayerName(nextName);
+    setPlatform(pendingPlatform);
+    setShard(pendingShard);
+
+    localStorage.setItem(
+      "pubg-clips-profile",
+      JSON.stringify({
+        playerName: nextName,
+        platform: pendingPlatform,
+        shard: pendingShard
+      })
+    );
+  }
+
+  function loadGlobalPubg() {
+    setMode("pubg");
+    setStreamer("");
+    setPlayerName("");
   }
 
   function clearFilter() {
     setPendingStreamer("");
     setStreamer("");
+    setPendingPlayerName("");
+    setPlayerName("");
+    setMode("pubg");
+    localStorage.removeItem("pubg-clips-profile");
   }
 
   return (
@@ -102,10 +186,51 @@ export function PubgClipsPanel() {
       <div className="border border-[#2d2d2d] bg-[#111] p-3">
         <p className="text-[11px] uppercase tracking-[0.14em] text-[#9a8050]">PUBG Clips Feed</p>
         <p className="mt-2 text-sm text-[#b9ad96]">
-          Live clips from Twitch for PUBG. Add a streamer login to focus on one channel.
+          Enter your PUBG account below to find clips from players you recently fought.
         </p>
 
-        <form onSubmit={onSubmit} className="mt-3 flex flex-col gap-2 sm:flex-row">
+        <form onSubmit={onAccountSubmit} className="mt-3 grid gap-2 sm:grid-cols-4">
+          <input
+            value={pendingPlayerName}
+            onChange={(e) => setPendingPlayerName(e.target.value)}
+            placeholder="your PUBG username"
+            className="sm:col-span-2 w-full border border-[#2d2d2d] bg-[#0b0b0b] px-3 py-2 text-sm text-[#e2d2af] outline-none focus:border-[#f5c842]"
+          />
+          <select
+            value={pendingPlatform}
+            onChange={(e) => setPendingPlatform(e.target.value)}
+            className="w-full border border-[#2d2d2d] bg-[#0b0b0b] px-3 py-2 text-sm text-[#e2d2af] outline-none focus:border-[#f5c842]"
+          >
+            <option value="steam">Steam</option>
+            <option value="xbox">Xbox</option>
+            <option value="psn">PSN</option>
+            <option value="kakao">Kakao</option>
+          </select>
+          <select
+            value={pendingShard}
+            onChange={(e) => setPendingShard(e.target.value)}
+            className="w-full border border-[#2d2d2d] bg-[#0b0b0b] px-3 py-2 text-sm text-[#e2d2af] outline-none focus:border-[#f5c842]"
+          >
+            <option value="pc-na">pc-na</option>
+            <option value="pc-eu">pc-eu</option>
+            <option value="pc-as">pc-as</option>
+            <option value="xbox-na">xbox-na</option>
+            <option value="xbox-eu">xbox-eu</option>
+            <option value="xbox-as">xbox-as</option>
+          </select>
+          <button
+            type="submit"
+            className="sm:col-span-4 border border-[#5e4d34] bg-[#1a1510] px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
+          >
+            Find My Encounter Clips
+          </button>
+        </form>
+
+        <div className="mt-4 border-t border-[#2a2a2a] pt-3">
+          <p className="text-[11px] uppercase tracking-[0.12em] text-[#7f7768]">Manual Twitch Filter</p>
+          <p className="mt-1 text-xs text-[#7f7768]">Optional fallback if you want one specific streamer.</p>
+
+          <form onSubmit={onSubmit} className="mt-2 flex flex-col gap-2 sm:flex-row">
           <input
             value={pendingStreamer}
             onChange={(e) => setPendingStreamer(e.target.value)}
@@ -120,13 +245,30 @@ export function PubgClipsPanel() {
           </button>
           <button
             type="button"
+            onClick={loadGlobalPubg}
+            className="border border-[#2d2d2d] bg-[#111] px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#9a9080] hover:border-[#666] hover:text-[#e2d2af]"
+          >
+            Global PUBG
+          </button>
+          <button
+            type="button"
             onClick={clearFilter}
             className="border border-[#2d2d2d] bg-[#111] px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#9a9080] hover:border-[#666] hover:text-[#e2d2af]"
           >
             Clear
           </button>
         </form>
+        </div>
       </div>
+
+      {mode === "encounters" && playerName && (
+        <div className="border border-[#2d2d2d] bg-[#111] px-3 py-2 text-xs uppercase tracking-[0.12em] text-[#9a9080]">
+          My account: <span className="text-[#e2d2af]">{playerName}</span> · {platform} · {shard}
+          {typeof resultMeta?.encountersScanned === "number" && (
+            <span className="ml-2 text-[#7f7768]">(encounters scanned: {resultMeta.encountersScanned})</span>
+          )}
+        </div>
+      )}
 
       {error && (
         <div className="border border-[#5e2a2a] bg-[#1a1010] p-3 text-sm text-[#e6b4b4]">
@@ -162,6 +304,11 @@ export function PubgClipsPanel() {
                 <p className="mt-2 text-[11px] uppercase tracking-[0.12em] text-[#9a9080]">
                   {clip.broadcaster_name} · {clip.creator_name}
                 </p>
+                {clip.encounterWith && (
+                  <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[#c59a54]">
+                    Encounter: {clip.encounterWith}
+                  </p>
+                )}
                 <p className="mt-1 text-[11px] text-[#7f7768]">
                   {clip.view_count.toLocaleString()} views · {formatRelativeTime(clip.created_at)}
                 </p>
