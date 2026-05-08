@@ -282,8 +282,6 @@ export function PubgMapOverlay({ map }: Props) {
 
   const categoryKeys = useMemo(() => {
     const keys = new Set<string>([
-      ...Object.keys(DEFAULT_CATEGORY_LABELS),
-      ...Object.keys(DEFAULT_MARKER_COLORS),
       ...Object.keys(categoryLabels),
       ...Object.keys(palette),
       ...editableMarkers.map((m) => m.type),
@@ -1188,42 +1186,6 @@ export function PubgMapOverlay({ map }: Props) {
           </p>
         </div>
       )}
-
-      {/* ── legend ── */}
-      <div className="border border-[#2d2d2d] bg-[#0e0e0e] px-4 py-3">
-        <p className="mb-2.5 text-[10px] uppercase tracking-[0.16em] text-[#5a5450]">Legend</p>
-        <div className="flex flex-wrap gap-6">
-          {categoryKeys.map((type) => (
-            <div key={type} className="flex items-center gap-2">
-              <span
-                className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
-                style={{
-                  border: `2px solid ${palette[type] ?? fallbackColorForCategory(type)}`,
-                  background: "transparent",
-                  color: palette[type] ?? fallbackColorForCategory(type)
-                }}
-              >
-                <MarkerIcon type={type} className="h-[70%] w-[70%]" />
-              </span>
-              <span className="text-xs text-[#9a9080]">{categoryLabels[type] ?? humanizeCategory(type)}</span>
-            </div>
-          ))}
-          <div className="flex items-center gap-2">
-            <span
-              className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
-              style={{
-                border: `2px solid #f5c842`,
-                background: "transparent",
-                boxShadow: `0 0 0 2px #fff, 0 0 6px 2px #f5c842`,
-                color: "#f5c842"
-              }}
-            >
-              <MarkerIcon type="selected" className="h-[70%] w-[70%]" />
-            </span>
-            <span className="text-xs text-[#9a9080]">Selected</span>
-          </div>
-        </div>
-      </div>
 
       {/* ── info panel ── */}
       <div className="border border-[#2d2d2d] bg-[#111] p-3">

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyTwitchEventSubSignature } from "@/lib/twitch";
+import stringSimilarity from "string-similarity";
 
 export const dynamic = "force-dynamic";
 const db = prisma as any;
@@ -64,6 +65,224 @@ function isFreshTimestamp(value: string) {
   if (Number.isNaN(ms)) return false;
   const ageMs = Math.abs(Date.now() - ms);
   return ageMs <= 10 * 60 * 1000;
+}
+
+function normalizeForLinking(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/^(ttv|tv|yt|youtube|twitch|tt|live|stream|gaming|gamer|plays|official)[\s._-]*/g, "")
+    .replace(/[\s._-]*(ttv|tv|yt|youtube|twitch|tt|live|stream|gaming|gamer|plays|official|tv)$/g, "")
+    .replace(/\d+$/, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function getCandidateShards(platform: string) {
+  if (platform === "xbox") return ["xbox-na", "xbox-eu", "xbox-as", "xbox-oc", "xbox-sa"];
+  if (platform === "psn") return ["psn-na", "psn-eu", "psn-as", "psn-oc", "psn-sa"];
+  if (platform === "kakao") return ["pc-kakao", "pc-krjp", "pc-as"];
+  return ["pc-na", "pc-eu", "pc-as", "pc-kakao", "pc-krjp", "pc-sa", "pc-oc"];
+}
+
+function getPubgApiKey() {
+  return process.env.PUBG_DEV_API ?? process.env.PUBG_API_KEY ?? "";
+}
+
+async function getPlayerWithMatches(shard: string, playerName: string) {
+  const apiKey = getPubgApiKey();
+  if (!apiKey) return null;
+
+  const response = await fetch(
+    `https://api.pubg.com/shards/${encodeURIComponent(shard)}/players?filter[playerNames]=${encodeURIComponent(playerName)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: "application/vnd.api+json"
+      },
+      cache: "no-store"
+    }
+  );
+
+  if (!response.ok) return null;
+  const payload = (await response.json()) as {
+    data?: Array<{ id: string; attributes?: { name?: string } }>;
+  };
+  const player = payload.data?.[0];
+  if (!player) return null;
+
+  return {
+    playerId: player.id,
+    playerName: player.attributes?.name ?? playerName
+  };
+}
+
+async function lookupPlayerAcrossShards(playerName: string, platform: string, preferredShard?: string | null) {
+  const shards = preferredShard
+    ? [preferredShard, ...getCandidateShards(platform).filter((s) => s !== preferredShard)]
+    : getCandidateShards(platform);
+
+  for (const shard of shards) {
+    const found = await getPlayerWithMatches(shard, playerName);
+    if (found) {
+      return {
+        shard,
+        playerId: found.playerId,
+        playerName: found.playerName,
+        verified: true
+      };
+    }
+  }
+
+  return null;
+}
+
+async function upsertIdentityLinkEvent(input: {
+  platform: string;
+  shard: string;
+  pubgNameNormalized: string;
+  pubgPlayerName: string;
+  twitchUserId: string;
+  twitchUserLogin: string;
+  twitchUserName: string;
+}) {
+  const dedupeKey = ["identity_map", input.platform, input.pubgNameNormalized, input.twitchUserId].join(":");
+
+  await db.pubgLinkEvent.upsert({
+    where: { dedupeKey },
+    create: {
+      dedupeKey,
+      eventType: "identity_map",
+      pubgNameRaw: input.pubgPlayerName,
+      pubgNameNormalized: input.pubgNameNormalized,
+      twitchUserId: input.twitchUserId,
+      twitchUserLogin: input.twitchUserLogin,
+      twitchUserName: input.twitchUserName,
+      shard: input.shard,
+      platform: input.platform
+    },
+    update: {
+      pubgNameRaw: input.pubgPlayerName,
+      pubgNameNormalized: input.pubgNameNormalized,
+      twitchUserLogin: input.twitchUserLogin,
+      twitchUserName: input.twitchUserName,
+      shard: input.shard,
+      platform: input.platform
+    }
+  });
+}
+
+async function maybeAutoLinkKnownPlayer(event: StreamOnlineEvent) {
+  const twitchUserId = event.broadcaster_user_id;
+  const twitchUserLogin = event.broadcaster_user_login;
+  const twitchUserName = event.broadcaster_user_name;
+  if (!twitchUserId || !twitchUserLogin || !twitchUserName) return null;
+
+  const loginNorm = normalizeForLinking(twitchUserLogin);
+  const displayNorm = normalizeForLinking(twitchUserName);
+  const prefixes = Array.from(new Set([loginNorm.slice(0, 3), displayNorm.slice(0, 3)].filter((p) => p.length >= 2)));
+  if (!prefixes.length) return null;
+
+  const rows = await db.pubgKnownPlayer.findMany({
+    where: {
+      OR: prefixes.flatMap((prefix) => [
+        { playerNameLower: { startsWith: prefix } },
+        { playerNameLower: { contains: prefix } }
+      ])
+    },
+    orderBy: [{ lastSeenAt: "desc" }, { seenCount: "desc" }],
+    take: 250
+  });
+
+  if (!rows.length) return null;
+
+  let best: { row: (typeof rows)[number]; similarity: number } | null = null;
+  let second: { row: (typeof rows)[number]; similarity: number } | null = null;
+  for (const row of rows) {
+    const normalized = normalizeForLinking(row.playerName);
+    if (!normalized || normalized.length < 4) continue;
+    const score = Math.max(
+      loginNorm ? stringSimilarity.compareTwoStrings(loginNorm, normalized) : 0,
+      displayNorm ? stringSimilarity.compareTwoStrings(displayNorm, normalized) : 0
+    );
+    if (score < 0.92) continue;
+
+    const candidate = { row, similarity: score };
+    if (!best || candidate.similarity > best.similarity) {
+      second = best;
+      best = candidate;
+    } else if (!second || candidate.similarity > second.similarity) {
+      second = candidate;
+    }
+  }
+
+  if (!best) return null;
+  if (second && best.similarity - second.similarity < 0.04) return null;
+
+  const resolved = await lookupPlayerAcrossShards(best.row.playerName, best.row.platform, best.row.shard).catch(() => null);
+  const normalizedPubg = normalizeForLinking(resolved?.playerName ?? best.row.playerName);
+  const playerId = resolved?.playerId ?? `unverified:${best.row.platform}:${best.row.shard}:${normalizedPubg}`;
+  const shard = resolved?.shard ?? best.row.shard;
+
+  await db.pubgStreamerIdentityLink.upsert({
+    where: {
+      twitchUserId_platform: {
+        twitchUserId,
+        platform: best.row.platform
+      }
+    },
+    create: {
+      twitchUserId,
+      twitchUserLogin,
+      twitchUserName,
+      platform: best.row.platform,
+      shard,
+      pubgPlayerId: playerId,
+      pubgPlayerName: resolved?.playerName ?? best.row.playerName,
+      pubgNameNormalized: normalizedPubg,
+      confidenceScore: Math.round(best.similarity * 100),
+      confidenceReasonsJson: JSON.stringify([
+        "eventsub_known_player",
+        `similarity_${Math.round(best.similarity * 100)}pct`,
+        resolved ? "verified_pubg_api" : "unverified_fallback"
+      ]),
+      source: resolved ? "eventsub_known_player" : "eventsub_known_player_unverified",
+      firstLinkedAt: new Date(),
+      lastLinkedAt: new Date()
+    },
+    update: {
+      twitchUserLogin,
+      twitchUserName,
+      shard,
+      pubgPlayerId: playerId,
+      pubgPlayerName: resolved?.playerName ?? best.row.playerName,
+      pubgNameNormalized: normalizedPubg,
+      confidenceScore: Math.round(best.similarity * 100),
+      confidenceReasonsJson: JSON.stringify([
+        "eventsub_known_player",
+        `similarity_${Math.round(best.similarity * 100)}pct`,
+        resolved ? "verified_pubg_api" : "unverified_fallback"
+      ]),
+      source: resolved ? "eventsub_known_player" : "eventsub_known_player_unverified",
+      lastLinkedAt: new Date()
+    }
+  });
+
+  await upsertIdentityLinkEvent({
+    platform: best.row.platform,
+    shard,
+    pubgNameNormalized: normalizedPubg,
+    pubgPlayerName: resolved?.playerName ?? best.row.playerName,
+    twitchUserId,
+    twitchUserLogin,
+    twitchUserName
+  });
+
+  return {
+    platform: best.row.platform,
+    shard,
+    pubgPlayerName: resolved?.playerName ?? best.row.playerName,
+    similarity: Math.round(best.similarity * 100),
+    verified: Boolean(resolved)
+  };
 }
 
 async function processStreamOnlineNotification(input: {
@@ -156,13 +375,23 @@ async function processStreamOnlineNotification(input: {
       }
     });
 
+    const autoLink = await maybeAutoLinkKnownPlayer(event).catch((error) => {
+      console.warn("[twitch-eventsub] known-player auto-link failed", {
+        broadcasterId: event.broadcaster_user_id,
+        broadcasterLogin: event.broadcaster_user_login,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return null;
+    });
+
     console.info("[twitch-eventsub] stream.online processed", {
       messageId,
       subscriptionId,
       broadcasterId: event.broadcaster_user_id,
       broadcasterLogin: event.broadcaster_user_login,
       streamId,
-      streamStartAt: streamStartAt.toISOString()
+      streamStartAt: streamStartAt.toISOString(),
+      autoLink
     });
     await writeEventSubRunLog({
       status: "ok",
@@ -175,6 +404,7 @@ async function processStreamOnlineNotification(input: {
         broadcasterLogin: event.broadcaster_user_login,
         streamId,
         streamStartAt: streamStartAt.toISOString(),
+        autoLink,
         backgroundProcessed: true
       }
     });
