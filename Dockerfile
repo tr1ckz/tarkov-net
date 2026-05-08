@@ -24,5 +24,8 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/prisma ./prisma
 
+# Verify schema is present at build time — fail loudly if not
+RUN test -f /app/prisma/schema.prisma || (echo "ERROR: prisma/schema.prisma missing from image" && exit 1)
+
 EXPOSE 3000
-CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy --schema /app/prisma/schema.prisma && npm run start"]
+CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy --schema /app/prisma/schema.prisma && node_modules/.bin/next start"]
