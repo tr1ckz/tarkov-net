@@ -260,14 +260,22 @@ export async function lookupPlayerAcrossShards(options: {
     : candidates;
 
   for (const shard of orderedShards) {
-    const found = await getPlayerWithMatches(shard, playerName);
-    if (found) {
-      return {
-        shard,
-        playerId: found.playerId,
-        playerName: found.playerName,
-        matchCount: found.matchIds.length
-      };
+    try {
+      const found = await getPlayerWithMatches(shard, playerName);
+      if (found) {
+        return {
+          shard,
+          playerId: found.playerId,
+          playerName: found.playerName,
+          matchCount: found.matchIds.length
+        };
+      }
+    } catch (error) {
+      // Log shard failure but continue to next candidate
+      // 404 means player not on this shard, other errors (5xx, network) should be retried on next shard
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.warn(`[pubg-api] player lookup failed on shard ${shard}: ${errorMsg}`);
+      continue;
     }
   }
 
@@ -313,9 +321,11 @@ export async function getRecentEncounterNames(options: {
     return false;
   };
 
-  const player = await getPlayerWithMatches(shard, playerName);
+  const player = await getPlayerWithMatches(shard, playerName).catch((error) => {
+    console.warn("[pubg-api] player not found for encounter extraction", { shard, playerName, error: error instanceof Error ? error.message : String(error) });
+    return null;
+  });
   if (!player) {
-    console.warn("[pubg-api] player not found for encounter extraction", { shard, playerName });
     return [];
   }
 

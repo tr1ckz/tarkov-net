@@ -444,8 +444,13 @@ export async function GET(request: Request) {
           const distinctTop = !secondMatch || topMatch.score - secondMatch.score >= 20;
           if (isHighConfidenceIdentityMatch(topMatch) && distinctTop) {
             if (!playerIdentityCache.has(encounter.name)) {
-              const resolvedEncounterPlayer = await getPlayerWithMatches(resolvedPlayer.shard, encounter.name);
-              playerIdentityCache.set(encounter.name, resolvedEncounterPlayer);
+              try {
+                const resolvedEncounterPlayer = await getPlayerWithMatches(resolvedPlayer.shard, encounter.name);
+                playerIdentityCache.set(encounter.name, resolvedEncounterPlayer);
+              } catch (error) {
+                console.warn(`[clips] Failed to resolve encounter player ${encounter.name} on shard ${resolvedPlayer.shard}:`, error instanceof Error ? error.message : String(error));
+                playerIdentityCache.set(encounter.name, null);
+              }
             }
 
             const resolvedEncounterPlayer = playerIdentityCache.get(encounter.name);
