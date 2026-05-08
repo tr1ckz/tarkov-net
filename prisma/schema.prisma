@@ -1,0 +1,106 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String     @id @default(cuid())
+  email         String     @unique
+  passwordHash  String
+  displayName   String
+  gameName      String?
+  tarkovProfileId String?
+  tarkovProfileMode String?
+  tarkovPveProfileId String?
+  tarkovArenaProfileId String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  favorites     Favorite[]
+}
+
+model Favorite {
+  id         String   @id @default(cuid())
+  userId     String
+  itemId     String
+  itemSlug   String
+  itemName   String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, itemId])
+  @@index([userId])
+}
+
+model CachedItem {
+  id             String             @id
+  name           String
+  shortName      String
+  normalizedName String
+  iconLink       String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  prices         CachedItemPrice[]
+  snapshots      CachedPricePoint[]
+}
+
+model CachedItemPrice {
+  id               String      @id @default(cuid())
+  itemId           String
+  gameMode         String
+  avg24hPrice      Int?
+  lastLowPrice     Int?
+  basePrice        Int?
+  bestTraderName   String?
+  bestTraderPrice  Int?
+  fetchedAt        DateTime    @default(now())
+  item             CachedItem  @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, gameMode])
+  @@index([gameMode])
+  @@index([itemId])
+}
+
+model CachedPricePoint {
+  id           String      @id @default(cuid())
+  itemId       String
+  gameMode     String
+  avg24hPrice  Int?
+  lastLowPrice Int?
+  capturedAt   DateTime    @default(now())
+  item         CachedItem  @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId, gameMode, capturedAt])
+  @@index([gameMode, capturedAt])
+}
+
+model CacheState {
+  key              String    @id
+  lastRefreshAt    DateTime?
+  lastFullSyncAt   DateTime?
+  lastSnapshotAt   DateTime?
+  refreshInProgress Boolean  @default(false)
+  refreshStartedAt DateTime?
+  updatedAt        DateTime  @updatedAt
+}
+
+model CachedRaidIntel {
+  id                  String   @id @default(cuid())
+  gameMode            String   @unique
+  reportedMap         String?
+  reportedServer      String?
+  reportedTime        String?
+  reportedTimeType    String?
+  reportCount         Int?
+  goonsMap            String?
+  goonsTimestamp      String?
+  raidDurationMinutes Int?
+  fetchedAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([gameMode, fetchedAt])
+}

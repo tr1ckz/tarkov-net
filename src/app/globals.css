@@ -1,0 +1,41 @@
+@import url("https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Rajdhani:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* #0e0e0e */ --background: 0 0% 5.5%;
+  /* #e2d2af */ --foreground: 41 47% 79%;
+  /* #1a1a1a */ --card: 0 0% 10%;
+  /* #e2d2af */ --card-foreground: 41 47% 79%;
+  /* #49533a */ --primary: 84 18% 28%;
+  /* #e2d2af */ --primary-foreground: 41 47% 79%;
+  /* #151515 */ --secondary: 0 0% 8%;
+  /* dim gold */ --secondary-foreground: 41 30% 68%;
+  /* #1a1a1a */ --muted: 0 0% 10%;
+  /* dim gold */ --muted-foreground: 41 18% 52%;
+  /* #5e6a4b */ --accent: 83 17% 35%;
+  /* #e2d2af */ --accent-foreground: 41 47% 79%;
+  /* #a32a2a */ --destructive: 0 59% 40%;
+  /* #e2d2af */ --destructive-foreground: 41 47% 79%;
+  /* #2d2d2d */ --border: 0 0% 18%;
+  /* #111111 */ --input: 0 0% 7%;
+}
+
+* {
+  @apply border-border;
+}
+
+body {
+  background-color: #0e0e0e;
+  color: #e2d2af;
+  font-family: Rajdhani, ui-sans-serif, system-ui;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+}
+
+::selection {
+  background: rgba(226, 210, 175, 0.25);
+}

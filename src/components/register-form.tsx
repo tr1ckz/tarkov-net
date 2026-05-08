@@ -1,0 +1,70 @@
+"use client";
+
+import Link from "next/link";
+import { FormEvent, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
+export function RegisterForm() {
+  const [displayName, setDisplayName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+
+  const onSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError("");
+
+    startTransition(async () => {
+      const response = await fetch("/api/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ displayName, email, password })
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({ error: "Registration failed" }));
+        setError(data.error ?? "Registration failed");
+        return;
+      }
+
+      router.push("/login");
+    });
+  };
+
+  return (
+    <form onSubmit={onSubmit} className="space-y-4">
+      <Input
+        value={displayName}
+        onChange={(event) => setDisplayName(event.target.value)}
+        placeholder="Display Name"
+        required
+      />
+      <Input
+        type="email"
+        value={email}
+        onChange={(event) => setEmail(event.target.value)}
+        placeholder="Email"
+        required
+      />
+      <Input
+        type="password"
+        value={password}
+        onChange={(event) => setPassword(event.target.value)}
+        placeholder="Password"
+        minLength={8}
+        required
+      />
+      {error && <p className="text-sm text-red-400">{error}</p>}
+      <Button type="submit" className="w-full" disabled={pending}>
+        {pending ? "Creating" : "Create account"}
+      </Button>
+      <p className="text-center text-sm text-muted-foreground">
+        Already have access? <Link href="/login" className="text-primary hover:underline">Login</Link>
+      </p>
+    </form>
+  );
+}
