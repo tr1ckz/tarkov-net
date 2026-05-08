@@ -937,46 +937,6 @@ export const pubgMaps: PubgMapIntel[] = [
         notes: "Main vehicle rotation path cutting through the map center."
       }
     ]
-  },
-  {
-    slug: "haven",
-    name: "Haven",
-    mapImage: "/pubg.avif",
-    sizeKm: "1x1",
-    terrain: "Industrial urban night environment with vertical lanes and tight corridors",
-    bestFor: "Duo-heavy tactical squads that excel at close-quarters clearing",
-    hotDrops: ["Industrial Zone", "Overpass", "Coal Yard", "Residential Blocks"],
-    vehicleRoutes: ["Peripheral street loop", "Canal-side lane", "Overpass transition"],
-    priorityCompounds: ["Warehouse rooftops", "Overpass hard cover", "Canal-side buildings"],
-    midgameFocus: "Own one vertical power position and clear block-by-block with utility before peeking.",
-    endgameNotes: "Haven endings are unforgiving; force trades with flashes and never overextend solo.",
-    secretRooms: [],
-    markers: [
-      {
-        id: "haven-industrial",
-        label: "Industrial Zone",
-        type: "hot-drop",
-        x: 48,
-        y: 50,
-        notes: "High conflict opener with abundant close-range weapon density."
-      },
-      {
-        id: "haven-overpass",
-        label: "Overpass",
-        type: "hot-drop",
-        x: 60,
-        y: 40,
-        notes: "Strong vertical control, but vulnerable to coordinated flanks."
-      },
-      {
-        id: "haven-street-route",
-        label: "Street Rotation Route",
-        type: "vehicle-route",
-        x: 43,
-        y: 58,
-        notes: "Fast micro-rotation lane between industrial and residential sectors."
-      }
-    ]
   }
 ];
 
