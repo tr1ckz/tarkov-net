@@ -44,11 +44,11 @@ type TwitchClipsResponse = {
 let tokenState: TwitchTokenState | null = null;
 
 function getCredentials() {
-  const clientId = process.env.TWITCH_CLIENT_ID;
-  const clientSecret = process.env.TWITCH_CLIENT_SECRET;
+  const clientId = process.env.TWITCH_CLIENT_ID ?? process.env.TWITCH_CLIENT;
+  const clientSecret = process.env.TWITCH_CLIENT_SECRET ?? process.env.TWITCH_SECRET;
 
   if (!clientId || !clientSecret) {
-    throw new Error("Missing TWITCH_CLIENT_ID or TWITCH_CLIENT_SECRET");
+    throw new Error("Missing Twitch credentials (TWITCH_CLIENT_ID/TWITCH_CLIENT_SECRET or TWITCH_CLIENT/TWITCH_SECRET)");
   }
 
   return { clientId, clientSecret };

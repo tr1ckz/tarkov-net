@@ -36,13 +36,13 @@ export async function GET(request: Request) {
     const message = error instanceof Error ? error.message : "Failed to load clips";
 
     // Missing credentials is a setup issue, return a clear message.
-    if (message.includes("TWITCH_CLIENT_ID") || message.includes("TWITCH_CLIENT_SECRET")) {
+    if (message.toLowerCase().includes("missing twitch credentials")) {
       return NextResponse.json(
         {
           clips: [],
           source: streamer ? "streamer" : "pubg",
           error: "Twitch credentials are not configured",
-          setup: "Set TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET in your .env"
+          setup: "Set TWITCH_CLIENT_ID/TWITCH_CLIENT_SECRET or TWITCH_CLIENT/TWITCH_SECRET in your .env"
         },
         { status: 500 }
       );
