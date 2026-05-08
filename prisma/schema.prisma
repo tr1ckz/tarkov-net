@@ -312,3 +312,64 @@ model PubgKnownPlayer {
   @@index([platform, shard])
   @@index([lastSeenAt])
 }
+
+model PubgStreamerMatch {
+  id              String   @id @default(cuid())
+  twitchUserId    String
+  twitchUserLogin String
+  twitchUserName  String
+  platform        String
+  shard           String
+  pubgPlayerId    String
+  pubgPlayerName  String
+  matchId         String
+  matchCreatedAt  DateTime?
+  mapName         String?
+  gameMode        String?
+  telemetryUrl    String?
+  source          String   @default("eventsub_stream_online")
+  indexedAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([twitchUserId, matchId], name: "twitchUserId_matchId")
+  @@index([twitchUserId, indexedAt])
+  @@index([matchCreatedAt])
+}
+
+model PubgStreamerVod {
+  id              String   @id @default(cuid())
+  twitchUserId    String
+  twitchUserLogin String
+  twitchUserName  String
+  videoId         String   @unique
+  title           String
+  url             String
+  thumbnailUrl    String?
+  durationSeconds Int
+  createdAtTwitch DateTime?
+  publishedAtTwitch DateTime?
+  indexedAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([twitchUserId, createdAtTwitch])
+}
+
+model PubgMatchVodLink {
+  id                String   @id @default(cuid())
+  twitchUserId      String
+  twitchUserLogin   String
+  twitchUserName    String
+  matchId           String
+  videoId           String
+  matchCreatedAt    DateTime?
+  vodStartedAt      DateTime?
+  vodOffsetSeconds  Int      @default(0)
+  deltaSeconds      Int      @default(0)
+  confidenceTag     String   @default("unknown")
+  linkedAt          DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([twitchUserId, matchId], name: "twitchUserId_matchLink")
+  @@index([videoId])
+  @@index([linkedAt])
+}

@@ -22,9 +22,14 @@ type DiscoveryAnalyticsResponse = {
     newIndexedPlayersInRange: number;
     seenPlayerObservationsInRange: number;
     activeContributorsInRange: number;
+    indexedMatchesInRange: number;
+    indexedVodsInRange: number;
+    mappedMatchVodLinksInRange: number;
   };
   dailyNewPlayers: Array<{ day: string; count: number }>;
   dailyObservations: Array<{ day: string; count: number }>;
+  dailyIndexedMatches: Array<{ day: string; count: number }>;
+  dailyMappedLinks: Array<{ day: string; count: number }>;
   shardBreakdown: Array<{ platform: string; shard: string; count: number }>;
   streamerContribution: Array<{
     twitchUserId: string;
@@ -38,6 +43,7 @@ type DiscoveryAnalyticsResponse = {
     status: "ok" | "empty" | "error";
     playerName: string | null;
     seenIndexing: Record<string, unknown> | null;
+    matchVodIndexing: Record<string, unknown> | null;
   }>;
 };
 
@@ -48,6 +54,9 @@ type ProcessResponse = {
   totalDiscoveredNew: number;
   totalObservations: number;
   totalUpserted: number;
+  totalMatchesIndexed: number;
+  totalVodsIndexed: number;
+  totalMatchVodLinks: number;
 };
 
 export default function PubgDiscoveryDashboardPage() {
@@ -114,16 +123,27 @@ export default function PubgDiscoveryDashboardPage() {
   }, [fetchData]);
 
   const chartRows = useMemo(() => {
-    if (!data) return [] as Array<{ day: string; newPlayers: number; observations: number }>;
+    if (!data) return [] as Array<{ day: string; newPlayers: number; observations: number; indexedMatches: number; mappedLinks: number }>;
 
     const observationMap = new Map(data.dailyObservations.map((row) => [row.day, row.count]));
     const newPlayersMap = new Map(data.dailyNewPlayers.map((row) => [row.day, row.count]));
+    const indexedMatchesMap = new Map(data.dailyIndexedMatches.map((row) => [row.day, row.count]));
+    const mappedLinksMap = new Map(data.dailyMappedLinks.map((row) => [row.day, row.count]));
 
-    const allDays = Array.from(new Set([...observationMap.keys(), ...newPlayersMap.keys()])).sort();
+    const allDays = Array.from(
+      new Set([
+        ...observationMap.keys(),
+        ...newPlayersMap.keys(),
+        ...indexedMatchesMap.keys(),
+        ...mappedLinksMap.keys(),
+      ])
+    ).sort();
     return allDays.map((day) => ({
       day,
       newPlayers: newPlayersMap.get(day) ?? 0,
       observations: observationMap.get(day) ?? 0,
+      indexedMatches: indexedMatchesMap.get(day) ?? 0,
+      mappedLinks: mappedLinksMap.get(day) ?? 0,
     }));
   }, [data]);
 
@@ -178,17 +198,21 @@ export default function PubgDiscoveryDashboardPage() {
       {processResult && (
         <div className="rounded border border-[#2a2010] bg-[#12100a] p-3 text-xs">
           Last background run: processed {processResult.processed}, indexed runs {processResult.indexedRuns},
-          new players {processResult.totalDiscoveredNew}, observations {processResult.totalObservations}
+          new players {processResult.totalDiscoveredNew}, observations {processResult.totalObservations},
+          matches {processResult.totalMatchesIndexed}, vods {processResult.totalVodsIndexed}, links {processResult.totalMatchVodLinks}
         </div>
       )}
 
       {data && !loading && (
         <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-8">
             <MetricCard label="Indexed Players" value={data.summary.totalIndexedPlayers.toLocaleString()} />
             <MetricCard label="New In Window" value={data.summary.newIndexedPlayersInRange.toLocaleString()} />
             <MetricCard label="Observations" value={data.summary.seenPlayerObservationsInRange.toLocaleString()} />
             <MetricCard label="Contributors" value={data.summary.activeContributorsInRange.toLocaleString()} />
+            <MetricCard label="Indexed Matches" value={data.summary.indexedMatchesInRange.toLocaleString()} />
+            <MetricCard label="Indexed VODs" value={data.summary.indexedVodsInRange.toLocaleString()} />
+            <MetricCard label="Mapped Match-VOD" value={data.summary.mappedMatchVodLinksInRange.toLocaleString()} />
             <MetricCard label="Window" value={`${data.summary.days} days`} />
             <MetricCard label="Since" value={new Date(data.summary.since).toLocaleDateString()} />
           </div>
@@ -216,6 +240,8 @@ export default function PubgDiscoveryDashboardPage() {
                   <Legend wrapperStyle={{ color: "#9a9080", fontSize: 11, paddingTop: 8 }} />
                   <Bar dataKey="newPlayers" name="New Indexed Players" fill="#4a7c4e" />
                   <Bar dataKey="observations" name="Seen-Player Observations" fill="#8b6b3a" />
+                  <Bar dataKey="indexedMatches" name="Indexed Matches" fill="#3a6d8b" />
+                  <Bar dataKey="mappedLinks" name="Mapped Match->VOD" fill="#7d4c8f" />
                 </BarChart>
               </ResponsiveContainer>
             )}

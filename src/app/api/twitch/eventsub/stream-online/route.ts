@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyTwitchEventSubSignature } from "@/lib/twitch";
 import { autoLinkPubgStreamerIdentity } from "@/lib/pubg-streamer-linking";
+import { indexStreamerMatchesAndVods } from "@/lib/pubg-match-vod-indexer";
 import {
   clearPubgCallContext,
   indexSeenPlayersFromRecentMatches,
@@ -209,11 +210,35 @@ async function processStreamOnlineNotification(input: {
       scannedMatches: number;
       namesFound: number;
       upserted: number;
+      discoveredNew: number;
+      observationsLogged: number;
       matchFetchErrors: number;
+    } | null = null;
+    let matchVodIndexing: {
+      indexed: boolean;
+      reason: string;
+      matchesScanned: number;
+      matchesIndexed: number;
+      vodsIndexed: number;
+      linksMapped: number;
+      matchErrors: number;
     } | null = null;
 
     const resolvedIdentity = getResolvedIdentityForSeenIndexing(autoLink);
     if (resolvedIdentity) {
+      const identityLink = await db.pubgStreamerIdentityLink.findUnique({
+        where: {
+          twitchUserId_platform: {
+            twitchUserId,
+            platform: resolvedIdentity.platform,
+          }
+        },
+        select: {
+          pubgPlayerId: true,
+          pubgPlayerName: true,
+        }
+      });
+
       seenIndexing = await indexSeenPlayersFromRecentMatches({
         platform: resolvedIdentity.platform,
         shard: resolvedIdentity.shard,
@@ -237,6 +262,32 @@ async function processStreamOnlineNotification(input: {
         });
         return null;
       });
+
+      if (identityLink?.pubgPlayerId) {
+        matchVodIndexing = await indexStreamerMatchesAndVods({
+          identity: {
+            twitchUserId,
+            twitchUserLogin,
+            twitchUserName,
+            platform: resolvedIdentity.platform,
+            shard: resolvedIdentity.shard,
+            pubgPlayerId: identityLink.pubgPlayerId,
+            pubgPlayerName: identityLink.pubgPlayerName || resolvedIdentity.pubgPlayerName,
+          },
+          maxMatches: Number(process.env.PUBG_EVENTSUB_MATCH_INDEX_MATCHES ?? "8"),
+          maxVods: Number(process.env.PUBG_EVENTSUB_VOD_INDEX_LIMIT ?? "12"),
+        }).catch((error) => {
+          console.warn("[twitch-eventsub] match-vod indexing failed", {
+            broadcasterId: twitchUserId,
+            broadcasterLogin: twitchUserLogin,
+            platform: resolvedIdentity.platform,
+            shard: resolvedIdentity.shard,
+            pubgPlayerId: identityLink.pubgPlayerId,
+            error: error instanceof Error ? error.message : String(error)
+          });
+          return null;
+        });
+      }
     }
 
     console.info("[twitch-eventsub] stream.online processed", {
@@ -247,7 +298,8 @@ async function processStreamOnlineNotification(input: {
       streamId,
       streamStartAt: streamStartAt.toISOString(),
       autoLink,
-      seenIndexing
+      seenIndexing,
+      matchVodIndexing
     });
     await writeEventSubRunLog({
       status: "ok",
@@ -262,6 +314,7 @@ async function processStreamOnlineNotification(input: {
         streamStartAt: streamStartAt.toISOString(),
         autoLink,
         seenIndexing,
+        matchVodIndexing,
         backgroundProcessed: true
       }
     });

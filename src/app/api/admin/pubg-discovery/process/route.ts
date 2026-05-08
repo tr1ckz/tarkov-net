@@ -8,6 +8,7 @@ import {
   setPubgCallContext,
   type PubgPlatform,
 } from "@/lib/pubg-api";
+import { indexStreamerMatchesAndVods } from "@/lib/pubg-match-vod-indexer";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +60,7 @@ export async function POST(request: Request) {
       twitchUserName: true,
       platform: true,
       shard: true,
+      pubgPlayerId: true,
       pubgPlayerName: true,
     }
   });
@@ -72,6 +74,9 @@ export async function POST(request: Request) {
   let totalDiscoveredNew = 0;
   let totalObservations = 0;
   let totalUpserted = 0;
+  let totalMatchesIndexed = 0;
+  let totalVodsIndexed = 0;
+  let totalMatchVodLinks = 0;
   const results: Array<{
     identityLinkId: string;
     twitchUserLogin: string;
@@ -80,6 +85,9 @@ export async function POST(request: Request) {
     discoveredNew?: number;
     upserted?: number;
     observationsLogged?: number;
+    matchesIndexed?: number;
+    vodsIndexed?: number;
+    linksMapped?: number;
   }> = [];
 
   setPubgCallContext("admin_discovery_processor");
@@ -125,6 +133,28 @@ export async function POST(request: Request) {
       totalObservations += run.observationsLogged;
       totalUpserted += run.upserted;
 
+      const matchVod = await indexStreamerMatchesAndVods({
+        identity: {
+          twitchUserId: row.twitchUserId,
+          twitchUserLogin: row.twitchUserLogin,
+          twitchUserName: row.twitchUserName,
+          platform,
+          shard: row.shard,
+          pubgPlayerId: row.pubgPlayerId,
+          pubgPlayerName: row.pubgPlayerName,
+        },
+        maxMatches,
+        maxVods: Number(process.env.PUBG_EVENTSUB_VOD_INDEX_LIMIT ?? "12"),
+      }).catch(() => {
+        return null;
+      });
+
+      if (matchVod) {
+        totalMatchesIndexed += matchVod.matchesIndexed;
+        totalVodsIndexed += matchVod.vodsIndexed;
+        totalMatchVodLinks += matchVod.linksMapped;
+      }
+
       results.push({
         identityLinkId: row.id,
         twitchUserLogin: row.twitchUserLogin,
@@ -132,6 +162,9 @@ export async function POST(request: Request) {
         discoveredNew: run.discoveredNew,
         upserted: run.upserted,
         observationsLogged: run.observationsLogged,
+        matchesIndexed: matchVod?.matchesIndexed ?? 0,
+        vodsIndexed: matchVod?.vodsIndexed ?? 0,
+        linksMapped: matchVod?.linksMapped ?? 0,
       });
     }
   } finally {
@@ -151,6 +184,9 @@ export async function POST(request: Request) {
         totalDiscoveredNew,
         totalObservations,
         totalUpserted,
+        totalMatchesIndexed,
+        totalVodsIndexed,
+        totalMatchVodLinks,
         results,
       }),
     }
@@ -163,6 +199,9 @@ export async function POST(request: Request) {
     totalDiscoveredNew,
     totalObservations,
     totalUpserted,
+    totalMatchesIndexed,
+    totalVodsIndexed,
+    totalMatchVodLinks,
     results,
   });
 }

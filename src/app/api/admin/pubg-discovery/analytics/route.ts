@@ -52,8 +52,13 @@ export async function GET(request: Request) {
     newPlayersInRangeRows,
     observationsInRangeRows,
     contributorsInRangeRows,
+    indexedMatchesInRangeRows,
+    indexedVodsInRangeRows,
+    mappedLinksInRangeRows,
     dailyNewPlayers,
     dailyObservations,
+    dailyIndexedMatches,
+    dailyMappedLinks,
     shardBreakdown,
     streamerContribution,
     recentDiscoveryRuns
@@ -70,6 +75,21 @@ export async function GET(request: Request) {
       FROM "PubgLinkEvent"
       WHERE "eventType" = 'seen_player_discovery' AND "createdAt" >= ${since}
     `,
+    prisma.$queryRaw<CountRow[]>`
+      SELECT COUNT(*) as count
+      FROM "PubgStreamerMatch"
+      WHERE "indexedAt" >= ${since}
+    `,
+    prisma.$queryRaw<CountRow[]>`
+      SELECT COUNT(*) as count
+      FROM "PubgStreamerVod"
+      WHERE "indexedAt" >= ${since}
+    `,
+    prisma.$queryRaw<CountRow[]>`
+      SELECT COUNT(*) as count
+      FROM "PubgMatchVodLink"
+      WHERE "linkedAt" >= ${since}
+    `,
     prisma.$queryRaw<DayCountRow[]>`
       SELECT strftime('%Y-%m-%d', "firstSeenAt") as day, COUNT(*) as count
       FROM "PubgKnownPlayer"
@@ -82,6 +102,20 @@ export async function GET(request: Request) {
       FROM "PubgLinkEvent"
       WHERE "eventType" = 'seen_player_discovery' AND "createdAt" >= ${since}
       GROUP BY strftime('%Y-%m-%d', "createdAt")
+      ORDER BY day ASC
+    `,
+    prisma.$queryRaw<DayCountRow[]>`
+      SELECT strftime('%Y-%m-%d', "indexedAt") as day, COUNT(*) as count
+      FROM "PubgStreamerMatch"
+      WHERE "indexedAt" >= ${since}
+      GROUP BY strftime('%Y-%m-%d', "indexedAt")
+      ORDER BY day ASC
+    `,
+    prisma.$queryRaw<DayCountRow[]>`
+      SELECT strftime('%Y-%m-%d', "linkedAt") as day, COUNT(*) as count
+      FROM "PubgMatchVodLink"
+      WHERE "linkedAt" >= ${since}
+      GROUP BY strftime('%Y-%m-%d', "linkedAt")
       ORDER BY day ASC
     `,
     prisma.$queryRaw<ShardBreakdownRow[]>`
@@ -128,6 +162,9 @@ export async function GET(request: Request) {
     newIndexedPlayersInRange: normalizeCount(newPlayersInRangeRows[0]?.count),
     seenPlayerObservationsInRange: normalizeCount(observationsInRangeRows[0]?.count),
     activeContributorsInRange: normalizeCount(contributorsInRangeRows[0]?.count),
+    indexedMatchesInRange: normalizeCount(indexedMatchesInRangeRows[0]?.count),
+    indexedVodsInRange: normalizeCount(indexedVodsInRangeRows[0]?.count),
+    mappedMatchVodLinksInRange: normalizeCount(mappedLinksInRangeRows[0]?.count),
   };
 
   return NextResponse.json({
@@ -137,6 +174,14 @@ export async function GET(request: Request) {
       count: normalizeCount(row.count),
     })),
     dailyObservations: dailyObservations.map((row) => ({
+      day: row.day ?? "unknown",
+      count: normalizeCount(row.count),
+    })),
+    dailyIndexedMatches: dailyIndexedMatches.map((row) => ({
+      day: row.day ?? "unknown",
+      count: normalizeCount(row.count),
+    })),
+    dailyMappedLinks: dailyMappedLinks.map((row) => ({
       day: row.day ?? "unknown",
       count: normalizeCount(row.count),
     })),
@@ -154,12 +199,15 @@ export async function GET(request: Request) {
     })),
     recentEventSubRuns: recentDiscoveryRuns.map((run) => {
       let seenIndexing: Record<string, unknown> | null = null;
+      let matchVodIndexing: Record<string, unknown> | null = null;
       if (run.metadataJson) {
         try {
           const parsed = JSON.parse(run.metadataJson) as Record<string, unknown>;
           seenIndexing = (parsed.seenIndexing as Record<string, unknown> | null) ?? null;
+          matchVodIndexing = (parsed.matchVodIndexing as Record<string, unknown> | null) ?? null;
         } catch {
           seenIndexing = null;
+          matchVodIndexing = null;
         }
       }
       return {
@@ -167,6 +215,7 @@ export async function GET(request: Request) {
         status: run.status,
         playerName: run.playerName,
         seenIndexing,
+        matchVodIndexing,
       };
     })
   });

@@ -12,6 +12,7 @@ type PubgPlayerResponse = {
 
 type PubgMatchResponse = {
   data?: {
+    id?: string;
     attributes?: {
       createdAt?: string;
       mapName?: string;
@@ -65,6 +66,14 @@ export type PubgEncounterEvent = {
 };
 
 export type PubgPlatform = "steam" | "xbox" | "psn" | "kakao";
+
+export type PubgMatchSummary = {
+  matchId: string;
+  createdAt: string | null;
+  mapName: string | null;
+  gameMode: string | null;
+  telemetryUrl: string | null;
+};
 
 // Async context key for propagating triggeredBy through the call stack
 const triggeredByStorage = new Map<string, string>();
@@ -289,6 +298,22 @@ export async function getMatchTelemetryUrl(shard: string, matchId: string) {
 
   const telemetry = payload.included?.find((entry) => entry.type === "asset")?.attributes?.URL;
   return telemetry ?? null;
+}
+
+export async function getMatchSummary(shard: string, matchId: string): Promise<PubgMatchSummary> {
+  const payload = await pubgGet<PubgMatchResponse>(
+    `/shards/${encodeURIComponent(shard)}/matches/${encodeURIComponent(matchId)}`
+  );
+
+  const telemetryUrl = payload.included?.find((entry) => entry.type === "asset")?.attributes?.URL ?? null;
+
+  return {
+    matchId,
+    createdAt: payload.data?.attributes?.createdAt ?? null,
+    mapName: payload.data?.attributes?.mapName ?? null,
+    gameMode: payload.data?.attributes?.gameMode ?? null,
+    telemetryUrl,
+  };
 }
 
 export async function getMatchParticipantNames(shard: string, matchId: string) {
