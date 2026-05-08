@@ -23,6 +23,13 @@ type MapCalibration = {
 
 type CalibrationOverrides = Partial<Record<PubgMapIntel["slug"], MapCalibration>>;
 
+type RenderBox = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
 const MAP_CALIBRATION: Partial<Record<PubgMapIntel["slug"], MapCalibration>> = {
   sanhok: { xOffset: 2.2, yOffset: 2.3, xScale: 95.4, yScale: 95.0 },
   miramar: { xOffset: 1.4, yOffset: 1.3, xScale: 97.2, yScale: 97.1 },
@@ -79,6 +86,30 @@ const MIN_ZOOM = 1;
 const MAX_ZOOM = 6;
 const ZOOM_STEP = 0.18;
 
+function computeRenderBox(containerWidth: number, containerHeight: number, imageRatio: number): RenderBox {
+  const containerRatio = containerWidth / containerHeight;
+
+  if (containerRatio > imageRatio) {
+    const height = containerHeight;
+    const width = height * imageRatio;
+    return {
+      left: (containerWidth - width) / 2,
+      top: 0,
+      width,
+      height,
+    };
+  }
+
+  const width = containerWidth;
+  const height = width / imageRatio;
+  return {
+    left: 0,
+    top: (containerHeight - height) / 2,
+    width,
+    height,
+  };
+}
+
 export function PubgMapOverlay({ map }: Props) {
   const [activeTypes, setActiveTypes] = useState<Record<PubgMapMarker["type"], boolean>>({
     "hot-drop": true,
@@ -95,6 +126,8 @@ export function PubgMapOverlay({ map }: Props) {
     calibratedX: number;
     calibratedY: number;
   } | null>(null);
+  const [renderBox, setRenderBox] = useState<RenderBox>({ left: 0, top: 0, width: 1, height: 1 });
+  const [imageRatio, setImageRatio] = useState(1);
 
   // pan/zoom state
   const [zoom, setZoom] = useState(1);
@@ -144,6 +177,15 @@ export function PubgMapOverlay({ map }: Props) {
 
   const activeMarker = visibleMarkers.find((m) => m.id === activeMarkerId) ?? null;
 
+  const recomputeRenderBox = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const width = el.clientWidth;
+    const height = el.clientHeight;
+    if (width <= 0 || height <= 0) return;
+    setRenderBox(computeRenderBox(width, height, imageRatio));
+  }, [imageRatio]);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const urlAdmin = params.get("admin") === "1";
@@ -156,6 +198,10 @@ export function PubgMapOverlay({ map }: Props) {
     setCalibration(overrides[map.slug] ?? getBaseCalibration(map.slug));
     setCapturedPoint(null);
   }, [map.slug]);
+
+  useEffect(() => {
+    recomputeRenderBox();
+  }, [recomputeRenderBox, zoom]);
 
   function persistCalibration(nextCalibration: MapCalibration) {
     const overrides = readOverrides();
@@ -236,8 +282,10 @@ export function PubgMapOverlay({ map }: Props) {
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect || rect.width <= 0 || rect.height <= 0) return;
 
-      const calibratedX = clampPercent(((e.clientX - rect.left - pan.x) / (zoom * rect.width)) * 100);
-      const calibratedY = clampPercent(((e.clientY - rect.top - pan.y) / (zoom * rect.height)) * 100);
+      const localX = (e.clientX - rect.left - pan.x) / zoom;
+      const localY = (e.clientY - rect.top - pan.y) / zoom;
+      const calibratedX = clampPercent(((localX - renderBox.left) / Math.max(1, renderBox.width)) * 100);
+      const calibratedY = clampPercent(((localY - renderBox.top) / Math.max(1, renderBox.height)) * 100);
       const raw = removeCalibration(calibratedX, calibratedY, calibration);
 
       const captured = {
@@ -254,7 +302,7 @@ export function PubgMapOverlay({ map }: Props) {
         // ignore clipboard permission failures
       }
     },
-    [adminMode, calibration, pan.x, pan.y, zoom]
+    [adminMode, calibration, pan.x, pan.y, renderBox.height, renderBox.left, renderBox.top, renderBox.width, zoom]
   );
 
   const resetView = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
@@ -267,6 +315,18 @@ export function PubgMapOverlay({ map }: Props) {
     el.addEventListener("wheel", handler, { passive: false });
     return () => el.removeEventListener("wheel", handler);
   }, []);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const observer = new ResizeObserver(() => {
+      recomputeRenderBox();
+    });
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [recomputeRenderBox]);
 
   // marker size inversely scales with zoom so they don't get huge
   const markerSize = Math.max(14, 22 - zoom * 2);
@@ -363,9 +423,16 @@ export function PubgMapOverlay({ map }: Props) {
           <img
             src={map.mapImage}
             alt={`${map.name} map`}
-            className="h-full w-full object-fill select-none"
+            className="h-full w-full object-contain select-none"
             draggable={false}
             loading="eager"
+            onLoad={(e) => {
+              const img = e.currentTarget;
+              if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                setImageRatio(img.naturalWidth / img.naturalHeight);
+              }
+              recomputeRenderBox();
+            }}
           />
 
           {visibleMarkers.map((marker) => {
@@ -380,8 +447,8 @@ export function PubgMapOverlay({ map }: Props) {
                 title={marker.label}
                 className="absolute rounded-full transition-transform hover:scale-125"
                 style={{
-                  left: `${calibrated.x}%`,
-                  top: `${calibrated.y}%`,
+                  left: `${renderBox.left + (calibrated.x / 100) * renderBox.width}px`,
+                  top: `${renderBox.top + (calibrated.y / 100) * renderBox.height}px`,
                   width: markerSize,
                   height: markerSize,
                   transform: `translate(-50%, -50%) ${isActive ? "scale(1.4)" : ""}`,
