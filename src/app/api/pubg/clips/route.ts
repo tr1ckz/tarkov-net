@@ -159,6 +159,7 @@ function pickClosestVodMoment(
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
+  const probeMode = searchParams.get("probe") === "1";
   const streamer = searchParams.get("streamer")?.trim().toLowerCase() ?? "";
   const playerName = searchParams.get("playerName")?.trim() ?? "";
   const requestedShard = searchParams.get("shard")?.trim().toLowerCase() ?? "";
@@ -469,7 +470,8 @@ export async function GET(request: Request) {
         linkEventsPersisted: debug.linkEventsPersisted,
         metadata: {
           resolvedShard: debug.resolvedShard,
-          encountersScanned: encounters.length
+          encountersScanned: encounters.length,
+          probeMode
         }
       });
 
@@ -501,7 +503,7 @@ export async function GET(request: Request) {
         status: clips.length ? "ok" : "empty",
         playerName: streamer,
         clipsReturned: clips.length,
-        metadata: { limit }
+        metadata: { limit, probeMode }
       });
       return NextResponse.json({ clips, source: "streamer", streamer });
     }
@@ -522,7 +524,7 @@ export async function GET(request: Request) {
       source: "pubg",
       status: clips.length ? "ok" : "empty",
       clipsReturned: clips.length,
-      metadata: { limit, gameId: pubgGameId }
+      metadata: { limit, gameId: pubgGameId, probeMode }
     });
     return NextResponse.json({ clips, source: "pubg" });
   } catch (error) {

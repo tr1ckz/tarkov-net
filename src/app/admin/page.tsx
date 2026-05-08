@@ -96,6 +96,8 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState<string | null>(null);
   const [refreshingPubg, setRefreshingPubg] = useState(false);
+  const [probingPubg, setProbingPubg] = useState(false);
+  const [probeMessage, setProbeMessage] = useState<string | null>(null);
 
   const isAdmin = (session?.user as { role?: string })?.role === "ADMIN";
 
@@ -130,6 +132,50 @@ export default function AdminPage() {
       setPubgStats(stats);
     } finally {
       setRefreshingPubg(false);
+    }
+  }
+
+  async function writeProbeLog() {
+    setProbingPubg(true);
+    setProbeMessage(null);
+    try {
+      const response = await fetch("/api/admin/pubg-linking/probe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: "manual-admin-probe" })
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setProbeMessage(payload?.error ?? "Failed to write probe log");
+        return;
+      }
+      setProbeMessage("Probe run log written.");
+      await refreshPubgStats();
+    } catch (error) {
+      setProbeMessage(error instanceof Error ? error.message : "Failed to write probe log");
+    } finally {
+      setProbingPubg(false);
+    }
+  }
+
+  async function runClipsProbe() {
+    setProbingPubg(true);
+    setProbeMessage(null);
+    try {
+      const response = await fetch("/api/pubg/clips?limit=1&probe=1", { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok) {
+        setProbeMessage(payload?.error ?? "Clips probe failed");
+        await refreshPubgStats();
+        return;
+      }
+      const count = Array.isArray(payload?.clips) ? payload.clips.length : 0;
+      setProbeMessage(`Clips probe completed. Returned ${count} clip(s).`);
+      await refreshPubgStats();
+    } catch (error) {
+      setProbeMessage(error instanceof Error ? error.message : "Clips probe failed");
+    } finally {
+      setProbingPubg(false);
     }
   }
 
@@ -361,14 +407,37 @@ export default function AdminPage() {
             <p className="text-xs uppercase tracking-widest text-[#7f7768]">
               Last 24h runs: {pubgStats?.totals.runs24h ?? 0} | ok {pubgStats?.totals.runs24hOk ?? 0} | empty {pubgStats?.totals.runs24hEmpty ?? 0} | errors {pubgStats?.totals.runs24hError ?? 0}
             </p>
-            <button
-              onClick={refreshPubgStats}
-              disabled={refreshingPubg}
-              className="border border-[#49533a] bg-[#1a1f14] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-[#e2d2af] hover:bg-[#222a1a] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {refreshingPubg ? "Refreshing..." : "Refresh Stats"}
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={refreshPubgStats}
+                disabled={refreshingPubg}
+                className="border border-[#49533a] bg-[#1a1f14] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-[#e2d2af] hover:bg-[#222a1a] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {refreshingPubg ? "Refreshing..." : "Refresh Stats"}
+              </button>
+              <button
+                onClick={writeProbeLog}
+                disabled={probingPubg}
+                className="border border-[#5e4d34] bg-[#1a1510] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-[#e2d2af] hover:border-[#f5c842] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Write Probe Log
+              </button>
+              <button
+                onClick={runClipsProbe}
+                disabled={probingPubg}
+                className="border border-[#2d2d2d] bg-[#111] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-[#c8bda0] hover:border-[#666] hover:text-[#e2d2af] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Run Clips Probe
+              </button>
+            </div>
           </div>
+
+          {probeMessage && <p className="text-xs text-[#c8bda0]">{probeMessage}</p>}
+          {(pubgStats?.totals.totalRuns ?? 0) === 0 && (
+            <p className="text-xs text-[#a58f62]">
+              No runs recorded yet. Use "Run Clips Probe" to force one and verify logging wiring.
+            </p>
+          )}
 
           <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
             <div className="border border-[#2d2d2d] bg-[#111] p-3">
