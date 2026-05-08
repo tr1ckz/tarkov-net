@@ -179,3 +179,30 @@ model PubgLinkEvent {
   @@index([twitchUserId])
   @@index([pubgNameNormalized, twitchUserId])
 }
+
+model PubgLinkRunLog {
+  id                  String   @id @default(cuid())
+  source              String
+  status              String
+  playerName          String?
+  platform            String?
+  requestedShard      String?
+  resolvedShard       String?
+  encountersFound     Int      @default(0)
+  clipsReturned       Int      @default(0)
+  activeIndexMatches  Int      @default(0)
+  activeOverlapMatches Int     @default(0)
+  directLoginMatches  Int      @default(0)
+  searchChannelMatches Int     @default(0)
+  vodMoments          Int      @default(0)
+  channelsWithClips   Int      @default(0)
+  linkEventsQueued    Int      @default(0)
+  linkEventsPersisted Int      @default(0)
+  errorMessage        String?
+  metadataJson        String?
+  createdAt           DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([source])
+  @@index([status])
+}

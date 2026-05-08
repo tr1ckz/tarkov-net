@@ -28,22 +28,35 @@ export async function GET() {
 
   const [
     totalEvents,
+    totalRuns,
     uniquePubgAccounts,
     uniqueTwitchAccounts,
     last24hEvents,
     last7dEvents,
+    runs24h,
+    runs7d,
+    runs24hOk,
+    runs24hEmpty,
+    runs24hError,
     sourceBreakdown,
     topPubg,
     topTwitch,
     recent,
+    recentRuns,
     activeIndexerCount,
     uniquePairRows
   ] = await Promise.all([
     prisma.pubgLinkEvent.count(),
+    prisma.pubgLinkRunLog.count(),
     prisma.pubgLinkEvent.groupBy({ by: ["pubgNameNormalized"] }),
     prisma.pubgLinkEvent.groupBy({ by: ["twitchUserId"] }),
     prisma.pubgLinkEvent.count({ where: { createdAt: { gte: dayAgo } } }),
     prisma.pubgLinkEvent.count({ where: { createdAt: { gte: weekAgo } } }),
+    prisma.pubgLinkRunLog.count({ where: { createdAt: { gte: dayAgo } } }),
+    prisma.pubgLinkRunLog.count({ where: { createdAt: { gte: weekAgo } } }),
+    prisma.pubgLinkRunLog.count({ where: { createdAt: { gte: dayAgo }, status: "ok" } }),
+    prisma.pubgLinkRunLog.count({ where: { createdAt: { gte: dayAgo }, status: "empty" } }),
+    prisma.pubgLinkRunLog.count({ where: { createdAt: { gte: dayAgo }, status: "error" } }),
     prisma.pubgLinkEvent.groupBy({ by: ["eventType"], _count: { _all: true } }),
     prisma.pubgLinkEvent.groupBy({
       by: ["pubgNameNormalized", "pubgNameRaw"],
@@ -69,6 +82,30 @@ export async function GET() {
         shard: true,
         platform: true,
         encounterAt: true
+      }
+    }),
+    prisma.pubgLinkRunLog.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 25,
+      select: {
+        createdAt: true,
+        source: true,
+        status: true,
+        playerName: true,
+        platform: true,
+        requestedShard: true,
+        resolvedShard: true,
+        encountersFound: true,
+        clipsReturned: true,
+        activeIndexMatches: true,
+        activeOverlapMatches: true,
+        directLoginMatches: true,
+        searchChannelMatches: true,
+        vodMoments: true,
+        channelsWithClips: true,
+        linkEventsQueued: true,
+        linkEventsPersisted: true,
+        errorMessage: true
       }
     }),
     prisma.pubgActiveStreamer.count(),
@@ -117,11 +154,17 @@ export async function GET() {
   return NextResponse.json({
     totals: {
       totalEvents,
+      totalRuns,
       uniquePubgAccounts: uniquePubgAccounts.length,
       uniqueTwitchAccounts: uniqueTwitchAccounts.length,
       uniquePairs: normalizeCount(uniquePairRows[0]?.count),
       last24hEvents,
       last7dEvents,
+      runs24h,
+      runs7d,
+      runs24hOk,
+      runs24hEmpty,
+      runs24hError,
       activeIndexerCount
     },
     sourceBreakdown: sourceBreakdown.map((row) => ({
@@ -130,6 +173,7 @@ export async function GET() {
     })),
     topPubg: topPubgWithReach,
     topTwitch: topTwitchWithReach,
-    recent
+    recent,
+    recentRuns
   });
 }

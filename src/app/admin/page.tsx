@@ -26,11 +26,17 @@ type InviteRow = {
 type PubgLinkingStats = {
   totals: {
     totalEvents: number;
+    totalRuns: number;
     uniquePubgAccounts: number;
     uniqueTwitchAccounts: number;
     uniquePairs: number;
     last24hEvents: number;
     last7dEvents: number;
+    runs24h: number;
+    runs7d: number;
+    runs24hOk: number;
+    runs24hEmpty: number;
+    runs24hError: number;
     activeIndexerCount: number;
   };
   sourceBreakdown: Array<{ eventType: string; count: number }>;
@@ -57,6 +63,26 @@ type PubgLinkingStats = {
     platform: string | null;
     encounterAt: string | null;
   }>;
+  recentRuns: Array<{
+    createdAt: string;
+    source: string;
+    status: "ok" | "empty" | "error";
+    playerName: string | null;
+    platform: string | null;
+    requestedShard: string | null;
+    resolvedShard: string | null;
+    encountersFound: number;
+    clipsReturned: number;
+    activeIndexMatches: number;
+    activeOverlapMatches: number;
+    directLoginMatches: number;
+    searchChannelMatches: number;
+    vodMoments: number;
+    channelsWithClips: number;
+    linkEventsQueued: number;
+    linkEventsPersisted: number;
+    errorMessage: string | null;
+  }>;
 };
 
 export default function AdminPage() {
@@ -69,6 +95,7 @@ export default function AdminPage() {
   const [tab, setTab] = useState<"users" | "invites" | "pubg">("invites");
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState<string | null>(null);
+  const [refreshingPubg, setRefreshingPubg] = useState(false);
 
   const isAdmin = (session?.user as { role?: string })?.role === "ADMIN";
 
@@ -95,6 +122,16 @@ export default function AdminPage() {
       setLoading(false);
     });
   }, [isAdmin]);
+
+  async function refreshPubgStats() {
+    setRefreshingPubg(true);
+    try {
+      const stats = await fetch("/api/admin/pubg-linking").then((r) => r.json());
+      setPubgStats(stats);
+    } finally {
+      setRefreshingPubg(false);
+    }
+  }
 
   async function generateInvite() {
     const res = await fetch("/api/admin/invite", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
@@ -320,7 +357,24 @@ export default function AdminPage() {
       {/* PUBG Linking Tab */}
       {tab === "pubg" && (
         <div className="space-y-5">
+          <div className="flex items-center justify-between">
+            <p className="text-xs uppercase tracking-widest text-[#7f7768]">
+              Last 24h runs: {pubgStats?.totals.runs24h ?? 0} | ok {pubgStats?.totals.runs24hOk ?? 0} | empty {pubgStats?.totals.runs24hEmpty ?? 0} | errors {pubgStats?.totals.runs24hError ?? 0}
+            </p>
+            <button
+              onClick={refreshPubgStats}
+              disabled={refreshingPubg}
+              className="border border-[#49533a] bg-[#1a1f14] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-[#e2d2af] hover:bg-[#222a1a] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {refreshingPubg ? "Refreshing..." : "Refresh Stats"}
+            </button>
+          </div>
+
           <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
+            <div className="border border-[#2d2d2d] bg-[#111] p-3">
+              <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Linker Runs</div>
+              <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.totalRuns ?? 0}</div>
+            </div>
             <div className="border border-[#2d2d2d] bg-[#111] p-3">
               <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Link Events</div>
               <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.totalEvents ?? 0}</div>
@@ -344,6 +398,28 @@ export default function AdminPage() {
             <div className="border border-[#2d2d2d] bg-[#111] p-3">
               <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Indexed Streamers</div>
               <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.activeIndexerCount ?? 0}</div>
+            </div>
+          </div>
+
+          <div className="border border-[#2d2d2d] bg-[#111] p-3">
+            <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">Recent Linker Runs (Diagnostics)</h2>
+            <div className="mt-3 space-y-2">
+              {(pubgStats?.recentRuns ?? []).map((run, idx) => (
+                <div key={`${run.createdAt}-${run.source}-${idx}`} className="border border-[#1f1f1f] bg-[#0d0d0d] px-3 py-2 text-xs text-[#b9af95]">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[#e2d2af]">{run.source}</span>
+                    <span className={`px-1.5 py-0.5 uppercase tracking-widest ${run.status === "ok" ? "text-[#8fa070]" : run.status === "empty" ? "text-[#d8b46b]" : "text-[#e07070]"}`}>{run.status}</span>
+                    <span className="text-[#666]">{new Date(run.createdAt).toLocaleString()}</span>
+                    {run.playerName && <span className="text-[#c8bda0]">player: {run.playerName}</span>}
+                    <span className="text-[#666]">clips: {run.clipsReturned}</span>
+                    <span className="text-[#666]">encounters: {run.encountersFound}</span>
+                    <span className="text-[#666]">index matches: {run.activeIndexMatches}</span>
+                    <span className="text-[#666]">persisted: {run.linkEventsPersisted}</span>
+                  </div>
+                  {run.errorMessage && <div className="mt-1 text-[#e07070]">{run.errorMessage}</div>}
+                </div>
+              ))}
+              {(pubgStats?.recentRuns.length ?? 0) === 0 && <p className="text-xs text-[#555]">No linker runs captured yet. Trigger a PUBG clip lookup to generate logs.</p>}
             </div>
           </div>
 

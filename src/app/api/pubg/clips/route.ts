@@ -60,6 +60,56 @@ function buildLinkDedupeKey(params: {
   ].join(":");
 }
 
+type PubgLinkRunLogInput = {
+  source: string;
+  status: "ok" | "empty" | "error";
+  playerName?: string;
+  platform?: string;
+  requestedShard?: string;
+  resolvedShard?: string;
+  encountersFound?: number;
+  clipsReturned?: number;
+  activeIndexMatches?: number;
+  activeOverlapMatches?: number;
+  directLoginMatches?: number;
+  searchChannelMatches?: number;
+  vodMoments?: number;
+  channelsWithClips?: number;
+  linkEventsQueued?: number;
+  linkEventsPersisted?: number;
+  errorMessage?: string;
+  metadata?: Record<string, unknown>;
+};
+
+async function writePubgLinkRunLog(input: PubgLinkRunLogInput) {
+  try {
+    await prisma.pubgLinkRunLog.create({
+      data: {
+        source: input.source,
+        status: input.status,
+        playerName: input.playerName,
+        platform: input.platform,
+        requestedShard: input.requestedShard,
+        resolvedShard: input.resolvedShard,
+        encountersFound: input.encountersFound ?? 0,
+        clipsReturned: input.clipsReturned ?? 0,
+        activeIndexMatches: input.activeIndexMatches ?? 0,
+        activeOverlapMatches: input.activeOverlapMatches ?? 0,
+        directLoginMatches: input.directLoginMatches ?? 0,
+        searchChannelMatches: input.searchChannelMatches ?? 0,
+        vodMoments: input.vodMoments ?? 0,
+        channelsWithClips: input.channelsWithClips ?? 0,
+        linkEventsQueued: input.linkEventsQueued ?? 0,
+        linkEventsPersisted: input.linkEventsPersisted ?? 0,
+        errorMessage: input.errorMessage,
+        metadataJson: input.metadata ? JSON.stringify(input.metadata) : undefined
+      }
+    });
+  } catch (error) {
+    console.error("[pubg-clips] failed to write run log", error);
+  }
+}
+
 function pickClosestVodMoment(
   videos: Array<{
     created_at: string;
@@ -123,6 +173,18 @@ export async function GET(request: Request) {
         preferredShard: requestedShard || undefined
       });
       if (!resolvedPlayer) {
+        await writePubgLinkRunLog({
+          source: "encounters",
+          status: "empty",
+          playerName,
+          platform,
+          requestedShard,
+          encountersFound: 0,
+          clipsReturned: 0,
+          errorMessage: "Player not found across candidate shards",
+          metadata: { searchedShards: getCandidateShards(platform) }
+        });
+
         return NextResponse.json(
           {
             clips: [],
@@ -388,6 +450,29 @@ export async function GET(request: Request) {
         debug
       });
 
+      await writePubgLinkRunLog({
+        source: "encounters",
+        status: clips.length ? "ok" : "empty",
+        playerName: resolvedPlayer.playerName,
+        platform,
+        requestedShard,
+        resolvedShard: resolvedPlayer.shard,
+        encountersFound: debug.encountersFound,
+        clipsReturned: clips.length,
+        activeIndexMatches: debug.activeIndexMatches,
+        activeOverlapMatches: debug.activeOverlapMatches,
+        directLoginMatches: debug.directLoginMatches,
+        searchChannelMatches: debug.searchChannelMatches,
+        vodMoments: debug.vodMoments,
+        channelsWithClips: debug.channelsWithClips,
+        linkEventsQueued: debug.linkEventsQueued,
+        linkEventsPersisted: debug.linkEventsPersisted,
+        metadata: {
+          resolvedShard: debug.resolvedShard,
+          encountersScanned: encounters.length
+        }
+      });
+
       return NextResponse.json({
         clips,
         source: "encounters",
@@ -400,23 +485,57 @@ export async function GET(request: Request) {
     if (streamer) {
       const broadcasterId = await findBroadcasterIdByLogin(streamer);
       if (!broadcasterId) {
+        await writePubgLinkRunLog({
+          source: "streamer",
+          status: "empty",
+          playerName: streamer,
+          clipsReturned: 0,
+          errorMessage: "Streamer login not found"
+        });
         return NextResponse.json({ clips: [], source: "streamer", streamer });
       }
 
       const clips = await getClipsByBroadcasterId(broadcasterId, limit);
+      await writePubgLinkRunLog({
+        source: "streamer",
+        status: clips.length ? "ok" : "empty",
+        playerName: streamer,
+        clipsReturned: clips.length,
+        metadata: { limit }
+      });
       return NextResponse.json({ clips, source: "streamer", streamer });
     }
 
     // Twitch canonical PUBG name is currently PUBG: BATTLEGROUNDS.
     const pubgGameId = await findGameIdByName("PUBG: BATTLEGROUNDS");
     if (!pubgGameId) {
+      await writePubgLinkRunLog({
+        source: "pubg",
+        status: "error",
+        errorMessage: "PUBG game id not found in Twitch"
+      });
       return NextResponse.json({ clips: [], source: "pubg" });
     }
 
     const clips = await getClipsByGameId(pubgGameId, limit);
+    await writePubgLinkRunLog({
+      source: "pubg",
+      status: clips.length ? "ok" : "empty",
+      clipsReturned: clips.length,
+      metadata: { limit, gameId: pubgGameId }
+    });
     return NextResponse.json({ clips, source: "pubg" });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to load clips";
+
+    await writePubgLinkRunLog({
+      source: playerName ? "encounters" : streamer ? "streamer" : "pubg",
+      status: "error",
+      playerName: playerName || streamer || undefined,
+      platform: playerName ? platform : undefined,
+      requestedShard: playerName ? requestedShard : undefined,
+      errorMessage: message
+    });
 
     // Missing credentials is a setup issue, return a clear message.
     if (message.toLowerCase().includes("missing twitch credentials")) {
