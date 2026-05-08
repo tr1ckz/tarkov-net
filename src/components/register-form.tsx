@@ -43,6 +43,7 @@ export function RegisterForm() {
         value={displayName}
         onChange={(event) => setDisplayName(event.target.value)}
         placeholder="Display Name"
+        autoComplete="nickname"
         required
       />
       <Input
@@ -50,6 +51,7 @@ export function RegisterForm() {
         value={email}
         onChange={(event) => setEmail(event.target.value)}
         placeholder="Email"
+        autoComplete="email"
         required
       />
       <Input
@@ -57,6 +59,7 @@ export function RegisterForm() {
         value={password}
         onChange={(event) => setPassword(event.target.value)}
         placeholder="Password"
+        autoComplete="new-password"
         minLength={8}
         required
       />
@@ -65,6 +68,7 @@ export function RegisterForm() {
           value={inviteCode}
           onChange={(event) => setInviteCode(event.target.value)}
           placeholder="Invite Code (required unless first user)"
+          autoComplete="one-time-code"
         />
         <p className="text-xs text-[#7f7768]">Required for all accounts except the first (admin) account.</p>
       </div>

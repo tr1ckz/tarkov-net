@@ -41,6 +41,7 @@ export function LoginForm() {
         value={email}
         onChange={(event) => setEmail(event.target.value)}
         placeholder="Email"
+        autoComplete="email"
         required
       />
       <Input
@@ -48,6 +49,7 @@ export function LoginForm() {
         value={password}
         onChange={(event) => setPassword(event.target.value)}
         placeholder="Password"
+        autoComplete="current-password"
         minLength={8}
         required
       />
