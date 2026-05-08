@@ -120,6 +120,7 @@ export async function refreshPubgStreamerIndex(options?: { force?: boolean }) {
 
   try {
     const streams = await getAllLiveStreamsByGameId(PUBG_TWITCH_GAME_ID, 12);
+    const indexedAt = now();
     const activeRows = streams.map((stream) => ({
       twitchUserId: stream.user_id,
       streamId: stream.id,
@@ -130,8 +131,8 @@ export async function refreshPubgStreamerIndex(options?: { force?: boolean }) {
       title: stream.title,
       normalizedLogin: normalizeForCompare(stripGamingPrefix(stream.user_login)),
       normalizedName: normalizeForCompare(stripGamingPrefix(stream.user_name)),
-      indexedAt: now(),
-      updatedAt: now()
+      indexedAt,
+      updatedAt: indexedAt
     }));
 
     for (const row of activeRows) {
@@ -148,6 +149,62 @@ export async function refreshPubgStreamerIndex(options?: { force?: boolean }) {
           normalizedLogin: row.normalizedLogin,
           normalizedName: row.normalizedName,
           indexedAt: row.indexedAt
+        }
+      });
+
+      await prisma.pubgStreamerProfile.upsert({
+        where: { twitchUserId: row.twitchUserId },
+        create: {
+          twitchUserId: row.twitchUserId,
+          userLogin: row.userLogin,
+          userName: row.userName,
+          normalizedLogin: row.normalizedLogin,
+          normalizedName: row.normalizedName,
+          firstSeenAt: indexedAt,
+          lastSeenAt: indexedAt,
+          lastSeenLiveAt: indexedAt,
+          isLive: true,
+          lastStreamId: row.streamId,
+          lastTitle: row.title,
+          lastGameId: row.gameId,
+          lastStreamStartAt: row.streamStartedAt,
+          indexedAt
+        },
+        update: {
+          userLogin: row.userLogin,
+          userName: row.userName,
+          normalizedLogin: row.normalizedLogin,
+          normalizedName: row.normalizedName,
+          lastSeenAt: indexedAt,
+          lastSeenLiveAt: indexedAt,
+          isLive: true,
+          lastStreamId: row.streamId,
+          lastTitle: row.title,
+          lastGameId: row.gameId,
+          lastStreamStartAt: row.streamStartedAt,
+          indexedAt
+        }
+      });
+    }
+
+    const activeIds = activeRows.map((row) => row.twitchUserId);
+    if (activeIds.length) {
+      await prisma.pubgStreamerProfile.updateMany({
+        where: {
+          twitchUserId: { notIn: activeIds },
+          isLive: true
+        },
+        data: {
+          isLive: false,
+          indexedAt
+        }
+      });
+    } else {
+      await prisma.pubgStreamerProfile.updateMany({
+        where: { isLive: true },
+        data: {
+          isLive: false,
+          indexedAt
         }
       });
     }

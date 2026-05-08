@@ -157,6 +157,29 @@ model PubgActiveStreamer {
   @@index([normalizedName])
 }
 
+model PubgStreamerProfile {
+  twitchUserId     String   @id
+  userLogin        String
+  userName         String
+  normalizedLogin  String
+  normalizedName   String
+  firstSeenAt      DateTime @default(now())
+  lastSeenAt       DateTime @default(now())
+  lastSeenLiveAt   DateTime?
+  isLive           Boolean  @default(false)
+  lastStreamId     String?
+  lastTitle        String?
+  lastGameId       String?
+  lastStreamStartAt DateTime?
+  indexedAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([isLive])
+  @@index([lastSeenAt])
+  @@index([normalizedLogin])
+  @@index([normalizedName])
+}
+
 model PubgLinkEvent {
   id                 String   @id @default(cuid())
   dedupeKey          String   @unique

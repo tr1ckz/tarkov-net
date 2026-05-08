@@ -42,6 +42,8 @@ type PubgLinkingStats = {
     runs24hEmpty: number;
     runs24hError: number;
     activeIndexerCount: number;
+    streamerProfileCount: number;
+    streamerProfileLiveCount: number;
   };
   sourceBreakdown: Array<{ eventType: string; count: number }>;
   topPubg: Array<{
@@ -525,6 +527,14 @@ export default function AdminPage() {
             <div className="border border-[#2d2d2d] bg-[#111] p-3">
               <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Indexed Streamers</div>
               <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.activeIndexerCount ?? 0}</div>
+            </div>
+            <div className="border border-[#2d2d2d] bg-[#111] p-3">
+              <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Profile DB Total</div>
+              <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.streamerProfileCount ?? 0}</div>
+            </div>
+            <div className="border border-[#2d2d2d] bg-[#111] p-3">
+              <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Profile DB Live</div>
+              <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.streamerProfileLiveCount ?? 0}</div>
             </div>
           </div>
 
