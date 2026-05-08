@@ -23,6 +23,8 @@ type EventSubEnvelope = {
   };
 };
 
+type StreamOnlineEvent = NonNullable<EventSubEnvelope["event"]>;
+
 async function writeEventSubRunLog(input: {
   status: "ok" | "empty" | "error";
   playerName?: string;
@@ -62,6 +64,140 @@ function isFreshTimestamp(value: string) {
   if (Number.isNaN(ms)) return false;
   const ageMs = Math.abs(Date.now() - ms);
   return ageMs <= 10 * 60 * 1000;
+}
+
+async function processStreamOnlineNotification(input: {
+  event: StreamOnlineEvent;
+  messageId: string;
+  messageType: string;
+  subscriptionId: string | null;
+}) {
+  const { event, messageId, messageType, subscriptionId } = input;
+  const indexedAt = new Date();
+  const streamStartAt = event.started_at ? new Date(event.started_at) : indexedAt;
+  const normalizedLogin = normalizeForCompare(stripGamingPrefix(event.broadcaster_user_login ?? ""));
+  const normalizedName = normalizeForCompare(stripGamingPrefix(event.broadcaster_user_name ?? ""));
+  const streamId = event.id ?? `eventsub-${event.broadcaster_user_id}-${indexedAt.getTime()}`;
+
+  try {
+    await db.pubgActiveStreamer.upsert({
+      where: { twitchUserId: event.broadcaster_user_id },
+      create: {
+        twitchUserId: event.broadcaster_user_id,
+        streamId,
+        userLogin: event.broadcaster_user_login,
+        userName: event.broadcaster_user_name,
+        gameId: "493057",
+        streamStartedAt: streamStartAt,
+        title: "Live (EventSub)",
+        normalizedLogin,
+        normalizedName,
+        indexedAt
+      },
+      update: {
+        streamId,
+        userLogin: event.broadcaster_user_login,
+        userName: event.broadcaster_user_name,
+        gameId: "493057",
+        streamStartedAt: streamStartAt,
+        title: "Live (EventSub)",
+        normalizedLogin,
+        normalizedName,
+        indexedAt
+      }
+    });
+
+    await db.pubgStreamerProfile.upsert({
+      where: { twitchUserId: event.broadcaster_user_id },
+      create: {
+        twitchUserId: event.broadcaster_user_id,
+        userLogin: event.broadcaster_user_login,
+        userName: event.broadcaster_user_name,
+        normalizedLogin,
+        normalizedName,
+        firstSeenAt: indexedAt,
+        lastSeenAt: indexedAt,
+        lastSeenLiveAt: indexedAt,
+        isLive: true,
+        lastStreamId: streamId,
+        lastTitle: "Live (EventSub)",
+        lastGameId: "493057",
+        lastStreamStartAt: streamStartAt,
+        indexedAt
+      },
+      update: {
+        userLogin: event.broadcaster_user_login,
+        userName: event.broadcaster_user_name,
+        normalizedLogin,
+        normalizedName,
+        lastSeenAt: indexedAt,
+        lastSeenLiveAt: indexedAt,
+        isLive: true,
+        lastStreamId: streamId,
+        lastTitle: "Live (EventSub)",
+        lastGameId: "493057",
+        lastStreamStartAt: streamStartAt,
+        indexedAt
+      }
+    });
+
+    await db.cacheState.upsert({
+      where: { key: "pubg:twitch-index" },
+      create: {
+        key: "pubg:twitch-index",
+        lastRefreshAt: indexedAt,
+        refreshInProgress: false,
+        refreshStartedAt: null
+      },
+      update: {
+        lastRefreshAt: indexedAt,
+        refreshInProgress: false,
+        refreshStartedAt: null
+      }
+    });
+
+    console.info("[twitch-eventsub] stream.online processed", {
+      messageId,
+      subscriptionId,
+      broadcasterId: event.broadcaster_user_id,
+      broadcasterLogin: event.broadcaster_user_login,
+      streamId,
+      streamStartAt: streamStartAt.toISOString()
+    });
+    await writeEventSubRunLog({
+      status: "ok",
+      playerName: event.broadcaster_user_login,
+      metadata: {
+        messageType,
+        messageId,
+        subscriptionId,
+        broadcasterId: event.broadcaster_user_id,
+        broadcasterLogin: event.broadcaster_user_login,
+        streamId,
+        streamStartAt: streamStartAt.toISOString(),
+        backgroundProcessed: true
+      }
+    });
+  } catch (error) {
+    console.error("[twitch-eventsub] failed to persist stream.online", {
+      messageId,
+      broadcasterId: event.broadcaster_user_id,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    await writeEventSubRunLog({
+      status: "error",
+      playerName: event.broadcaster_user_login,
+      errorMessage: error instanceof Error ? error.message : String(error),
+      metadata: {
+        messageType,
+        messageId,
+        subscriptionId,
+        broadcasterId: event.broadcaster_user_id,
+        broadcasterLogin: event.broadcaster_user_login,
+        backgroundProcessed: true
+      }
+    });
+  }
 }
 
 export async function POST(request: Request) {
@@ -205,129 +341,29 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, ignored: true });
   }
 
-  const indexedAt = new Date();
-  const streamStartAt = event.started_at ? new Date(event.started_at) : indexedAt;
-  const normalizedLogin = normalizeForCompare(stripGamingPrefix(event.broadcaster_user_login));
-  const normalizedName = normalizeForCompare(stripGamingPrefix(event.broadcaster_user_name));
-  const streamId = event.id ?? `eventsub-${event.broadcaster_user_id}-${indexedAt.getTime()}`;
-
-  try {
-    await db.pubgActiveStreamer.upsert({
-      where: { twitchUserId: event.broadcaster_user_id },
-      create: {
-        twitchUserId: event.broadcaster_user_id,
-        streamId,
-        userLogin: event.broadcaster_user_login,
-        userName: event.broadcaster_user_name,
-        gameId: "27971",
-        streamStartedAt: streamStartAt,
-        title: "Live (EventSub)",
-        normalizedLogin,
-        normalizedName,
-        indexedAt
-      },
-      update: {
-        streamId,
-        userLogin: event.broadcaster_user_login,
-        userName: event.broadcaster_user_name,
-        gameId: "27971",
-        streamStartedAt: streamStartAt,
-        title: "Live (EventSub)",
-        normalizedLogin,
-        normalizedName,
-        indexedAt
-      }
+  // Queue notification processing in background so webhook returns immediately.
+  setTimeout(() => {
+    void processStreamOnlineNotification({
+      event,
+      messageId,
+      messageType,
+      subscriptionId: payload.subscription?.id ?? null
     });
+  }, 0);
 
-    await db.pubgStreamerProfile.upsert({
-      where: { twitchUserId: event.broadcaster_user_id },
-      create: {
-        twitchUserId: event.broadcaster_user_id,
-        userLogin: event.broadcaster_user_login,
-        userName: event.broadcaster_user_name,
-        normalizedLogin,
-        normalizedName,
-        firstSeenAt: indexedAt,
-        lastSeenAt: indexedAt,
-        lastSeenLiveAt: indexedAt,
-        isLive: true,
-        lastStreamId: streamId,
-        lastTitle: "Live (EventSub)",
-        lastGameId: "27971",
-        lastStreamStartAt: streamStartAt,
-        indexedAt
-      },
-      update: {
-        userLogin: event.broadcaster_user_login,
-        userName: event.broadcaster_user_name,
-        normalizedLogin,
-        normalizedName,
-        lastSeenAt: indexedAt,
-        lastSeenLiveAt: indexedAt,
-        isLive: true,
-        lastStreamId: streamId,
-        lastTitle: "Live (EventSub)",
-        lastGameId: "27971",
-        lastStreamStartAt: streamStartAt,
-        indexedAt
-      }
-    });
-
-    await db.cacheState.upsert({
-      where: { key: "pubg:twitch-index" },
-      create: {
-        key: "pubg:twitch-index",
-        lastRefreshAt: indexedAt,
-        refreshInProgress: false,
-        refreshStartedAt: null
-      },
-      update: {
-        lastRefreshAt: indexedAt,
-        refreshInProgress: false,
-        refreshStartedAt: null
-      }
-    });
-
-    console.info("[twitch-eventsub] stream.online processed", {
+  await writeEventSubRunLog({
+    status: "ok",
+    playerName: event.broadcaster_user_login,
+    metadata: {
+      messageType,
       messageId,
       subscriptionId: payload.subscription?.id ?? null,
       broadcasterId: event.broadcaster_user_id,
       broadcasterLogin: event.broadcaster_user_login,
-      streamId,
-      streamStartAt: streamStartAt.toISOString()
-    });
-    await writeEventSubRunLog({
-      status: "ok",
-      playerName: event.broadcaster_user_login,
-      metadata: {
-        messageType,
-        messageId,
-        subscriptionId: payload.subscription?.id ?? null,
-        broadcasterId: event.broadcaster_user_id,
-        broadcasterLogin: event.broadcaster_user_login,
-        streamId,
-        streamStartAt: streamStartAt.toISOString()
-      }
-    });
-  } catch (error) {
-    console.error("[twitch-eventsub] failed to persist stream.online", {
-      messageId,
-      broadcasterId: event.broadcaster_user_id,
-      error: error instanceof Error ? error.message : String(error)
-    });
-    await writeEventSubRunLog({
-      status: "error",
-      playerName: event.broadcaster_user_login,
-      errorMessage: error instanceof Error ? error.message : String(error),
-      metadata: {
-        messageType,
-        messageId,
-        broadcasterId: event.broadcaster_user_id,
-        broadcasterLogin: event.broadcaster_user_login
-      }
-    });
-    return NextResponse.json({ error: "Failed to persist event" }, { status: 500 });
-  }
+      queued: true,
+      backgroundProcessing: true
+    }
+  });
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, queued: true }, { status: 202 });
 }
