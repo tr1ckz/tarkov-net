@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import type { Metadata } from "next";
 import {
   BarChart3,
@@ -28,8 +29,11 @@ const PRIMARY_NAV = [
 ];
 
 export const metadata: Metadata = {
-  title: "TARKOV-NET",
-  description: "A dark-web styled Tarkov market network with PvP, PvE, and Arena intelligence"
+  title: "TARKOV NET",
+  description: "A dark-web styled Tarkov market network with PvP, PvE, and Arena intelligence",
+  icons: {
+    icon: "/logo.png"
+  }
 };
 
 export default async function RootLayout({
@@ -49,7 +53,10 @@ export default async function RootLayout({
           <header className="mb-4 border border-[#2d2d2d] bg-[linear-gradient(90deg,#1a1a1a_0%,#171717_45%,#131313_100%)] p-4">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="space-y-1">
-                <h1 className="font-display text-3xl uppercase tracking-[0.12em] text-[#e2d2af]">TARKOV-NET</h1>
+                <div className="flex items-center gap-3">
+                  <Image src="/logo.png" alt="TARKOV NET logo" width={44} height={44} className="h-11 w-11 object-contain" priority />
+                  <h1 className="font-display text-3xl uppercase tracking-[0.12em] text-[#e2d2af]">TARKOV NET</h1>
+                </div>
                 <p className="text-sm text-[#9a9080]">
                   Live EFT economy intelligence for {gameModeLabel(mode)} markets
                 </p>

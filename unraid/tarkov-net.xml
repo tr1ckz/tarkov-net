@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <Container version="2">
-  <Name>TARKOV-NET</Name>
+  <Name>TARKOV NET</Name>
   <Repository>ghcr.io/tr1ckz/tarkov-net:latest</Repository>
   <Registry>https://ghcr.io</Registry>
   <Network>bridge</Network>
@@ -20,7 +20,7 @@
   <DateInstalled/>
   <DonateText/>
   <DonateLink/>
-  <Description>TARKOV-NET Unraid container template.</Description>
+  <Description>TARKOV NET Unraid container template.</Description>
   <Networking>
     <Mode>bridge</Mode>
     <Publish>

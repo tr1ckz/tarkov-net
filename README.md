@@ -1,4 +1,4 @@
-# TARKOV-NET
+# TARKOV NET
 
 A custom Tarkov Market platform built with Next.js 14 App Router, Prisma + SQLite, NextAuth Credentials, and tarkov.dev GraphQL data.
 
