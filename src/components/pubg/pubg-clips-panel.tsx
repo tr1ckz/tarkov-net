@@ -12,6 +12,14 @@ type Clip = {
   created_at: string;
   view_count: number;
   encounterWith?: string;
+  encounterActionText?: string;
+  encounterActionType?: string;
+  encounterWeapon?: string | null;
+  encounterDistanceMeters?: number | null;
+  mapTag?: string | null;
+  gameModeTag?: string | null;
+  teamSizeModeTag?: string | null;
+  povTag?: string | null;
   sourceType?: "vod" | "clip";
 };
 
@@ -400,9 +408,27 @@ export function PubgClipsPanel() {
                     Encounter: {clip.encounterWith}
                   </p>
                 )}
+                {clip.encounterActionText && (
+                  <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[#d6b376]">
+                    Event: {clip.encounterActionText}
+                  </p>
+                )}
                 {clip.sourceType && (
                   <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[#6f675a]">
                     Source: {clip.sourceType === "vod" ? "VOD Moment" : "Clip"}
+                  </p>
+                )}
+                {(clip.mapTag || clip.gameModeTag || clip.teamSizeModeTag || clip.povTag) && (
+                  <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[#8b816f]">
+                    {clip.mapTag ? `Map: ${clip.mapTag}` : "Map: -"} · {clip.gameModeTag ? `Mode: ${clip.gameModeTag}` : "Mode: -"}
+                    {clip.teamSizeModeTag ? ` · Team: ${clip.teamSizeModeTag}` : ""}
+                    {clip.povTag ? ` · POV: ${clip.povTag === "STREAMER_POV" ? "Streamer POV" : "Teammate POV"}` : ""}
+                  </p>
+                )}
+                {(clip.encounterWeapon || typeof clip.encounterDistanceMeters === "number") && (
+                  <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[#8b816f]">
+                    {clip.encounterWeapon ? `Gun: ${clip.encounterWeapon}` : "Gun: -"}
+                    {typeof clip.encounterDistanceMeters === "number" ? ` · Distance: ${clip.encounterDistanceMeters}m` : ""}
                   </p>
                 )}
                 <p className="mt-1 text-[11px] text-[#7f7768]">

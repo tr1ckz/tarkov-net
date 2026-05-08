@@ -14,6 +14,8 @@ type PubgMatchResponse = {
   data?: {
     attributes?: {
       createdAt?: string;
+      mapName?: string;
+      gameMode?: string;
     };
   };
   included?: Array<{
@@ -27,12 +29,39 @@ type PubgMatchResponse = {
   }>;
 };
 
-type KillEvent = {
+type TelemetryCharacterRef = {
+  name?: string | null;
+} | null;
+
+type PubgTelemetryEvent = {
   _T?: string;
   _D?: string;
-  killer?: { name?: string | null } | null;
-  victim?: { name?: string | null } | null;
-  attacker?: { name?: string | null } | null;
+  killer?: TelemetryCharacterRef;
+  victim?: TelemetryCharacterRef;
+  attacker?: TelemetryCharacterRef;
+  damageCauserName?: string | null;
+  distance?: number | null;
+};
+
+export type PubgEncounterActionType =
+  | "knocking_out_streamer"
+  | "getting_knocked_out_by_streamer"
+  | "killing_streamer"
+  | "getting_killed_by_streamer";
+
+export type PubgEncounterPovTag = "TEAMMATE_POV" | "STREAMER_POV";
+
+export type PubgEncounterEvent = {
+  name: string;
+  count: number;
+  lastSeenAt: string | null;
+  actionType: PubgEncounterActionType;
+  weapon: string | null;
+  distanceMeters: number | null;
+  mapTag: string | null;
+  gameModeTag: string | null;
+  teamSizeModeTag: string | null;
+  povTag: PubgEncounterPovTag;
 };
 
 export type PubgPlatform = "steam" | "xbox" | "psn" | "kakao";
@@ -60,6 +89,49 @@ async function pubgGet<T>(path: string): Promise<T> {
   }
 
   return (await response.json()) as T;
+}
+
+async function fetchTelemetryEvents(url: string) {
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`PUBG telemetry fetch error (${response.status})`);
+  }
+
+  return (await response.json()) as PubgTelemetryEvent[];
+}
+
+function normalizeName(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function namesEqual(left: string | null | undefined, right: string | null | undefined) {
+  if (!left || !right) return false;
+  return normalizeName(left) === normalizeName(right);
+}
+
+function parseWeaponName(value: string | null | undefined) {
+  if (!value) return null;
+
+  const cleaned = value
+    .replace(/^Item_Weapon_/i, "")
+    .replace(/^Item_/i, "")
+    .replace(/^Weap/i, "")
+    .replace(/_C$/i, "")
+    .replace(/Proj/i, "")
+    .replace(/_/g, " ")
+    .trim();
+
+  return cleaned || value;
+}
+
+function deriveTeamSizeModeTag(gameMode: string | null | undefined) {
+  if (!gameMode) return null;
+
+  const lower = gameMode.toLowerCase();
+  if (lower.includes("solo")) return "SOLO";
+  if (lower.includes("duo")) return "DUO";
+  if (lower.includes("squad")) return "SQUAD";
+  return "UNKNOWN";
 }
 
 export async function getPlayerWithMatches(shard: string, playerName: string) {
@@ -138,14 +210,13 @@ export async function getRecentEncounterNames(options: {
   maxMatches?: number;
   maxOpponents?: number;
   restrictToKnownNormalizedNames?: Set<string>;
-}) {
+}): Promise<PubgEncounterEvent[]> {
   const { shard, playerName } = options;
   const maxMatches = Math.max(1, Math.min(options.maxMatches ?? 6, 15));
-  const maxOpponents = Math.max(1, Math.min(options.maxOpponents ?? 40, 80));
+  const maxOpponents = Math.max(1, Math.min(options.maxOpponents ?? 80, 120));
   const knownNormalized = options.restrictToKnownNormalizedNames;
   const hasKnownFilter = Boolean(knownNormalized && knownNormalized.size > 0);
 
-  const normalizeName = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
   const knownGate = (name: string) => {
     if (!hasKnownFilter || !knownNormalized) return true;
     const normalized = normalizeName(name);
@@ -178,46 +249,118 @@ export async function getRecentEncounterNames(options: {
     knownFilterSize: knownNormalized?.size ?? 0
   });
 
-  const encounterStats = new Map<string, { count: number; lastSeenAt: string | null }>();
+  const encounterStats = new Map<string, PubgEncounterEvent>();
   const matchIds = player.matchIds.slice(0, maxMatches);
-  let participantsVisited = 0;
+  let telemetryEventsVisited = 0;
   let participantsSkippedByKnownFilter = 0;
+  let telemetryFetchErrors = 0;
 
   for (const matchId of matchIds) {
     const matchPayload = await pubgGet<PubgMatchResponse>(
       `/shards/${encodeURIComponent(shard)}/matches/${encodeURIComponent(matchId)}`
     );
     const matchCreatedAt = matchPayload.data?.attributes?.createdAt ?? null;
+    const mapTag = matchPayload.data?.attributes?.mapName ?? null;
+    const gameModeTag = matchPayload.data?.attributes?.gameMode ?? null;
+    const teamSizeModeTag = deriveTeamSizeModeTag(gameModeTag);
+    const telemetryUrl = matchPayload.included?.find((entry) => entry.type === "asset")?.attributes?.URL;
 
-    const participantNames = Array.from(
-      new Set(
-        (matchPayload.included ?? [])
-          .filter((entry) => entry.type === "participant")
-          .map((entry) => entry.attributes?.stats?.name?.trim())
-          .filter((name): name is string => Boolean(name))
-      )
-    );
+    if (!telemetryUrl) {
+      continue;
+    }
 
-    for (const participantName of participantNames) {
-      if (participantName === playerName) continue;
-      participantsVisited += 1;
+    let telemetry: PubgTelemetryEvent[] = [];
+    try {
+      telemetry = await fetchTelemetryEvents(telemetryUrl);
+    } catch (error) {
+      telemetryFetchErrors += 1;
+      console.warn("[pubg-api] telemetry fetch failed", {
+        shard,
+        matchId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      continue;
+    }
 
-      if (!knownGate(participantName)) {
+    for (const event of telemetry) {
+      const type = event._T;
+      if (type !== "LogPlayerKillV2" && type !== "LogPlayerMakeGroggy") {
+        continue;
+      }
+
+      telemetryEventsVisited += 1;
+
+      const attackerName = event.killer?.name ?? event.attacker?.name ?? null;
+      const victimName = event.victim?.name ?? null;
+      let encounterName: string | null = null;
+      let actionType: PubgEncounterActionType | null = null;
+      let povTag: PubgEncounterPovTag | null = null;
+
+      if (type === "LogPlayerKillV2") {
+        if (namesEqual(attackerName, playerName) && victimName && !namesEqual(victimName, playerName)) {
+          encounterName = victimName;
+          actionType = "killing_streamer";
+          povTag = "TEAMMATE_POV";
+        } else if (namesEqual(victimName, playerName) && attackerName && !namesEqual(attackerName, playerName)) {
+          encounterName = attackerName;
+          actionType = "getting_killed_by_streamer";
+          povTag = "STREAMER_POV";
+        }
+      }
+
+      if (type === "LogPlayerMakeGroggy") {
+        if (namesEqual(attackerName, playerName) && victimName && !namesEqual(victimName, playerName)) {
+          encounterName = victimName;
+          actionType = "knocking_out_streamer";
+          povTag = "TEAMMATE_POV";
+        } else if (namesEqual(victimName, playerName) && attackerName && !namesEqual(attackerName, playerName)) {
+          encounterName = attackerName;
+          actionType = "getting_knocked_out_by_streamer";
+          povTag = "STREAMER_POV";
+        }
+      }
+
+      if (!encounterName || !actionType || !povTag) {
+        continue;
+      }
+
+      if (!knownGate(encounterName)) {
         participantsSkippedByKnownFilter += 1;
         continue;
       }
 
-      const current = encounterStats.get(participantName) ?? { count: 0, lastSeenAt: null };
-      const previousLastSeenMs = current.lastSeenAt ? Date.parse(current.lastSeenAt) : Number.NaN;
-      const matchCreatedAtMs = matchCreatedAt ? Date.parse(matchCreatedAt) : Number.NaN;
-      const lastSeenAt =
-        Number.isNaN(matchCreatedAtMs) || (!Number.isNaN(previousLastSeenMs) && previousLastSeenMs >= matchCreatedAtMs)
-          ? current.lastSeenAt
-          : matchCreatedAt;
+      const encounterAt = event._D ?? matchCreatedAt;
+      const current = encounterStats.get(encounterName) ?? {
+        name: encounterName,
+        count: 0,
+        lastSeenAt: null,
+        actionType,
+        weapon: null,
+        distanceMeters: null,
+        mapTag,
+        gameModeTag,
+        teamSizeModeTag,
+        povTag
+      };
 
-      encounterStats.set(participantName, {
+      const previousLastSeenMs = current.lastSeenAt ? Date.parse(current.lastSeenAt) : Number.NaN;
+      const encounterAtMs = encounterAt ? Date.parse(encounterAt) : Number.NaN;
+      const isNewerTimestamp = !Number.isNaN(encounterAtMs) && (Number.isNaN(previousLastSeenMs) || encounterAtMs >= previousLastSeenMs);
+      const distanceMeters = typeof event.distance === "number" && Number.isFinite(event.distance)
+        ? Math.max(0, Math.round(event.distance))
+        : null;
+
+      encounterStats.set(encounterName, {
+        ...current,
         count: current.count + 1,
-        lastSeenAt
+        lastSeenAt: isNewerTimestamp ? encounterAt : current.lastSeenAt,
+        actionType: isNewerTimestamp ? actionType : current.actionType,
+        weapon: isNewerTimestamp ? parseWeaponName(event.damageCauserName) : current.weapon,
+        distanceMeters: isNewerTimestamp ? distanceMeters : current.distanceMeters,
+        mapTag: isNewerTimestamp ? mapTag : current.mapTag,
+        gameModeTag: isNewerTimestamp ? gameModeTag : current.gameModeTag,
+        teamSizeModeTag: isNewerTimestamp ? teamSizeModeTag : current.teamSizeModeTag,
+        povTag: isNewerTimestamp ? povTag : current.povTag
       });
     }
   }
@@ -226,13 +369,21 @@ export async function getRecentEncounterNames(options: {
     shard,
     playerName,
     uniqueOpponents: encounterStats.size,
-    participantsVisited,
+    telemetryEventsVisited,
     participantsSkippedByKnownFilter,
-    hasKnownFilter
+    hasKnownFilter,
+    telemetryFetchErrors
   });
 
-  return Array.from(encounterStats.entries())
-    .sort((a, b) => b[1].count - a[1].count)
+  return Array.from(encounterStats.values())
+    .sort((a, b) => {
+      const left = a.lastSeenAt ? Date.parse(a.lastSeenAt) : Number.NaN;
+      const right = b.lastSeenAt ? Date.parse(b.lastSeenAt) : Number.NaN;
+      if (!Number.isNaN(left) && !Number.isNaN(right) && right !== left) {
+        return right - left;
+      }
+      return b.count - a.count;
+    })
     .slice(0, maxOpponents)
-    .map(([name, stats]) => ({ name, count: stats.count, lastSeenAt: stats.lastSeenAt }));
+    .map((entry) => ({ ...entry }));
 }

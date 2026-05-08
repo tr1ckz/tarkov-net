@@ -12,6 +12,7 @@ import {
   getCandidateShards,
   getRecentEncounterNames,
   lookupPlayerAcrossShards,
+  type PubgEncounterEvent,
   type PubgPlatform
 } from "@/lib/pubg-api";
 import {
@@ -42,6 +43,27 @@ function getLoginCandidates(pubgName: string) {
 function parsePlatform(value: string): PubgPlatform {
   if (value === "xbox" || value === "psn" || value === "kakao") return value;
   return "steam";
+}
+
+function describeEncounterAction(encounter: PubgEncounterEvent) {
+  switch (encounter.actionType) {
+    case "knocking_out_streamer":
+      return `knocking out ${encounter.name}`;
+    case "getting_knocked_out_by_streamer": {
+      const weaponPart = encounter.weapon ? ` with ${encounter.weapon}` : "";
+      const distancePart = typeof encounter.distanceMeters === "number" ? ` from ${encounter.distanceMeters}m` : "";
+      return `getting knocked out by ${encounter.name}${weaponPart}${distancePart}`;
+    }
+    case "killing_streamer":
+      return `killing ${encounter.name}`;
+    case "getting_killed_by_streamer": {
+      const weaponPart = encounter.weapon ? ` with ${encounter.weapon}` : "";
+      const distancePart = typeof encounter.distanceMeters === "number" ? ` from ${encounter.distanceMeters}m` : "";
+      return `getting killed by ${encounter.name}${weaponPart}${distancePart}`;
+    }
+    default:
+      return `encountered ${encounter.name}`;
+  }
 }
 
 async function getKnownStreamerNormalizedNames() {
@@ -330,11 +352,20 @@ export async function GET(request: Request) {
         thumbnail_url: string;
         duration: number;
         encounterWith: string;
+        encounterActionText: string;
+        encounterActionType: string;
+        encounterWeapon?: string | null;
+        encounterDistanceMeters?: number | null;
+        mapTag?: string | null;
+        gameModeTag?: string | null;
+        teamSizeModeTag?: string | null;
+        povTag?: string | null;
         sourceType: "vod" | "clip";
       }>;
 
       for (const encounter of filteredEncounters) {
         pushVerbose(`encounter scan name=${encounter.name} lastSeenAt=${encounter.lastSeenAt ?? "-"}`);
+        const encounterActionText = describeEncounterAction(encounter);
         const candidates = new Set<string>(getLoginCandidates(encounter.name));
         const encounterNormalized = normalizeName(encounter.name);
 
@@ -397,6 +428,14 @@ export async function GET(request: Request) {
                   thumbnail_url: `https://static-cdn.jtvnw.net/previews-ttv/live_user_${streamerMatch.userLogin}-640x360.jpg`,
                   duration: 0,
                   encounterWith: encounter.name,
+                  encounterActionText,
+                  encounterActionType: encounter.actionType,
+                  encounterWeapon: encounter.weapon,
+                  encounterDistanceMeters: encounter.distanceMeters,
+                  mapTag: encounter.mapTag,
+                  gameModeTag: encounter.gameModeTag,
+                  teamSizeModeTag: encounter.teamSizeModeTag,
+                  povTag: encounter.povTag,
                   sourceType: "vod"
                 });
                 if (clips.length >= limit) break;
@@ -484,6 +523,14 @@ export async function GET(request: Request) {
                 .replace("%{height}", "360"),
               duration: 0,
               encounterWith: encounter.name,
+              encounterActionText,
+              encounterActionType: encounter.actionType,
+              encounterWeapon: encounter.weapon,
+              encounterDistanceMeters: encounter.distanceMeters,
+              mapTag: encounter.mapTag,
+              gameModeTag: encounter.gameModeTag,
+              teamSizeModeTag: encounter.teamSizeModeTag,
+              povTag: encounter.povTag,
               sourceType: "vod"
             });
             if (clips.length >= limit) break;
@@ -519,6 +566,14 @@ export async function GET(request: Request) {
             clips.push({
               ...clip,
               encounterWith: encounter.name,
+              encounterActionText,
+              encounterActionType: encounter.actionType,
+              encounterWeapon: encounter.weapon,
+              encounterDistanceMeters: encounter.distanceMeters,
+              mapTag: encounter.mapTag,
+              gameModeTag: encounter.gameModeTag,
+              teamSizeModeTag: encounter.teamSizeModeTag,
+              povTag: encounter.povTag,
               sourceType: "clip"
             });
             if (clips.length >= limit) break;
