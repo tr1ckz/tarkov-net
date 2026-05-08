@@ -20,6 +20,7 @@ type ClipsResponse = {
   streamer?: string;
   profile?: { playerName: string; shard: string; platform: string };
   encountersScanned?: number;
+  lookupNeeded?: boolean;
   debug?: {
     encountersFound: number;
     directLoginMatches: number;
@@ -56,6 +57,7 @@ export function PubgClipsPanel() {
   const [shard, setShard] = useState("pc-na");
   const [pendingShard, setPendingShard] = useState("pc-na");
   const [loading, setLoading] = useState(false);
+  const [lookupLoading, setLookupLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [setupHint, setSetupHint] = useState<string | null>(null);
   const [clips, setClips] = useState<Clip[]>([]);
@@ -180,6 +182,59 @@ export function PubgClipsPanel() {
     );
   }
 
+  async function lookupAccount() {
+    const nextName = pendingPlayerName.trim();
+    if (!nextName) return;
+
+    setLookupLoading(true);
+    setError(null);
+    setSetupHint(null);
+
+    try {
+      const params = new URLSearchParams({
+        playerName: nextName,
+        platform: pendingPlatform,
+        shard: pendingShard
+      });
+      const response = await fetch(`/api/pubg/player-lookup?${params.toString()}`, {
+        cache: "no-store"
+      });
+      const payload = await response.json();
+
+      if (!response.ok || !payload?.found) {
+        setError(payload?.error ?? "Player lookup failed");
+        setSetupHint(payload?.setup ?? null);
+        return;
+      }
+
+      const profile = payload.profile as {
+        playerName: string;
+        shard: string;
+        matchCount: number;
+      };
+
+      setPendingPlayerName(profile.playerName);
+      setPendingShard(profile.shard);
+      setPlayerName(profile.playerName);
+      setShard(profile.shard);
+      setPlatform(pendingPlatform);
+      setMode("encounters");
+
+      localStorage.setItem(
+        "pubg-clips-profile",
+        JSON.stringify({
+          playerName: profile.playerName,
+          platform: pendingPlatform,
+          shard: profile.shard
+        })
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Player lookup failed");
+    } finally {
+      setLookupLoading(false);
+    }
+  }
+
   function loadGlobalPubg() {
     setMode("pubg");
     setStreamer("");
@@ -237,6 +292,14 @@ export function PubgClipsPanel() {
             className="sm:col-span-4 border border-[#5e4d34] bg-[#1a1510] px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
           >
             Find My Encounter Clips
+          </button>
+          <button
+            type="button"
+            onClick={lookupAccount}
+            disabled={lookupLoading}
+            className="sm:col-span-4 border border-[#2d2d2d] bg-[#111] px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#9a9080] hover:border-[#666] hover:text-[#e2d2af] disabled:opacity-50"
+          >
+            {lookupLoading ? "Looking up..." : "Lookup Player"}
           </button>
         </form>
 

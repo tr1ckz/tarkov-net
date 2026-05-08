@@ -26,6 +26,8 @@ type KillEvent = {
   attacker?: { name?: string | null } | null;
 };
 
+export type PubgPlatform = "steam" | "xbox" | "psn" | "kakao";
+
 function getPubgApiKey() {
   const apiKey = process.env.PUBG_DEV_API ?? process.env.PUBG_API_KEY;
   if (!apiKey) {
@@ -68,6 +70,48 @@ export async function getPlayerWithMatches(shard: string, playerName: string) {
     playerName: player.attributes.name,
     matchIds
   };
+}
+
+export function getCandidateShards(platform: PubgPlatform): string[] {
+  if (platform === "xbox") {
+    return ["xbox-na", "xbox-eu", "xbox-as", "xbox-oc", "xbox-sa"];
+  }
+
+  if (platform === "psn") {
+    return ["psn-na", "psn-eu", "psn-as", "psn-oc", "psn-sa"];
+  }
+
+  if (platform === "kakao") {
+    return ["pc-kakao", "pc-krjp", "pc-as"];
+  }
+
+  return ["pc-na", "pc-eu", "pc-as", "pc-kakao", "pc-krjp", "pc-sa", "pc-oc"];
+}
+
+export async function lookupPlayerAcrossShards(options: {
+  playerName: string;
+  preferredShard?: string;
+  platform: PubgPlatform;
+}) {
+  const { playerName, platform, preferredShard } = options;
+  const candidates = getCandidateShards(platform);
+  const orderedShards = preferredShard
+    ? [preferredShard, ...candidates.filter((shard) => shard !== preferredShard)]
+    : candidates;
+
+  for (const shard of orderedShards) {
+    const found = await getPlayerWithMatches(shard, playerName);
+    if (found) {
+      return {
+        shard,
+        playerId: found.playerId,
+        playerName: found.playerName,
+        matchCount: found.matchIds.length
+      };
+    }
+  }
+
+  return null;
 }
 
 export async function getMatchTelemetryUrl(shard: string, matchId: string) {

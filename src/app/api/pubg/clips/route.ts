@@ -6,7 +6,7 @@ import {
   getClipsByGameId,
   searchChannelsByName
 } from "@/lib/twitch";
-import { getRecentEncounterNames } from "@/lib/pubg-api";
+import { getPlayerWithMatches, getRecentEncounterNames } from "@/lib/pubg-api";
 
 export const dynamic = "force-dynamic";
 
@@ -34,9 +34,22 @@ export async function GET(request: Request) {
 
   try {
     if (playerName) {
+      const resolvedPlayer = await getPlayerWithMatches(shard, playerName);
+      if (!resolvedPlayer) {
+        return NextResponse.json(
+          {
+            clips: [],
+            source: "encounters",
+            error: "Player not found on selected shard. Use Lookup first to resolve the correct shard.",
+            lookupNeeded: true
+          },
+          { status: 404 }
+        );
+      }
+
       const encounters = await getRecentEncounterNames({
         shard,
-        playerName,
+        playerName: resolvedPlayer.playerName,
         maxMatches: 7,
         maxOpponents: 25
       });
@@ -111,7 +124,7 @@ export async function GET(request: Request) {
       return NextResponse.json({
         clips,
         source: "encounters",
-        profile: { playerName, shard, platform },
+        profile: { playerName: resolvedPlayer.playerName, shard, platform },
         encountersScanned: encounters.length,
         debug
       });
