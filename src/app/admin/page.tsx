@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 type UserRow = {
   id: string;
@@ -122,9 +122,35 @@ type LiveTailResponse = {
   runs: LiveTailRun[];
 };
 
+type TwitchIndexStatusResponse = {
+  key: string;
+  activeStreamerCount: number;
+  lastRefreshAt: string | null;
+  refreshInProgress: boolean;
+  refreshStartedAt: string | null;
+  jobHealth?: {
+    crawlerHealthy: boolean;
+    indexFresh: boolean;
+    crawlerLastSeenAt: string | null;
+    crawlerLastStatus: "ok" | "empty" | "error" | null;
+    crawlerLastError: string | null;
+    crawlerMetadata?: Record<string, unknown> | null;
+  };
+  recentDiagnosticRuns?: Array<{
+    createdAt: string;
+    source: string;
+    status: "ok" | "empty" | "error";
+    playerName: string | null;
+    errorMessage: string | null;
+    metadata?: Record<string, unknown> | null;
+  }>;
+};
+
 export default function AdminPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   const [users, setUsers] = useState<UserRow[]>([]);
   const [invites, setInvites] = useState<InviteRow[]>([]);
@@ -144,6 +170,9 @@ export default function AdminPage() {
   const [liveTailMinutes, setLiveTailMinutes] = useState("30");
   const [liveTailLimit, setLiveTailLimit] = useState("120");
   const [liveTailPlayer, setLiveTailPlayer] = useState("");
+  const [indexStatus, setIndexStatus] = useState<TwitchIndexStatusResponse | null>(null);
+  const [indexStatusError, setIndexStatusError] = useState<string | null>(null);
+  const [queryInitialized, setQueryInitialized] = useState(false);
 
   const isAdmin = (session?.user as { role?: string })?.role === "ADMIN";
 
@@ -170,6 +199,60 @@ export default function AdminPage() {
       setLoading(false);
     });
   }, [isAdmin]);
+
+  useEffect(() => {
+    if (queryInitialized) return;
+
+    const tabParam = searchParams.get("tab");
+    if (tabParam === "users" || tabParam === "invites" || tabParam === "pubg") {
+      setTab(tabParam);
+    }
+
+    const sourceParam = searchParams.get("ltSource");
+    if (sourceParam) setLiveTailSource(sourceParam);
+    const statusParam = searchParams.get("ltStatus");
+    if (statusParam) setLiveTailStatus(statusParam);
+    const playerParam = searchParams.get("ltPlayer");
+    if (playerParam) setLiveTailPlayer(playerParam);
+    const minutesParam = searchParams.get("ltMinutes");
+    if (minutesParam) setLiveTailMinutes(minutesParam);
+    const limitParam = searchParams.get("ltLimit");
+    if (limitParam) setLiveTailLimit(limitParam);
+
+    setQueryInitialized(true);
+  }, [queryInitialized, searchParams]);
+
+  useEffect(() => {
+    if (!queryInitialized) return;
+
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", tab);
+
+    if (tab === "pubg") {
+      params.set("ltSource", liveTailSource);
+      params.set("ltStatus", liveTailStatus);
+      params.set("ltPlayer", liveTailPlayer);
+      params.set("ltMinutes", liveTailMinutes);
+      params.set("ltLimit", liveTailLimit);
+    }
+
+    const nextQuery = params.toString();
+    const currentQuery = searchParams.toString();
+    if (nextQuery !== currentQuery) {
+      router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+    }
+  }, [
+    queryInitialized,
+    tab,
+    liveTailSource,
+    liveTailStatus,
+    liveTailPlayer,
+    liveTailMinutes,
+    liveTailLimit,
+    pathname,
+    router,
+    searchParams
+  ]);
 
   useEffect(() => {
     if (!isAdmin || tab !== "pubg") return;
@@ -253,6 +336,37 @@ export default function AdminPage() {
     liveTailLimit,
     liveTailPlayer
   ]);
+
+  useEffect(() => {
+    if (!isAdmin || tab !== "pubg") return;
+
+    let cancelled = false;
+    const loadStatus = async () => {
+      try {
+        const payload = await fetch("/api/pubg/twitch-index/status", { cache: "no-store" }).then(
+          (response) => response.json() as Promise<TwitchIndexStatusResponse>
+        );
+        if (!cancelled) {
+          setIndexStatus(payload);
+          setIndexStatusError(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setIndexStatusError(error instanceof Error ? error.message : "Failed to load index status");
+        }
+      }
+    };
+
+    void loadStatus();
+    const interval = setInterval(() => {
+      void loadStatus();
+    }, 10000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isAdmin, tab]);
 
   async function refreshPubgStats() {
     setRefreshingPubg(true);
@@ -570,7 +684,14 @@ export default function AdminPage() {
           <p className="text-[11px] uppercase tracking-widest text-[#7f7768]">
             Build: {pubgStats?.build?.gitSha?.slice(0, 12) || "unknown"} | env: {pubgStats?.build?.nodeEnv || "unknown"}
           </p>
-          <p className="text-[10px] uppercase tracking-widest text-[#555]">Auto-refresh every 15s while this tab is open.</p>
+          <p className="text-[10px] uppercase tracking-widest text-[#555]">Auto-refresh: stats 15s, jobs 10s, log tail 5s while this tab is open.</p>
+
+          <div className="border border-[#2d2d2d] bg-[#111] p-3">
+            <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">What's Going On</h2>
+            <p className="mt-2 text-xs text-[#8b816f]">
+              This panel exposes live linker activity and crawler/EventSub health. If mappings are missing, start with ACTIVE JOBS status and then inspect LOG TAIL errors.
+            </p>
+          </div>
 
           <div className="flex items-center justify-between">
             <p className="text-xs uppercase tracking-widest text-[#7f7768]">
@@ -622,8 +743,56 @@ export default function AdminPage() {
           )}
 
           <div className="border border-[#2d2d2d] bg-[#111] p-3">
+            <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">Active Crawlers / Jobs</h2>
+            {indexStatusError && <p className="mt-2 text-xs text-[#e07070]">{indexStatusError}</p>}
+            <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className="border border-[#1f1f1f] bg-[#0d0d0d] p-2 text-xs">
+                <div className="text-[#666] uppercase tracking-widest">Crawler Health</div>
+                <div className={indexStatus?.jobHealth?.crawlerHealthy ? "text-[#8fa070]" : "text-[#e07070]"}>
+                  {indexStatus?.jobHealth?.crawlerHealthy ? "RUNNING" : "STALE / DOWN"}
+                </div>
+              </div>
+              <div className="border border-[#1f1f1f] bg-[#0d0d0d] p-2 text-xs">
+                <div className="text-[#666] uppercase tracking-widest">Index Freshness</div>
+                <div className={indexStatus?.jobHealth?.indexFresh ? "text-[#8fa070]" : "text-[#d8b46b]"}>
+                  {indexStatus?.jobHealth?.indexFresh ? "FRESH" : "STALE"}
+                </div>
+              </div>
+              <div className="border border-[#1f1f1f] bg-[#0d0d0d] p-2 text-xs">
+                <div className="text-[#666] uppercase tracking-widest">Last Crawler Seen</div>
+                <div className="text-[#c8bda0]">
+                  {indexStatus?.jobHealth?.crawlerLastSeenAt ? new Date(indexStatus.jobHealth.crawlerLastSeenAt).toLocaleString() : "n/a"}
+                </div>
+              </div>
+              <div className="border border-[#1f1f1f] bg-[#0d0d0d] p-2 text-xs">
+                <div className="text-[#666] uppercase tracking-widest">Active Indexed Streamers</div>
+                <div className="text-[#e2d2af]">{indexStatus?.activeStreamerCount ?? pubgStats?.totals.activeIndexerCount ?? 0}</div>
+              </div>
+            </div>
+            {indexStatus?.jobHealth?.crawlerLastError && (
+              <p className="mt-2 text-xs text-[#e07070]">Last crawler error: {indexStatus.jobHealth.crawlerLastError}</p>
+            )}
+            <div className="mt-3 max-h-40 space-y-1 overflow-y-auto pr-1">
+              {(indexStatus?.recentDiagnosticRuns ?? []).map((row, idx) => (
+                <div key={`${row.createdAt}-${row.source}-${idx}`} className="text-[11px] text-[#8e8e8e]">
+                  <span className="text-[#c8bda0]">{new Date(row.createdAt).toLocaleTimeString()}</span>
+                  <span className="text-[#666]"> · </span>
+                  <span className="text-[#e2d2af]">{row.source}</span>
+                  <span className="text-[#666]"> · </span>
+                  <span className={row.status === "ok" ? "text-[#8fa070]" : row.status === "empty" ? "text-[#d8b46b]" : "text-[#e07070]"}>{row.status}</span>
+                  {row.playerName && <span className="text-[#666]"> · {row.playerName}</span>}
+                  {row.errorMessage && <span className="text-[#e07070]"> · {row.errorMessage}</span>}
+                </div>
+              ))}
+              {(indexStatus?.recentDiagnosticRuns?.length ?? 0) === 0 && (
+                <p className="text-[11px] text-[#555]">No diagnostics runs yet from eventsub/index routes.</p>
+              )}
+            </div>
+          </div>
+
+          <div className="border border-[#2d2d2d] bg-[#111] p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">Live Log Tail</h2>
+              <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">Logs (Live Tail)</h2>
               <p className="text-[10px] uppercase tracking-widest text-[#666]">Polling every 5s</p>
             </div>
 
@@ -637,6 +806,7 @@ export default function AdminPage() {
                 <option value="encounters">Encounters</option>
                 <option value="eventsub">EventSub</option>
                 <option value="twitch-index-refresh">Index Refresh</option>
+                <option value="crawler-index">Crawler Index</option>
                 <option value="pubg">PUBG</option>
                 <option value="streamer">Streamer</option>
                 <option value="admin_probe">Admin Probe</option>
@@ -726,6 +896,8 @@ export default function AdminPage() {
             </div>
           </div>
 
+          <div className="border border-[#2d2d2d] bg-[#111] p-3">
+            <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">Stats</h2>
           <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
             <div className="border border-[#2d2d2d] bg-[#111] p-3">
               <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Linker Runs</div>
@@ -764,6 +936,7 @@ export default function AdminPage() {
               <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.streamerProfileLiveCount ?? 0}</div>
             </div>
           </div>
+          </div>
 
           <div className="border border-[#2d2d2d] bg-[#111] p-3">
             <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">Recent Linker Runs (Diagnostics)</h2>
@@ -794,40 +967,6 @@ export default function AdminPage() {
             </div>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div className="border border-[#2d2d2d] bg-[#111] p-3">
-              <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">Top PUBG Accounts Linked</h2>
-              <div className="mt-3 space-y-2">
-                {(pubgStats?.topPubg ?? []).map((row) => (
-                  <div key={row.normalized} className="flex items-center justify-between border border-[#1f1f1f] bg-[#0d0d0d] px-3 py-2 text-xs">
-                    <div>
-                      <div className="text-[#e2d2af]">{row.pubgName}</div>
-                      <div className="text-[#666]">{row.uniqueTwitchAccounts} unique Twitch accounts</div>
-                    </div>
-                    <div className="text-[#8fa070]">{row.linkEvents} events</div>
-                  </div>
-                ))}
-                {(pubgStats?.topPubg.length ?? 0) === 0 && <p className="text-xs text-[#555]">No linked accounts yet.</p>}
-              </div>
-            </div>
-
-            <div className="border border-[#2d2d2d] bg-[#111] p-3">
-              <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">Top Twitch Accounts Matched</h2>
-              <div className="mt-3 space-y-2">
-                {(pubgStats?.topTwitch ?? []).map((row) => (
-                  <div key={row.twitchUserId} className="flex items-center justify-between border border-[#1f1f1f] bg-[#0d0d0d] px-3 py-2 text-xs">
-                    <div>
-                      <div className="text-[#e2d2af]">{row.twitchUserName}</div>
-                      <div className="text-[#666]">@{row.twitchUserLogin || "unknown"} • {row.uniquePubgAccounts} PUBG accounts</div>
-                    </div>
-                    <div className="text-[#8fa070]">{row.linkEvents} events</div>
-                  </div>
-                ))}
-                {(pubgStats?.topTwitch.length ?? 0) === 0 && <p className="text-xs text-[#555]">No Twitch links yet.</p>}
-              </div>
-            </div>
-          </div>
-
           <div className="border border-[#2d2d2d] bg-[#111] p-3">
             <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">Recent Link Events</h2>
             <div className="mt-3 space-y-2">
@@ -840,18 +979,6 @@ export default function AdminPage() {
                 </div>
               ))}
               {(pubgStats?.recent.length ?? 0) === 0 && <p className="text-xs text-[#555]">No link events captured yet.</p>}
-            </div>
-          </div>
-
-          <div className="border border-[#2d2d2d] bg-[#111] p-3">
-            <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">Event Type Breakdown</h2>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {(pubgStats?.sourceBreakdown ?? []).map((row) => (
-                <span key={row.eventType} className="border border-[#3a4430] bg-[#12160e] px-2 py-1 text-[11px] uppercase tracking-widest text-[#8fa070]">
-                  {row.eventType}: {row.count}
-                </span>
-              ))}
-              {(pubgStats?.sourceBreakdown.length ?? 0) === 0 && <span className="text-xs text-[#555]">No event data yet.</span>}
             </div>
           </div>
         </div>

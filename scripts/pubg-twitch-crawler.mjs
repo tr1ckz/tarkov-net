@@ -11,6 +11,25 @@ const EVENTSUB_CREATE_LIMIT_PER_SYNC = Math.max(1, Math.min(500, Number(process.
 let tokenState = null;
 let lastEventSubSyncMs = 0;
 
+async function writeCrawlerRunLog(input) {
+  try {
+    await prisma.pubgLinkRunLog.create({
+      data: {
+        source: "crawler-index",
+        status: input.status,
+        clipsReturned: 0,
+        encountersFound: 0,
+        errorMessage: input.errorMessage,
+        metadataJson: input.metadata ? JSON.stringify(input.metadata) : undefined
+      }
+    });
+  } catch (error) {
+    log("error", "failed to write crawler run log", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
 function log(level, message, data = {}) {
   const payload = {
     ts: new Date().toISOString(),
@@ -392,12 +411,28 @@ async function indexStreams() {
     indexedAt: indexedAt.toISOString(),
     durationMs: Date.now() - startedAt
   });
+
+  await writeCrawlerRunLog({
+    status: "ok",
+    metadata: {
+      runId,
+      indexedCount: streams.length,
+      indexedAt: indexedAt.toISOString(),
+      durationMs: Date.now() - startedAt,
+      eventSubSyncIntervalMs: EVENTSUB_SYNC_INTERVAL_MS
+    }
+  });
 }
 
 async function runForever() {
   await indexStreams().catch(async (error) => {
     log("error", "startup index failed", {
       error: error instanceof Error ? error.message : String(error)
+    });
+    await writeCrawlerRunLog({
+      status: "error",
+      errorMessage: error instanceof Error ? error.message : String(error),
+      metadata: { stage: "startup" }
     });
     await prisma.cacheState.updateMany({
       where: { key: "pubg:twitch-index" },
@@ -410,6 +445,11 @@ async function runForever() {
     indexStreams().catch((error) => {
       log("error", "scheduled refresh failed", {
         error: error instanceof Error ? error.message : String(error)
+      });
+      void writeCrawlerRunLog({
+        status: "error",
+        errorMessage: error instanceof Error ? error.message : String(error),
+        metadata: { stage: "scheduled_refresh" }
       });
       prisma.cacheState
         .updateMany({
@@ -432,6 +472,11 @@ if (runOnce) {
     .catch((error) => {
       log("error", "one-shot refresh failed", {
         error: error instanceof Error ? error.message : String(error)
+      });
+      void writeCrawlerRunLog({
+        status: "error",
+        errorMessage: error instanceof Error ? error.message : String(error),
+        metadata: { stage: "one_shot" }
       });
       process.exitCode = 1;
     })
