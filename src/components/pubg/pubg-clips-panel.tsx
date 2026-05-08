@@ -42,6 +42,17 @@ type ClipsResponse = {
   setup?: string;
 };
 
+type PlayerLookupResponse = {
+  found?: boolean;
+  error?: string;
+  setup?: string;
+  profile?: {
+    playerName: string;
+    shard: string;
+    matchCount: number;
+  };
+};
+
 type Mode = "pubg" | "streamer" | "encounters";
 
 async function fetchJsonWithTimeout<T>(url: string, timeoutMs = 20000): Promise<T> {
@@ -84,6 +95,10 @@ function formatRelativeTime(iso: string) {
   return `${days}d ago`;
 }
 
+function normalizeName(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 export function PubgClipsPanel() {
   const [mode, setMode] = useState<Mode>("pubg");
   const [streamer, setStreamer] = useState("");
@@ -95,6 +110,13 @@ export function PubgClipsPanel() {
   const [resolvedShard, setResolvedShard] = useState("");
   const [loading, setLoading] = useState(false);
   const [lookupLoading, setLookupLoading] = useState(false);
+  const [liveLookupLoading, setLiveLookupLoading] = useState(false);
+  const [liveLookupError, setLiveLookupError] = useState<string | null>(null);
+  const [liveLookupProfile, setLiveLookupProfile] = useState<{
+    playerName: string;
+    shard: string;
+    matchCount: number;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [setupHint, setSetupHint] = useState<string | null>(null);
   const [clips, setClips] = useState<Clip[]>([]);
@@ -187,6 +209,72 @@ export function PubgClipsPanel() {
     };
   }, [query]);
 
+  useEffect(() => {
+    const candidate = pendingPlayerName.trim();
+    if (candidate.length < 3) {
+      setLiveLookupProfile(null);
+      setLiveLookupError(null);
+      setLiveLookupLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      setLiveLookupLoading(true);
+      setLiveLookupError(null);
+
+      const params = new URLSearchParams({
+        playerName: candidate,
+        platform: pendingPlatform
+      });
+
+      fetch(`/api/pubg/player-lookup?${params.toString()}`, {
+        cache: "no-store",
+        signal: controller.signal
+      })
+        .then(async (response) => {
+          const payload = (await response.json()) as PlayerLookupResponse;
+          if (!response.ok || !payload?.found || !payload.profile) {
+            throw new Error(payload?.error ?? "Player lookup failed");
+          }
+
+          setLiveLookupProfile(payload.profile);
+          setLiveLookupError(null);
+        })
+        .catch((err: unknown) => {
+          if (err instanceof Error && err.name === "AbortError") {
+            return;
+          }
+          setLiveLookupProfile(null);
+          setLiveLookupError(err instanceof Error ? err.message : "Player lookup failed");
+        })
+        .finally(() => {
+          setLiveLookupLoading(false);
+        });
+    }, 500);
+
+    return () => {
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [pendingPlayerName, pendingPlatform]);
+
+  function applyLookupProfile(profile: { playerName: string; shard: string; matchCount: number }) {
+    setPendingPlayerName(profile.playerName);
+    setPlayerName(profile.playerName);
+    setResolvedShard(profile.shard);
+    setPlatform(pendingPlatform);
+    setMode("encounters");
+
+    localStorage.setItem(
+      "pubg-clips-profile",
+      JSON.stringify({
+        playerName: profile.playerName,
+        platform: pendingPlatform
+      })
+    );
+  }
+
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMode("streamer");
@@ -197,6 +285,14 @@ export function PubgClipsPanel() {
     event.preventDefault();
     const nextName = pendingPlayerName.trim();
     if (!nextName) return;
+
+    if (
+      liveLookupProfile &&
+      normalizeName(liveLookupProfile.playerName) === normalizeName(nextName)
+    ) {
+      applyLookupProfile(liveLookupProfile);
+      return;
+    }
 
     setMode("encounters");
     setPlayerName(nextName);
@@ -225,16 +321,7 @@ export function PubgClipsPanel() {
         playerName: nextName,
         platform: pendingPlatform
       });
-      const payload = await fetchJsonWithTimeout<{
-        found?: boolean;
-        error?: string;
-        setup?: string;
-        profile?: {
-          playerName: string;
-          shard: string;
-          matchCount: number;
-        };
-      }>(`/api/pubg/player-lookup?${params.toString()}`);
+      const payload = await fetchJsonWithTimeout<PlayerLookupResponse>(`/api/pubg/player-lookup?${params.toString()}`);
 
       if (!payload?.found || !payload.profile) {
         setError(payload?.error ?? "Player lookup failed");
@@ -243,20 +330,9 @@ export function PubgClipsPanel() {
       }
 
       const profile = payload.profile;
-
-      setPendingPlayerName(profile.playerName);
-      setPlayerName(profile.playerName);
-      setResolvedShard(profile.shard);
-      setPlatform(pendingPlatform);
-      setMode("encounters");
-
-      localStorage.setItem(
-        "pubg-clips-profile",
-        JSON.stringify({
-          playerName: profile.playerName,
-          platform: pendingPlatform
-        })
-      );
+      setLiveLookupProfile(profile);
+      setLiveLookupError(null);
+      applyLookupProfile(profile);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Player lookup failed");
       setResolvedShard("unresolved");
@@ -269,6 +345,8 @@ export function PubgClipsPanel() {
     setMode("pubg");
     setStreamer("");
     setPlayerName("");
+    setLiveLookupProfile(null);
+    setLiveLookupError(null);
   }
 
   function clearFilter() {
@@ -278,6 +356,8 @@ export function PubgClipsPanel() {
     setPlayerName("");
     setResolvedShard("");
     setMode("pubg");
+    setLiveLookupProfile(null);
+    setLiveLookupError(null);
     localStorage.removeItem("pubg-clips-profile");
   }
 
@@ -324,6 +404,20 @@ export function PubgClipsPanel() {
             {lookupLoading ? "Looking up..." : "Lookup Player"}
           </button>
         </form>
+
+        {pendingPlayerName.trim().length >= 3 && (
+          <div className="mt-2 text-xs text-[#8c826f]">
+            {liveLookupLoading && <span>Checking case-sensitive PUBG name...</span>}
+            {!liveLookupLoading && liveLookupProfile && (
+              <span>
+                Found: <span className="text-[#e2d2af]">{liveLookupProfile.playerName}</span> on {liveLookupProfile.shard} ({liveLookupProfile.matchCount} matches)
+              </span>
+            )}
+            {!liveLookupLoading && !liveLookupProfile && liveLookupError && (
+              <span className="text-[#c78f8f]">{liveLookupError}</span>
+            )}
+          </div>
+        )}
 
         <div className="mt-4 border-t border-[#2a2a2a] pt-3">
           <p className="text-[11px] uppercase tracking-[0.12em] text-[#7f7768]">Manual Twitch Filter</p>
