@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Crosshair, Globe, MapPinned, Route, Shield } from "lucide-react";
+import { Crosshair, MapPinned } from "lucide-react";
 
 type NavEntry = {
   href: string;
@@ -8,12 +8,8 @@ type NavEntry = {
 };
 
 const PUBG_NAV: NavEntry[] = [
-  { href: "/pubg", label: "Overview", icon: Crosshair },
-  { href: "/pubg/maps", label: "Maps Intel", icon: MapPinned },
-  { href: "/pubg/meta", label: "Regional Meta", icon: Globe },
-  { href: "/pubg/meta/americas", label: "Americas", icon: Route },
-  { href: "/pubg/meta/europe", label: "Europe", icon: Shield },
-  { href: "/pubg/meta/asia", label: "Asia", icon: Route }
+  { href: "/pubg", label: "Maps", icon: Crosshair },
+  { href: "/pubg/maps", label: "All Maps", icon: MapPinned },
 ];
 
 export default function PubgLayout({ children }: { children: React.ReactNode }) {

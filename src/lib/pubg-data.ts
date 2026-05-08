@@ -769,6 +769,94 @@ export const pubgMaps: PubgMapIntel[] = [
         notes: "Stealthy macro route with multiple hard-cover branches."
       }
     ]
+  },
+  {
+    slug: "sanhok",
+    name: "Sanhok",
+    mapImage: "/pubg/maps/Sanhok_Main_No_Text_Low_Res.jpg",
+    sizeKm: "4x4",
+    terrain: "Jungle, rivers, and dense foliage",
+    bestFor: "Fast-paced squads who thrive in close-range fights",
+    hotDrops: ["Paradise Resort", "Bootcamp", "Cave", "Ruins"],
+    vehicleRoutes: ["Bootcamp to Pai Nan river road", "Camp Alpha to Quarry ridge", "South beach vehicle loop"],
+    priorityCompounds: ["Paradise Resort central buildings", "Bootcamp military structures", "Cave compound"],
+    midgameFocus: "Constant pressure rotation through jungle paths; vehicles are secondary here.",
+    endgameNotes: "Final circles in Sanhok collapse fast — pre-position inside zone by phase 4.",
+    secretRooms: [],
+    markers: [
+      {
+        id: "sanhok-paradise",
+        label: "Paradise Resort",
+        type: "hot-drop",
+        x: 55,
+        y: 38,
+        notes: "High loot density hotel complex with vertical fights."
+      },
+      {
+        id: "sanhok-bootcamp",
+        label: "Bootcamp",
+        type: "hot-drop",
+        x: 45,
+        y: 55,
+        notes: "Military-grade loot with fully exposed open lanes."
+      },
+      {
+        id: "sanhok-cave",
+        label: "Cave",
+        type: "hot-drop",
+        x: 38,
+        y: 72,
+        notes: "Unique underground loot corridor — watch all entry points."
+      },
+      {
+        id: "sanhok-river-route",
+        label: "River Road Route",
+        type: "vehicle-route",
+        x: 50,
+        y: 45,
+        notes: "Fast rotate using the central river road spine."
+      }
+    ]
+  },
+  {
+    slug: "karakin",
+    name: "Karakin",
+    mapImage: "/pubg/maps/Karakin_Main_No_Text_Low_Res.jpg",
+    sizeKm: "2x2",
+    terrain: "Arid hills, bunkers, and destructible walls",
+    bestFor: "Aggressive entry-fraggers who exploit breachable cover",
+    hotDrops: ["Al Habar", "Cargo Ship", "Bahr Sahir", "Hadiqa Nemo"],
+    vehicleRoutes: ["Al Habar to Bahr Sahir hilltop road", "East perimeter breaching path", "Cargo Ship north approach"],
+    priorityCompounds: ["Al Habar elevated structures", "Bahr Sahir cliff buildings", "Hadiqa Nemo garden compound"],
+    midgameFocus: "Use sticky bombs to breach walls and create new angles the opponent doesn't expect.",
+    endgameNotes: "Karakin finals are always brutal CQC — hold elevated broken-wall cover.",
+    secretRooms: [],
+    markers: [
+      {
+        id: "karakin-habar",
+        label: "Al Habar",
+        type: "hot-drop",
+        x: 42,
+        y: 35,
+        notes: "Dense urban fights with breakable walls everywhere."
+      },
+      {
+        id: "karakin-bahr",
+        label: "Bahr Sahir",
+        type: "hot-drop",
+        x: 60,
+        y: 58,
+        notes: "Elevated cliff town with dominant angles on approaching squads."
+      },
+      {
+        id: "karakin-breach-route",
+        label: "Breach Route",
+        type: "vehicle-route",
+        x: 50,
+        y: 45,
+        notes: "Main vehicle rotation path cutting through the map center."
+      }
+    ]
   }
 ];
 
