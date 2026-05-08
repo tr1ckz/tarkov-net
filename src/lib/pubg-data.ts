@@ -20,6 +20,7 @@ export type PubgMapMarker = {
 export type PubgMapIntel = {
   slug: string;
   name: string;
+  mapImage: string;
   sizeKm: string;
   terrain: string;
   bestFor: string;
@@ -46,6 +47,7 @@ export const pubgMaps: PubgMapIntel[] = [
   {
     slug: "erangel",
     name: "Erangel",
+    mapImage: "/pubg/maps/Erangel_Main_No_Text_Low_Res.png",
     sizeKm: "8x8",
     terrain: "Mixed fields, compounds, and ridgelines",
     bestFor: "Balanced squads with strong vehicle rotations",
@@ -54,7 +56,143 @@ export const pubgMaps: PubgMapIntel[] = [
     priorityCompounds: ["Rozhok hill compounds", "South George crate edge", "Mansion and prison ridge"],
     midgameFocus: "Hold bridge control and elevated compounds around central circles.",
     endgameNotes: "Use smoke walls aggressively in open circles and deny ridges with crossfires.",
-    secretRooms: [],
+    secretRooms: [
+      {
+        name: "Erangel Secret Basement 1",
+        mapGridArea: "62.95% / 8.09%",
+        howToOpen: "Use an Erangel Secret Basement Key to unlock basement entrances.",
+        expectedLoot: "High-tier weapons, armor, and utility from basement crates.",
+        risk: "medium",
+        x: 62.95,
+        y: 8.09
+      },
+      {
+        name: "Erangel Secret Basement 2",
+        mapGridArea: "16.72% / 22.38%",
+        howToOpen: "Use an Erangel Secret Basement Key to unlock basement entrances.",
+        expectedLoot: "High-tier weapons, armor, and utility from basement crates.",
+        risk: "medium",
+        x: 16.72,
+        y: 22.38
+      },
+      {
+        name: "Erangel Secret Basement 3",
+        mapGridArea: "50.95% / 23.67%",
+        howToOpen: "Use an Erangel Secret Basement Key to unlock basement entrances.",
+        expectedLoot: "High-tier weapons, armor, and utility from basement crates.",
+        risk: "medium",
+        x: 50.95,
+        y: 23.67
+      },
+      {
+        name: "Erangel Secret Basement 4",
+        mapGridArea: "79.72% / 25.35%",
+        howToOpen: "Use an Erangel Secret Basement Key to unlock basement entrances.",
+        expectedLoot: "High-tier weapons, armor, and utility from basement crates.",
+        risk: "medium",
+        x: 79.72,
+        y: 25.35
+      },
+      {
+        name: "Erangel Secret Basement 5",
+        mapGridArea: "31.6% / 27.53%",
+        howToOpen: "Use an Erangel Secret Basement Key to unlock basement entrances.",
+        expectedLoot: "High-tier weapons, armor, and utility from basement crates.",
+        risk: "medium",
+        x: 31.6,
+        y: 27.53
+      },
+      {
+        name: "Erangel Secret Basement 6",
+        mapGridArea: "66.23% / 41.82%",
+        howToOpen: "Use an Erangel Secret Basement Key to unlock basement entrances.",
+        expectedLoot: "High-tier weapons, armor, and utility from basement crates.",
+        risk: "medium",
+        x: 66.23,
+        y: 41.82
+      },
+      {
+        name: "Erangel Secret Basement 7",
+        mapGridArea: "19.3% / 43.41%",
+        howToOpen: "Use an Erangel Secret Basement Key to unlock basement entrances.",
+        expectedLoot: "High-tier weapons, armor, and utility from basement crates.",
+        risk: "medium",
+        x: 19.3,
+        y: 43.41
+      },
+      {
+        name: "Erangel Secret Basement 8",
+        mapGridArea: "37.06% / 45.59%",
+        howToOpen: "Use an Erangel Secret Basement Key to unlock basement entrances.",
+        expectedLoot: "High-tier weapons, armor, and utility from basement crates.",
+        risk: "medium",
+        x: 37.06,
+        y: 45.59
+      },
+      {
+        name: "Erangel Secret Basement 9",
+        mapGridArea: "56.6% / 54.82%",
+        howToOpen: "Use an Erangel Secret Basement Key to unlock basement entrances.",
+        expectedLoot: "High-tier weapons, armor, and utility from basement crates.",
+        risk: "medium",
+        x: 56.6,
+        y: 54.82
+      },
+      {
+        name: "Erangel Secret Basement 10",
+        mapGridArea: "82.5% / 59.78%",
+        howToOpen: "Use an Erangel Secret Basement Key to unlock basement entrances.",
+        expectedLoot: "High-tier weapons, armor, and utility from basement crates.",
+        risk: "medium",
+        x: 82.5,
+        y: 59.78
+      },
+      {
+        name: "Erangel Secret Basement 11",
+        mapGridArea: "32.79% / 62.36%",
+        howToOpen: "Use an Erangel Secret Basement Key to unlock basement entrances.",
+        expectedLoot: "High-tier weapons, armor, and utility from basement crates.",
+        risk: "medium",
+        x: 32.79,
+        y: 62.36
+      },
+      {
+        name: "Erangel Secret Basement 12",
+        mapGridArea: "15.93% / 67.71%",
+        howToOpen: "Use an Erangel Secret Basement Key to unlock basement entrances.",
+        expectedLoot: "High-tier weapons, armor, and utility from basement crates.",
+        risk: "medium",
+        x: 15.93,
+        y: 67.71
+      },
+      {
+        name: "Erangel Secret Basement 13",
+        mapGridArea: "53.13% / 72.38%",
+        howToOpen: "Use an Erangel Secret Basement Key to unlock basement entrances.",
+        expectedLoot: "High-tier weapons, armor, and utility from basement crates.",
+        risk: "medium",
+        x: 53.13,
+        y: 72.38
+      },
+      {
+        name: "Erangel Secret Basement 14",
+        mapGridArea: "40.83% / 80.61%",
+        howToOpen: "Use an Erangel Secret Basement Key to unlock basement entrances.",
+        expectedLoot: "High-tier weapons, armor, and utility from basement crates.",
+        risk: "medium",
+        x: 40.83,
+        y: 80.61
+      },
+      {
+        name: "Erangel Secret Basement 15",
+        mapGridArea: "69.1% / 82.1%",
+        howToOpen: "Use an Erangel Secret Basement Key to unlock basement entrances.",
+        expectedLoot: "High-tier weapons, armor, and utility from basement crates.",
+        risk: "medium",
+        x: 69.1,
+        y: 82.1
+      }
+    ],
     markers: [
       {
         id: "erangel-school",
@@ -85,6 +223,7 @@ export const pubgMaps: PubgMapIntel[] = [
   {
     slug: "miramar",
     name: "Miramar",
+    mapImage: "/pubg/maps/Miramar_Main_No_Text_Low_Res.png",
     sizeKm: "8x8",
     terrain: "Desert hills, long sight-lines, sparse cover",
     bestFor: "Precision teams with DMR/sniper confidence",
@@ -124,6 +263,7 @@ export const pubgMaps: PubgMapIntel[] = [
   {
     slug: "taego",
     name: "Taego",
+    mapImage: "/pubg/maps/Taego_Main_No_Text_Low_Res.png",
     sizeKm: "8x8",
     terrain: "Rice fields, towns, and mountain edges",
     bestFor: "Fast loot/opening tempo with key-driven power spikes",
@@ -134,22 +274,139 @@ export const pubgMaps: PubgMapIntel[] = [
     endgameNotes: "Avoid low fields in final circles unless you have smoke and vehicles in reserve.",
     secretRooms: [
       {
-        name: "Taego Secret Room Cluster - Ho San Belt",
-        mapGridArea: "Around Ho San and east-river compounds",
-        howToOpen: "Use Taego Secret Room Key from world spawns and loot crates.",
-        expectedLoot: "High-tier armor, emergency pickups, and weapon upgrades.",
+        name: "Taego Secret Room 1",
+        mapGridArea: "16.81% / 14.88%",
+        howToOpen: "Use a Taego Secret Room Key found as world loot.",
+        expectedLoot: "High-tier armor, weapons, and utility spikes.",
         risk: "high",
-        x: 63,
-        y: 42
+        x: 16.81,
+        y: 14.88
       },
       {
-        name: "Taego Secret Room Cluster - Buk San Sa",
-        mapGridArea: "North-central temple and village compounds",
-        howToOpen: "Taego Secret Room Key",
-        expectedLoot: "High weapon density and late-game utility stacks.",
-        risk: "medium",
-        x: 47,
-        y: 23
+        name: "Taego Secret Room 2",
+        mapGridArea: "31.79% / 16.37%",
+        howToOpen: "Use a Taego Secret Room Key found as world loot.",
+        expectedLoot: "High-tier armor, weapons, and utility spikes.",
+        risk: "high",
+        x: 31.79,
+        y: 16.37
+      },
+      {
+        name: "Taego Secret Room 3",
+        mapGridArea: "59.47% / 21.23%",
+        howToOpen: "Use a Taego Secret Room Key found as world loot.",
+        expectedLoot: "High-tier armor, weapons, and utility spikes.",
+        risk: "high",
+        x: 59.47,
+        y: 21.23
+      },
+      {
+        name: "Taego Secret Room 4",
+        mapGridArea: "43.79% / 23.61%",
+        howToOpen: "Use a Taego Secret Room Key found as world loot.",
+        expectedLoot: "High-tier armor, weapons, and utility spikes.",
+        risk: "high",
+        x: 43.79,
+        y: 23.61
+      },
+      {
+        name: "Taego Secret Room 5",
+        mapGridArea: "84.07% / 25%",
+        howToOpen: "Use a Taego Secret Room Key found as world loot.",
+        expectedLoot: "High-tier armor, weapons, and utility spikes.",
+        risk: "high",
+        x: 84.07,
+        y: 25
+      },
+      {
+        name: "Taego Secret Room 6",
+        mapGridArea: "15.52% / 33.04%",
+        howToOpen: "Use a Taego Secret Room Key found as world loot.",
+        expectedLoot: "High-tier armor, weapons, and utility spikes.",
+        risk: "high",
+        x: 15.52,
+        y: 33.04
+      },
+      {
+        name: "Taego Secret Room 7",
+        mapGridArea: "87.15% / 40.77%",
+        howToOpen: "Use a Taego Secret Room Key found as world loot.",
+        expectedLoot: "High-tier armor, weapons, and utility spikes.",
+        risk: "high",
+        x: 87.15,
+        y: 40.77
+      },
+      {
+        name: "Taego Secret Room 8",
+        mapGridArea: "12.34% / 41.17%",
+        howToOpen: "Use a Taego Secret Room Key found as world loot.",
+        expectedLoot: "High-tier armor, weapons, and utility spikes.",
+        risk: "high",
+        x: 12.34,
+        y: 41.17
+      },
+      {
+        name: "Taego Secret Room 9",
+        mapGridArea: "73.65% / 47.03%",
+        howToOpen: "Use a Taego Secret Room Key found as world loot.",
+        expectedLoot: "High-tier armor, weapons, and utility spikes.",
+        risk: "high",
+        x: 73.65,
+        y: 47.03
+      },
+      {
+        name: "Taego Secret Room 10",
+        mapGridArea: "54.21% / 60.91%",
+        howToOpen: "Use a Taego Secret Room Key found as world loot.",
+        expectedLoot: "High-tier armor, weapons, and utility spikes.",
+        risk: "high",
+        x: 54.21,
+        y: 60.91
+      },
+      {
+        name: "Taego Secret Room 11",
+        mapGridArea: "12.24% / 64.39%",
+        howToOpen: "Use a Taego Secret Room Key found as world loot.",
+        expectedLoot: "High-tier armor, weapons, and utility spikes.",
+        risk: "high",
+        x: 12.24,
+        y: 64.39
+      },
+      {
+        name: "Taego Secret Room 12",
+        mapGridArea: "78.42% / 68.26%",
+        howToOpen: "Use a Taego Secret Room Key found as world loot.",
+        expectedLoot: "High-tier armor, weapons, and utility spikes.",
+        risk: "high",
+        x: 78.42,
+        y: 68.26
+      },
+      {
+        name: "Taego Secret Room 13",
+        mapGridArea: "60.56% / 78.87%",
+        howToOpen: "Use a Taego Secret Room Key found as world loot.",
+        expectedLoot: "High-tier armor, weapons, and utility spikes.",
+        risk: "high",
+        x: 60.56,
+        y: 78.87
+      },
+      {
+        name: "Taego Secret Room 14",
+        mapGridArea: "29.61% / 79.07%",
+        howToOpen: "Use a Taego Secret Room Key found as world loot.",
+        expectedLoot: "High-tier armor, weapons, and utility spikes.",
+        risk: "high",
+        x: 29.61,
+        y: 79.07
+      },
+      {
+        name: "Taego Secret Room 15",
+        mapGridArea: "77.42% / 88.49%",
+        howToOpen: "Use a Taego Secret Room Key found as world loot.",
+        expectedLoot: "High-tier armor, weapons, and utility spikes.",
+        risk: "high",
+        x: 77.42,
+        y: 88.49
       }
     ],
     markers: [
@@ -182,6 +439,7 @@ export const pubgMaps: PubgMapIntel[] = [
   {
     slug: "deston",
     name: "Deston",
+    mapImage: "/pubg/maps/Deston_Main_No_Text_Low_Res.png",
     sizeKm: "8x8",
     terrain: "Urban towers, swamps, and coastal lowlands",
     bestFor: "Vertical fighting and aggressive repositioning",
@@ -192,22 +450,166 @@ export const pubgMaps: PubgMapIntel[] = [
     endgameNotes: "Final circles often split hard cover; preserve utility for tower and low-ground pushes.",
     secretRooms: [
       {
-        name: "Security Keycard Rooms - Ripton",
-        mapGridArea: "Major city towers and locked interiors",
-        howToOpen: "Find Security Keycard in high-tier loot areas.",
-        expectedLoot: "Advanced armor, attachments, and tactical utility.",
+        name: "Deston Security Room 1",
+        mapGridArea: "33.99% / 6.97%",
+        howToOpen: "Use a Deston Security Keycard to unlock the room.",
+        expectedLoot: "Weapons, armor, attachments, and tactical utility.",
         risk: "high",
-        x: 34,
-        y: 56
+        x: 33.99,
+        y: 6.97
       },
       {
-        name: "Security Keycard Rooms - Arena / Concert Sector",
-        mapGridArea: "Central entertainment district compounds",
-        howToOpen: "Security Keycard",
-        expectedLoot: "High-value guns and med stacks for mid-to-late game fights.",
-        risk: "medium",
-        x: 49,
-        y: 49
+        name: "Deston Security Room 2",
+        mapGridArea: "63.65% / 11.44%",
+        howToOpen: "Use a Deston Security Keycard to unlock the room.",
+        expectedLoot: "Weapons, armor, attachments, and tactical utility.",
+        risk: "high",
+        x: 63.65,
+        y: 11.44
+      },
+      {
+        name: "Deston Security Room 3",
+        mapGridArea: "23.68% / 18.56%",
+        howToOpen: "Use a Deston Security Keycard to unlock the room.",
+        expectedLoot: "Weapons, armor, attachments, and tactical utility.",
+        risk: "high",
+        x: 23.68,
+        y: 18.56
+      },
+      {
+        name: "Deston Security Room 4",
+        mapGridArea: "24.27% / 21.44%",
+        howToOpen: "Use a Deston Security Keycard to unlock the room.",
+        expectedLoot: "Weapons, armor, attachments, and tactical utility.",
+        risk: "high",
+        x: 24.27,
+        y: 21.44
+      },
+      {
+        name: "Deston Security Room 5",
+        mapGridArea: "82% / 22.94%",
+        howToOpen: "Use a Deston Security Keycard to unlock the room.",
+        expectedLoot: "Weapons, armor, attachments, and tactical utility.",
+        risk: "high",
+        x: 82,
+        y: 22.94
+      },
+      {
+        name: "Deston Security Room 6",
+        mapGridArea: "62.46% / 24.73%",
+        howToOpen: "Use a Deston Security Keycard to unlock the room.",
+        expectedLoot: "Weapons, armor, attachments, and tactical utility.",
+        risk: "high",
+        x: 62.46,
+        y: 24.73
+      },
+      {
+        name: "Deston Security Room 7",
+        mapGridArea: "38.05% / 33.16%",
+        howToOpen: "Use a Deston Security Keycard to unlock the room.",
+        expectedLoot: "Weapons, armor, attachments, and tactical utility.",
+        risk: "high",
+        x: 38.05,
+        y: 33.16
+      },
+      {
+        name: "Deston Security Room 8",
+        mapGridArea: "55.71% / 33.76%",
+        howToOpen: "Use a Deston Security Keycard to unlock the room.",
+        expectedLoot: "Weapons, armor, attachments, and tactical utility.",
+        risk: "high",
+        x: 55.71,
+        y: 33.76
+      },
+      {
+        name: "Deston Security Room 9",
+        mapGridArea: "20.59% / 41.69%",
+        howToOpen: "Use a Deston Security Keycard to unlock the room.",
+        expectedLoot: "Weapons, armor, attachments, and tactical utility.",
+        risk: "high",
+        x: 20.59,
+        y: 41.69
+      },
+      {
+        name: "Deston Security Room 10",
+        mapGridArea: "56.21% / 49.93%",
+        howToOpen: "Use a Deston Security Keycard to unlock the room.",
+        expectedLoot: "Weapons, armor, attachments, and tactical utility.",
+        risk: "high",
+        x: 56.21,
+        y: 49.93
+      },
+      {
+        name: "Deston Security Room 11",
+        mapGridArea: "81.71% / 52.09%",
+        howToOpen: "Use a Deston Security Keycard to unlock the room.",
+        expectedLoot: "Weapons, armor, attachments, and tactical utility.",
+        risk: "high",
+        x: 81.71,
+        y: 52.09
+      },
+      {
+        name: "Deston Security Room 12",
+        mapGridArea: "75% / 52.58%",
+        howToOpen: "Use a Deston Security Keycard to unlock the room.",
+        expectedLoot: "Weapons, armor, attachments, and tactical utility.",
+        risk: "high",
+        x: 75,
+        y: 52.58
+      },
+      {
+        name: "Deston Security Room 13",
+        mapGridArea: "19.2% / 55.58%",
+        howToOpen: "Use a Deston Security Keycard to unlock the room.",
+        expectedLoot: "Weapons, armor, attachments, and tactical utility.",
+        risk: "high",
+        x: 19.2,
+        y: 55.58
+      },
+      {
+        name: "Deston Security Room 14",
+        mapGridArea: "79.53% / 57.65%",
+        howToOpen: "Use a Deston Security Keycard to unlock the room.",
+        expectedLoot: "Weapons, armor, attachments, and tactical utility.",
+        risk: "high",
+        x: 79.53,
+        y: 57.65
+      },
+      {
+        name: "Deston Security Room 15",
+        mapGridArea: "74.87% / 57.75%",
+        howToOpen: "Use a Deston Security Keycard to unlock the room.",
+        expectedLoot: "Weapons, armor, attachments, and tactical utility.",
+        risk: "high",
+        x: 74.87,
+        y: 57.75
+      },
+      {
+        name: "Deston Security Room 16",
+        mapGridArea: "43.61% / 70.76%",
+        howToOpen: "Use a Deston Security Keycard to unlock the room.",
+        expectedLoot: "Weapons, armor, attachments, and tactical utility.",
+        risk: "high",
+        x: 43.61,
+        y: 70.76
+      },
+      {
+        name: "Deston Security Room 17",
+        mapGridArea: "14.74% / 76.61%",
+        howToOpen: "Use a Deston Security Keycard to unlock the room.",
+        expectedLoot: "Weapons, armor, attachments, and tactical utility.",
+        risk: "high",
+        x: 14.74,
+        y: 76.61
+      },
+      {
+        name: "Deston Security Room 18",
+        mapGridArea: "67.72% / 77.31%",
+        howToOpen: "Use a Deston Security Keycard to unlock the room.",
+        expectedLoot: "Weapons, armor, attachments, and tactical utility.",
+        risk: "high",
+        x: 67.72,
+        y: 77.31
       }
     ],
     markers: [
@@ -240,6 +642,7 @@ export const pubgMaps: PubgMapIntel[] = [
   {
     slug: "vikendi",
     name: "Vikendi",
+    mapImage: "/pubg/maps/Vikendi_Main_No_Text_Low_Res.png",
     sizeKm: "6x6",
     terrain: "Snow, forests, and dense micro-cover",
     bestFor: "Stealth movement and quick compound fights",
@@ -250,13 +653,94 @@ export const pubgMaps: PubgMapIntel[] = [
     endgameNotes: "Play edge intelligently; center can overexpose in snow fields.",
     secretRooms: [
       {
-        name: "Vikendi Cave / Lab Access Routes",
-        mapGridArea: "Mountain cave entrances and underground access points",
-        howToOpen: "Use map triggers and route timing to enter before zone collapse.",
-        expectedLoot: "High-tier gear bursts and rare utility options.",
+        name: "Vikendi Keycard Bunker 1",
+        mapGridArea: "64.64% / 16.86%",
+        howToOpen: "Use a Vikendi Security Keycard to access bunker loot.",
+        expectedLoot: "High-tier weapons, armor, and utility in bunker crates.",
         risk: "high",
-        x: 52,
-        y: 36
+        x: 64.64,
+        y: 16.86
+      },
+      {
+        name: "Vikendi Keycard Bunker 2",
+        mapGridArea: "33.59% / 19.74%",
+        howToOpen: "Use a Vikendi Security Keycard to access bunker loot.",
+        expectedLoot: "High-tier weapons, armor, and utility in bunker crates.",
+        risk: "high",
+        x: 33.59,
+        y: 19.74
+      },
+      {
+        name: "Vikendi Keycard Bunker 3",
+        mapGridArea: "76.15% / 23.01%",
+        howToOpen: "Use a Vikendi Security Keycard to access bunker loot.",
+        expectedLoot: "High-tier weapons, armor, and utility in bunker crates.",
+        risk: "high",
+        x: 76.15,
+        y: 23.01
+      },
+      {
+        name: "Vikendi Keycard Bunker 4",
+        mapGridArea: "71.78% / 37.1%",
+        howToOpen: "Use a Vikendi Security Keycard to access bunker loot.",
+        expectedLoot: "High-tier weapons, armor, and utility in bunker crates.",
+        risk: "high",
+        x: 71.78,
+        y: 37.1
+      },
+      {
+        name: "Vikendi Keycard Bunker 5",
+        mapGridArea: "49.96% / 39.18%",
+        howToOpen: "Use a Vikendi Security Keycard to access bunker loot.",
+        expectedLoot: "High-tier weapons, armor, and utility in bunker crates.",
+        risk: "high",
+        x: 49.96,
+        y: 39.18
+      },
+      {
+        name: "Vikendi Keycard Bunker 6",
+        mapGridArea: "58.09% / 43.25%",
+        howToOpen: "Use a Vikendi Security Keycard to access bunker loot.",
+        expectedLoot: "High-tier weapons, armor, and utility in bunker crates.",
+        risk: "high",
+        x: 58.09,
+        y: 43.25
+      },
+      {
+        name: "Vikendi Keycard Bunker 7",
+        mapGridArea: "81.11% / 46.63%",
+        howToOpen: "Use a Vikendi Security Keycard to access bunker loot.",
+        expectedLoot: "High-tier weapons, armor, and utility in bunker crates.",
+        risk: "high",
+        x: 81.11,
+        y: 46.63
+      },
+      {
+        name: "Vikendi Keycard Bunker 8",
+        mapGridArea: "16.92% / 48.21%",
+        howToOpen: "Use a Vikendi Security Keycard to access bunker loot.",
+        expectedLoot: "High-tier weapons, armor, and utility in bunker crates.",
+        risk: "high",
+        x: 16.92,
+        y: 48.21
+      },
+      {
+        name: "Vikendi Keycard Bunker 9",
+        mapGridArea: "29.12% / 69.05%",
+        howToOpen: "Use a Vikendi Security Keycard to access bunker loot.",
+        expectedLoot: "High-tier weapons, armor, and utility in bunker crates.",
+        risk: "high",
+        x: 29.12,
+        y: 69.05
+      },
+      {
+        name: "Vikendi Keycard Bunker 10",
+        mapGridArea: "74.36% / 72.32%",
+        howToOpen: "Use a Vikendi Security Keycard to access bunker loot.",
+        expectedLoot: "High-tier weapons, armor, and utility in bunker crates.",
+        risk: "high",
+        x: 74.36,
+        y: 72.32
       }
     ],
     markers: [

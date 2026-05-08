@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import type { Metadata } from "next";
 import "./globals.css";
 import { AuthNav } from "@/components/auth-nav";
@@ -34,13 +35,21 @@ export default async function RootLayout({
                     <p className="text-xs uppercase tracking-[0.12em] text-[#9a9080]">Tarkov and PUBG tactical intelligence</p>
                   </div>
                 </div>
-                <AuthNav
-                  signedIn={Boolean(session?.user)}
-                  displayName={session?.user?.name ?? undefined}
-                  gameName={session?.user?.gameName ?? null}
-                  role={(session?.user as { role?: string })?.role ?? null}
-                  showPlayerStats={false}
-                />
+                <div className="flex items-center gap-2">
+                  <Link
+                    href="/"
+                    className="inline-flex h-9 items-center border border-[#5e4d34] bg-[#1a1510] px-3 text-xs font-semibold uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#d7b67a]"
+                  >
+                    Main Hub
+                  </Link>
+                  <AuthNav
+                    signedIn={Boolean(session?.user)}
+                    displayName={session?.user?.name ?? undefined}
+                    gameName={session?.user?.gameName ?? null}
+                    role={(session?.user as { role?: string })?.role ?? null}
+                    showPlayerStats={false}
+                  />
+                </div>
               </div>
             </header>
             <main>{children}</main>

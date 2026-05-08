@@ -21,9 +21,30 @@ export function PubgMapOverlay({ map }: Props) {
   });
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
 
+  const mapImageUrl = map.mapImage;
+
+  const mergedMarkers = useMemo(() => {
+    const existingSecretKeys = new Set(
+      map.markers
+        .filter((marker) => marker.type === "secret-room")
+        .map((marker) => `${Math.round(marker.x * 10)}:${Math.round(marker.y * 10)}`)
+    );
+
+    const derivedSecretRoomMarkers: PubgMapMarker[] = map.secretRooms.map((room, index) => ({
+      id: `secret-room-${map.slug}-${index}`,
+      label: room.name,
+      type: "secret-room" as const,
+      x: room.x,
+      y: room.y,
+      notes: `${room.mapGridArea} - ${room.howToOpen}`
+    })).filter((marker) => !existingSecretKeys.has(`${Math.round(marker.x * 10)}:${Math.round(marker.y * 10)}`));
+
+    return [...map.markers, ...derivedSecretRoomMarkers];
+  }, [map.markers, map.secretRooms, map.slug]);
+
   const visibleMarkers = useMemo(
-    () => map.markers.filter((marker) => activeTypes[marker.type]),
-    [map.markers, activeTypes]
+    () => mergedMarkers.filter((marker) => activeTypes[marker.type]),
+    [mergedMarkers, activeTypes]
   );
 
   const activeMarker = visibleMarkers.find((marker) => marker.id === activeMarkerId) ?? null;
@@ -59,11 +80,18 @@ export function PubgMapOverlay({ map }: Props) {
         </button>
       </div>
 
-      <div className="relative overflow-hidden border border-[#2d2d2d] bg-[radial-gradient(circle_at_20%_20%,#252525_0%,#171717_55%,#101010_100%)]">
+      <div className="relative overflow-hidden border border-[#2d2d2d] bg-[#101010]">
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,#2a2a2a_1px,transparent_1px),linear-gradient(to_bottom,#2a2a2a_1px,transparent_1px)] bg-[size:10%_10%] opacity-55" />
-        <div className="pointer-events-none absolute left-2 top-2 text-[10px] uppercase tracking-[0.14em] text-[#7f7768]">{map.name} Tactical Grid</div>
+        <div className="pointer-events-none absolute left-2 top-2 z-10 border border-[#2d2d2d] bg-[#111]/80 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-[#7f7768]">{map.name} Tactical Grid</div>
 
         <div className="relative h-[420px] w-full">
+          <img
+            src={mapImageUrl}
+            alt={`${map.name} map`}
+            className="absolute inset-0 h-full w-full object-cover"
+            loading="lazy"
+          />
+
           {visibleMarkers.map((marker) => (
             <button
               key={marker.id}
@@ -75,6 +103,12 @@ export function PubgMapOverlay({ map }: Props) {
               {marker.label}
             </button>
           ))}
+
+          {!visibleMarkers.length ? (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/40 text-xs uppercase tracking-[0.12em] text-[#c8bda0]">
+              No markers visible - enable a layer above
+            </div>
+          ) : null}
         </div>
       </div>
 
