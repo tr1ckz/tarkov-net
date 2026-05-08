@@ -22,5 +22,6 @@ services:
       EVENTSUB_SYNC_INTERVAL_MS: "1800000"
       EVENTSUB_SYNC_LIMIT: "400"
       EVENTSUB_CREATE_LIMIT_PER_SYNC: "80"
+      PUBG_TWITCH_GAME_IDS: "493057,27971"
     volumes:
       - ./data:/app/data
