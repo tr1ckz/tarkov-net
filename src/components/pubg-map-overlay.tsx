@@ -7,14 +7,14 @@ type Props = {
   map: PubgMapIntel;
 };
 
-const MARKER_META: Record<PubgMapMarker["type"], { label: string }> = {
-  "hot-drop": { label: "Hot Drop" },
-  "secret-room": { label: "Secret Room" },
-  "secret-key": { label: "Key Location" },
-  "vehicle-route": { label: "Vehicle Route" },
+const DEFAULT_CATEGORY_LABELS: Record<string, string> = {
+  "hot-drop": "Hot Drop",
+  "secret-room": "Secret Room",
+  "secret-key": "Key Location",
+  "vehicle-route": "Vehicle Route",
 };
 
-type MarkerPalette = Record<PubgMapMarker["type"], string>;
+type MarkerPalette = Record<string, string>;
 
 const DEFAULT_MARKER_COLORS: MarkerPalette = {
   "hot-drop": "#e85555",
@@ -22,6 +22,35 @@ const DEFAULT_MARKER_COLORS: MarkerPalette = {
   "secret-key": "#9fd46a",
   "vehicle-route": "#5599ee",
 };
+
+function humanizeCategory(type: string) {
+  return type
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
+function sanitizeCategoryKey(value: string) {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s_-]/g, "")
+    .replace(/[\s_]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function fallbackColorForCategory(type: string) {
+  const known = DEFAULT_MARKER_COLORS[type];
+  if (known) return known;
+  let hash = 0;
+  for (let i = 0; i < type.length; i += 1) {
+    hash = (hash * 31 + type.charCodeAt(i)) | 0;
+  }
+  const normalized = Math.abs(hash) % 0xffffff;
+  return `#${normalized.toString(16).padStart(6, "0")}`;
+}
 
 type MapCalibration = {
   xOffset: number;
@@ -107,7 +136,7 @@ function computeRenderBox(containerWidth: number, containerHeight: number, image
 }
 
 export function PubgMapOverlay({ map }: Props) {
-  const [activeTypes, setActiveTypes] = useState<Record<PubgMapMarker["type"], boolean>>({
+  const [activeTypes, setActiveTypes] = useState<Record<string, boolean>>({
     "hot-drop": true,
     "secret-room": true,
     "secret-key": true,
@@ -126,11 +155,15 @@ export function PubgMapOverlay({ map }: Props) {
   const [imageRatio, setImageRatio] = useState(1);
   const [editableMarkers, setEditableMarkers] = useState<PubgMapMarker[]>([]);
   const [newEntityLabel, setNewEntityLabel] = useState("New Marker");
-  const [newEntityType, setNewEntityType] = useState<PubgMapMarker["type"]>("hot-drop");
+  const [newEntityType, setNewEntityType] = useState<string>("hot-drop");
   const [newEntityNotes, setNewEntityNotes] = useState("Added in admin editor");
+  const [categoryLabels, setCategoryLabels] = useState<Record<string, string>>(DEFAULT_CATEGORY_LABELS);
+  const [newCategoryKey, setNewCategoryKey] = useState("");
+  const [newCategoryLabel, setNewCategoryLabel] = useState("");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [palette, setPalette] = useState<MarkerPalette>(DEFAULT_MARKER_COLORS);
   const [mapImageUrl, setMapImageUrl] = useState(map.mapImage);
+  const [lastLoadedMapUrl, setLastLoadedMapUrl] = useState(map.mapImage);
 
   // pan/zoom state
   const [zoom, setZoom] = useState(1);
@@ -183,6 +216,47 @@ export function PubgMapOverlay({ map }: Props) {
 
   const activeMarker = visibleMarkers.find((m) => m.id === activeMarkerId) ?? null;
 
+  const categoryKeys = useMemo(() => {
+    const keys = new Set<string>([
+      ...Object.keys(DEFAULT_CATEGORY_LABELS),
+      ...Object.keys(DEFAULT_MARKER_COLORS),
+      ...Object.keys(categoryLabels),
+      ...Object.keys(palette),
+      ...editableMarkers.map((m) => m.type),
+    ]);
+    return Array.from(keys).filter(Boolean).sort((a, b) => a.localeCompare(b));
+  }, [categoryLabels, editableMarkers, palette]);
+
+  useEffect(() => {
+    setActiveTypes((prev) => {
+      const next = { ...prev };
+      for (const key of categoryKeys) {
+        if (typeof next[key] === "undefined") next[key] = true;
+      }
+      return next;
+    });
+  }, [categoryKeys]);
+
+  useEffect(() => {
+    setCategoryLabels((prev) => {
+      const next = { ...prev };
+      for (const key of categoryKeys) {
+        if (!next[key]) next[key] = DEFAULT_CATEGORY_LABELS[key] ?? humanizeCategory(key);
+      }
+      return next;
+    });
+  }, [categoryKeys]);
+
+  useEffect(() => {
+    setPalette((prev) => {
+      const next = { ...prev };
+      for (const key of categoryKeys) {
+        if (!next[key]) next[key] = fallbackColorForCategory(key);
+      }
+      return next;
+    });
+  }, [categoryKeys]);
+
   const recomputeRenderBox = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -205,7 +279,9 @@ export function PubgMapOverlay({ map }: Props) {
     setEditableMarkers(mergedMarkers);
     setSaveStatus("idle");
     setPalette(DEFAULT_MARKER_COLORS);
+    setCategoryLabels(DEFAULT_CATEGORY_LABELS);
     setMapImageUrl(map.mapImage);
+    setLastLoadedMapUrl(map.mapImage);
 
     let cancelled = false;
 
@@ -217,6 +293,7 @@ export function PubgMapOverlay({ map }: Props) {
           calibration?: MapCalibration | null;
           entities?: PubgMapMarker[] | null;
           legendColors?: MarkerPalette | null;
+          categoryLabels?: Record<string, string> | null;
           mapImageUrl?: string | null;
         };
 
@@ -234,8 +311,13 @@ export function PubgMapOverlay({ map }: Props) {
           setPalette(payload.legendColors);
         }
 
+        if (payload.categoryLabels) {
+          setCategoryLabels((prev) => ({ ...prev, ...payload.categoryLabels }));
+        }
+
         if (payload.mapImageUrl) {
           setMapImageUrl(payload.mapImageUrl);
+          setLastLoadedMapUrl(payload.mapImageUrl);
         }
       } catch {
         // fall back to defaults if server config cannot be loaded
@@ -261,6 +343,7 @@ export function PubgMapOverlay({ map }: Props) {
     calibration?: MapCalibration | null;
     entities?: PubgMapMarker[] | null;
     legendColors?: MarkerPalette | null;
+    categoryLabels?: Record<string, string> | null;
     mapImageUrl?: string | null;
   }) {
     setSaveStatus("saving");
@@ -308,15 +391,25 @@ export function PubgMapOverlay({ map }: Props) {
     void saveServerConfig({ legendColors: nextPalette });
   }
 
+  function persistCategoryLabels(nextLabels: Record<string, string>) {
+    setCategoryLabels(nextLabels);
+    void saveServerConfig({ categoryLabels: nextLabels });
+  }
+
   function resetPaletteToDefaults() {
-    setPalette(DEFAULT_MARKER_COLORS);
-    void saveServerConfig({ legendColors: DEFAULT_MARKER_COLORS });
+    const next: MarkerPalette = {};
+    for (const key of categoryKeys) {
+      next[key] = DEFAULT_MARKER_COLORS[key] ?? fallbackColorForCategory(key);
+    }
+    setPalette(next);
+    void saveServerConfig({ legendColors: next });
   }
 
   function saveMapImageOverride() {
     const next = mapImageUrl.trim();
     if (!next) {
       setMapImageUrl(map.mapImage);
+      setLastLoadedMapUrl(map.mapImage);
       void saveServerConfig({ mapImageUrl: null });
       return;
     }
@@ -327,14 +420,36 @@ export function PubgMapOverlay({ map }: Props) {
 
   function resetMapImageOverride() {
     setMapImageUrl(map.mapImage);
+    setLastLoadedMapUrl(map.mapImage);
     void saveServerConfig({ mapImageUrl: null });
+  }
+
+  function getKnownResolutionVariant(slug: string, variant: "low" | "hq") {
+    const base = slug.charAt(0).toUpperCase() + slug.slice(1);
+    const ext = slug === "sanhok" || slug === "karakin" ? "jpg" : "png";
+    const low = `/pubg/maps/${base}_Main_No_Text_Low_Res.${ext}`;
+    const hq = `/pubg/maps/${base}_Main_No_Text_HQ.jpg`;
+    return variant === "hq" ? hq : low;
+  }
+
+  function applyKnownMapResolution(variant: "low" | "hq") {
+    const next = getKnownResolutionVariant(map.slug, variant);
+    setMapImageUrl(next);
+    void saveServerConfig({ mapImageUrl: next });
   }
 
   function guessHighResVariant(url: string) {
     if (url.includes("_Low_Res")) {
-      return url.replace("_Low_Res", "_High_Res");
+      return url
+        .replace("_Low_Res", "_HQ")
+        .replace(/\.png$/i, ".jpg")
+        .replace(/\.jpeg$/i, ".jpg");
     }
-    return url;
+    if (/\/image\/[^/]+\/map\.jpg$/i.test(url)) {
+      // External map.jpg sources already appear to be full-size assets.
+      return url;
+    }
+    return url.replace(/_low/i, "_hq");
   }
 
   function toggleAdminMode() {
@@ -345,7 +460,7 @@ export function PubgMapOverlay({ map }: Props) {
     });
   }
 
-  const toggleType = (type: PubgMapMarker["type"]) => {
+  const toggleType = (type: string) => {
     setActiveTypes((prev) => ({ ...prev, [type]: !prev[type] }));
     setActiveMarkerId(null);
   };
@@ -506,9 +621,9 @@ export function PubgMapOverlay({ map }: Props) {
     <div className="space-y-4">
       {/* ── controls bar ── */}
       <div className="flex flex-wrap items-center gap-2">
-        {(Object.keys(MARKER_META) as PubgMapMarker["type"][]).map((type) => {
-          const label = MARKER_META[type].label;
-          const color = palette[type] ?? DEFAULT_MARKER_COLORS[type];
+        {categoryKeys.map((type) => {
+          const label = categoryLabels[type] ?? humanizeCategory(type);
+          const color = palette[type] ?? fallbackColorForCategory(type);
           const active = activeTypes[type];
           return (
             <button
@@ -599,12 +714,12 @@ export function PubgMapOverlay({ map }: Props) {
             draggable={false}
             loading="eager"
             onError={() => {
-              if (mapImageUrl !== map.mapImage) {
-                setMapImageUrl(map.mapImage);
-              }
+              const fallback = lastLoadedMapUrl || map.mapImage;
+              if (mapImageUrl !== fallback) setMapImageUrl(fallback);
             }}
             onLoad={(e) => {
               const img = e.currentTarget;
+              setLastLoadedMapUrl(mapImageUrl);
               if (img.naturalWidth > 0 && img.naturalHeight > 0) {
                 setImageRatio(img.naturalWidth / img.naturalHeight);
               }
@@ -613,7 +728,7 @@ export function PubgMapOverlay({ map }: Props) {
           />
 
           {visibleMarkers.map((marker) => {
-            const color = palette[marker.type] ?? DEFAULT_MARKER_COLORS[marker.type];
+            const color = palette[marker.type] ?? fallbackColorForCategory(marker.type);
             const isActive = activeMarkerId === marker.id;
             const calibrated = applyCalibration(marker.x, marker.y, calibration);
             return (
@@ -761,12 +876,12 @@ export function PubgMapOverlay({ map }: Props) {
           <div className="mt-4 border-t border-[#2a2418] pt-3">
             <p className="text-[11px] uppercase tracking-[0.1em] text-[#8f826a]">Legend/Icon Color Groups</p>
             <div className="mt-2 grid gap-2 sm:grid-cols-2">
-              {(Object.keys(MARKER_META) as PubgMapMarker["type"][]).map((type) => (
+              {categoryKeys.map((type) => (
                 <label key={`color-${type}`} className="flex items-center justify-between gap-3 text-xs text-[#b8aa90]">
-                  <span>{MARKER_META[type].label}</span>
+                  <span>{categoryLabels[type] ?? humanizeCategory(type)}</span>
                   <input
                     type="color"
-                    value={palette[type]}
+                    value={palette[type] ?? fallbackColorForCategory(type)}
                     onChange={(e) => setPalette((prev) => ({ ...prev, [type]: e.target.value }))}
                     className="h-8 w-10 border border-[#3a3426] bg-[#0e0c09]"
                   />
@@ -788,6 +903,82 @@ export function PubgMapOverlay({ map }: Props) {
           </div>
 
           <div className="mt-4 border-t border-[#2a2418] pt-3">
+            <p className="text-[11px] uppercase tracking-[0.1em] text-[#8f826a]">Category Manager</p>
+            <div className="mt-2 grid gap-2 sm:grid-cols-3">
+              <input
+                value={newCategoryKey}
+                onChange={(e) => setNewCategoryKey(e.target.value)}
+                className="w-full border border-[#3a3426] bg-[#0e0c09] px-2 py-1.5 text-xs text-[#e2d2af]"
+                placeholder="new category key (example: loot-route)"
+              />
+              <input
+                value={newCategoryLabel}
+                onChange={(e) => setNewCategoryLabel(e.target.value)}
+                className="w-full border border-[#3a3426] bg-[#0e0c09] px-2 py-1.5 text-xs text-[#e2d2af]"
+                placeholder="display label"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const key = sanitizeCategoryKey(newCategoryKey || newCategoryLabel);
+                  if (!key) return;
+                  const label = (newCategoryLabel || humanizeCategory(key)).trim();
+                  const nextLabels = { ...categoryLabels, [key]: label };
+                  const nextPalette = { ...palette, [key]: palette[key] ?? fallbackColorForCategory(key) };
+                  setNewEntityType(key);
+                  setNewCategoryKey("");
+                  setNewCategoryLabel("");
+                  persistCategoryLabels(nextLabels);
+                  persistPalette(nextPalette);
+                }}
+                className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
+              >Add Category</button>
+            </div>
+            <div className="mt-2 space-y-2">
+              {categoryKeys.map((type) => (
+                <div key={`category-row-${type}`} className="grid gap-2 sm:grid-cols-[1fr,1fr,auto,auto] items-center">
+                  <div className="text-xs text-[#8f826a]">{type}</div>
+                  <input
+                    value={categoryLabels[type] ?? humanizeCategory(type)}
+                    onChange={(e) => setCategoryLabels((prev) => ({ ...prev, [type]: e.target.value }))}
+                    onBlur={() => persistCategoryLabels({ ...categoryLabels, [type]: categoryLabels[type] ?? humanizeCategory(type) })}
+                    className="w-full border border-[#3a3426] bg-[#0e0c09] px-2 py-1.5 text-xs text-[#e2d2af]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const replacement = "hot-drop";
+                      const moved = editableMarkers.map((m) => (m.type === type ? { ...m, type: replacement } : m));
+                      persistEntities(moved);
+
+                      const nextLabels = { ...categoryLabels };
+                      delete nextLabels[type];
+                      persistCategoryLabels(nextLabels);
+
+                      const nextPalette = { ...palette };
+                      delete nextPalette[type];
+                      persistPalette(nextPalette);
+
+                      setActiveTypes((prev) => {
+                        const next = { ...prev };
+                        delete next[type];
+                        return next;
+                      });
+                      if (newEntityType === type) setNewEntityType(replacement);
+                    }}
+                    className="border border-[#5e2a2a] bg-[#1a1010] px-2 py-1.5 text-[11px] uppercase tracking-[0.12em] text-[#e3b8b8] hover:border-[#d36a6a]"
+                  >Remove</button>
+                  <button
+                    type="button"
+                    onClick={() => setNewEntityType(type)}
+                    className="border border-[#3a3a3a] bg-[#1a1a1a] px-2 py-1.5 text-[11px] uppercase tracking-[0.12em] text-[#c8bda0] hover:border-[#666]"
+                  >Use</button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-4 border-t border-[#2a2418] pt-3">
             <p className="text-[11px] uppercase tracking-[0.1em] text-[#8f826a]">Map Image Source</p>
             <p className="mt-1 text-xs text-[#8f826a]">Use a higher-resolution URL if available; fallback returns to default map texture.</p>
             <div className="mt-2 grid gap-2 sm:grid-cols-4">
@@ -795,7 +986,7 @@ export function PubgMapOverlay({ map }: Props) {
                 value={mapImageUrl}
                 onChange={(e) => setMapImageUrl(e.target.value)}
                 className="sm:col-span-4 w-full border border-[#3a3426] bg-[#0e0c09] px-2 py-1.5 text-xs text-[#e2d2af]"
-                placeholder="/pubg/maps/Erangel_Main_No_Text_High_Res.png"
+                placeholder="/pubg/maps/Erangel_Main_No_Text_HQ.jpg"
               />
             </div>
             <div className="mt-2 flex flex-wrap gap-2">
@@ -806,9 +997,23 @@ export function PubgMapOverlay({ map }: Props) {
               >Save Map Image</button>
               <button
                 type="button"
-                onClick={() => setMapImageUrl(guessHighResVariant(mapImageUrl || map.mapImage))}
+                onClick={() => {
+                  const next = guessHighResVariant(mapImageUrl || map.mapImage);
+                  setMapImageUrl(next);
+                  void saveServerConfig({ mapImageUrl: next });
+                }}
                 className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
               >Try High-Res Variant</button>
+              <button
+                type="button"
+                onClick={() => applyKnownMapResolution("hq")}
+                className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
+              >Use Known HQ</button>
+              <button
+                type="button"
+                onClick={() => applyKnownMapResolution("low")}
+                className="border border-[#3a3a3a] bg-[#1a1a1a] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#9a9080] hover:border-[#666] hover:text-white"
+              >Use Known Low</button>
               <button
                 type="button"
                 onClick={resetMapImageOverride}
@@ -826,11 +1031,11 @@ export function PubgMapOverlay({ map }: Props) {
             />
             <select
               value={newEntityType}
-              onChange={(e) => setNewEntityType(e.target.value as PubgMapMarker["type"])}
+              onChange={(e) => setNewEntityType(e.target.value)}
               className="w-full border border-[#3a3426] bg-[#0e0c09] px-2 py-1.5 text-xs text-[#e2d2af]"
             >
-              {(Object.keys(MARKER_META) as PubgMapMarker["type"][]).map((type) => (
-                <option key={type} value={type}>{MARKER_META[type].label}</option>
+              {categoryKeys.map((type) => (
+                <option key={type} value={type}>{categoryLabels[type] ?? humanizeCategory(type)}</option>
               ))}
             </select>
             <input
@@ -856,13 +1061,13 @@ export function PubgMapOverlay({ map }: Props) {
       <div className="border border-[#2d2d2d] bg-[#0e0e0e] px-4 py-3">
         <p className="mb-2.5 text-[10px] uppercase tracking-[0.16em] text-[#5a5450]">Legend</p>
         <div className="flex flex-wrap gap-6">
-          {(Object.keys(MARKER_META) as PubgMapMarker["type"][]).map((type) => (
+          {categoryKeys.map((type) => (
             <div key={type} className="flex items-center gap-2">
               <span
                 className="shrink-0 rounded-full"
-                style={{ width: 16, height: 16, border: `2px solid ${palette[type]}`, background: "transparent" }}
+                style={{ width: 16, height: 16, border: `2px solid ${palette[type] ?? fallbackColorForCategory(type)}`, background: "transparent" }}
               />
-              <span className="text-xs text-[#9a9080]">{MARKER_META[type].label}</span>
+              <span className="text-xs text-[#9a9080]">{categoryLabels[type] ?? humanizeCategory(type)}</span>
             </div>
           ))}
           <div className="flex items-center gap-2">
@@ -892,7 +1097,7 @@ export function PubgMapOverlay({ map }: Props) {
               style={{
                 width: 16,
                 height: 16,
-                border: `2px solid ${palette[activeMarker.type]}`,
+                border: `2px solid ${palette[activeMarker.type] ?? fallbackColorForCategory(activeMarker.type)}`,
                 background: "transparent",
               }}
             />
@@ -901,7 +1106,7 @@ export function PubgMapOverlay({ map }: Props) {
               </p>
             </div>
             <p className="mt-1 text-xs uppercase tracking-[0.12em] text-[#9a9080]">
-              {activeMarker.type.replace(/-/g, " ")}
+              {categoryLabels[activeMarker.type] ?? humanizeCategory(activeMarker.type)}
             </p>
             <p className="mt-2 text-sm text-[#c8bda0]">{activeMarker.notes}</p>
           </div>

@@ -14,7 +14,7 @@ const calibrationSchema = z.object({
 const markerSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
-  type: z.enum(["hot-drop", "secret-room", "secret-key", "vehicle-route"]),
+  type: z.string().min(1).max(64),
   x: z.number(),
   y: z.number(),
   notes: z.string().min(1)
@@ -22,19 +22,39 @@ const markerSchema = z.object({
 
 const colorSchema = z.string().regex(/^#([0-9a-fA-F]{6})$/, "Expected 6-digit hex color");
 
-const legendSchema = z.object({
-  "hot-drop": colorSchema,
-  "secret-room": colorSchema,
-  "secret-key": colorSchema,
-  "vehicle-route": colorSchema
-});
+const legendColorsSchema = z.record(z.string().min(1).max(64), colorSchema);
+const categoryLabelsSchema = z.record(z.string().min(1).max(64), z.string().trim().min(1).max(80));
 
 const patchSchema = z.object({
   calibration: calibrationSchema.nullable().optional(),
   entities: z.array(markerSchema).nullable().optional(),
-  legendColors: legendSchema.nullable().optional(),
+  legendColors: legendColorsSchema.nullable().optional(),
+  categoryLabels: categoryLabelsSchema.nullable().optional(),
   mapImageUrl: z.string().trim().min(1).max(500).nullable().optional()
 });
+
+type LegendPayload = {
+  colors?: Record<string, string>;
+  labels?: Record<string, string>;
+};
+
+function parseLegend(value: string | null | undefined): LegendPayload | null {
+  const parsed = safeParseJson<unknown>(value);
+  if (!parsed || typeof parsed !== "object") return null;
+
+  // Backward compatibility: previous shape was a plain color record.
+  const maybeColorRecord = Object.values(parsed as Record<string, unknown>).every(
+    (v) => typeof v === "string" && /^#([0-9a-fA-F]{6})$/.test(v)
+  );
+  if (maybeColorRecord) {
+    return { colors: parsed as Record<string, string>, labels: {} };
+  }
+
+  const obj = parsed as { colors?: unknown; labels?: unknown };
+  const colors = obj.colors && typeof obj.colors === "object" ? (obj.colors as Record<string, string>) : {};
+  const labels = obj.labels && typeof obj.labels === "object" ? (obj.labels as Record<string, string>) : {};
+  return { colors, labels };
+}
 
 function requireAdmin(session: Session | null) {
   if (!session?.user || (session.user as { role?: string }).role !== "ADMIN") {
@@ -71,11 +91,14 @@ export async function GET(_: Request, { params }: { params: { slug: string } }) 
     }
   });
 
+  const legend = parseLegend(config?.legendJson);
+
   return NextResponse.json({
     mapSlug: slug,
     calibration: safeParseJson(config?.calibrationJson),
     entities: safeParseJson(config?.entitiesJson),
-    legendColors: safeParseJson(config?.legendJson),
+    legendColors: legend?.colors ?? null,
+    categoryLabels: legend?.labels ?? null,
     mapImageUrl: config?.mapImageUrl ?? null,
     updatedAt: config?.updatedAt ?? null,
     updatedByUserId: config?.updatedByUserId ?? null
@@ -101,9 +124,10 @@ export async function PATCH(request: Request, { params }: { params: { slug: stri
   const hasCalibration = Object.prototype.hasOwnProperty.call(parsed.data, "calibration");
   const hasEntities = Object.prototype.hasOwnProperty.call(parsed.data, "entities");
   const hasLegend = Object.prototype.hasOwnProperty.call(parsed.data, "legendColors");
+  const hasLabels = Object.prototype.hasOwnProperty.call(parsed.data, "categoryLabels");
   const hasMapImage = Object.prototype.hasOwnProperty.call(parsed.data, "mapImageUrl");
 
-  if (!hasCalibration && !hasEntities && !hasLegend && !hasMapImage) {
+  if (!hasCalibration && !hasEntities && !hasLegend && !hasLabels && !hasMapImage) {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }
 
@@ -125,8 +149,22 @@ export async function PATCH(request: Request, { params }: { params: { slug: stri
     updateData.entitiesJson = parsed.data.entities ? JSON.stringify(parsed.data.entities) : null;
   }
 
-  if (hasLegend) {
-    updateData.legendJson = parsed.data.legendColors ? JSON.stringify(parsed.data.legendColors) : null;
+  if (hasLegend || hasLabels) {
+    const current = await prisma.pubgMapConfig.findUnique({
+      where: { mapSlug: slug },
+      select: { legendJson: true }
+    });
+    const existing = parseLegend(current?.legendJson);
+    const colors = hasLegend ? (parsed.data.legendColors ?? null) : (existing?.colors ?? null);
+    const labels = hasLabels ? (parsed.data.categoryLabels ?? null) : (existing?.labels ?? null);
+
+    updateData.legendJson =
+      colors || labels
+        ? JSON.stringify({
+            colors: colors ?? {},
+            labels: labels ?? {}
+          })
+        : null;
   }
 
   if (hasMapImage) {
@@ -160,7 +198,8 @@ export async function PATCH(request: Request, { params }: { params: { slug: stri
     mapSlug: saved.mapSlug,
     calibration: safeParseJson(saved.calibrationJson),
     entities: safeParseJson(saved.entitiesJson),
-    legendColors: safeParseJson(saved.legendJson),
+    legendColors: parseLegend(saved.legendJson)?.colors ?? null,
+    categoryLabels: parseLegend(saved.legendJson)?.labels ?? null,
     mapImageUrl: saved.mapImageUrl,
     updatedAt: saved.updatedAt,
     updatedByUserId: saved.updatedByUserId
