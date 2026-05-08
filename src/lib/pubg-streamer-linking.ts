@@ -1,6 +1,13 @@
 import stringSimilarity from "string-similarity";
 import { prisma } from "@/lib/prisma";
-import { recordPubgApiCall, setPubgCallContext, clearPubgCallContext } from "@/lib/pubg-api";
+import {
+  recordPubgApiCall,
+  setPubgCallContext,
+  clearPubgCallContext,
+  lookupPlayerAcrossShards as lookupPlayerAcrossShards_pubgApi,
+  getCandidateShards,
+  type PubgPlatform
+} from "@/lib/pubg-api";
 
 const db = prisma as any;
 
@@ -17,68 +24,6 @@ function normalizeForLinking(value: string) {
     .replace(/[\s._-]*(ttv|tv|yt|youtube|twitch|tt|live|stream|gaming|gamer|plays|official|tv)$/g, "")
     .replace(/\d+$/, "")
     .replace(/[^a-z0-9]/g, "");
-}
-
-function getCandidateShards(platform: string) {
-  if (platform === "xbox") return ["xbox-na", "xbox-eu", "xbox-as", "xbox-oc", "xbox-sa"];
-  if (platform === "psn") return ["psn-na", "psn-eu", "psn-as", "psn-oc", "psn-sa"];
-  if (platform === "kakao") return ["pc-kakao", "pc-krjp", "pc-as"];
-  return ["pc-na", "pc-eu", "pc-as", "pc-kakao", "pc-krjp", "pc-sa", "pc-oc"];
-}
-
-function getPubgApiKey() {
-  return process.env.PUBG_DEV_API ?? process.env.PUBG_API_KEY ?? "";
-}
-
-async function getPlayerWithMatches(shard: string, playerName: string) {
-  const apiKey = getPubgApiKey();
-  if (!apiKey) return null;
-
-  const endpoint = `/shards/${shard}/players?filter[playerNames]=${encodeURIComponent(playerName)}`;
-  const start = Date.now();
-  const response = await fetch(
-    `https://api.pubg.com${endpoint}`,
-    {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: "application/vnd.api+json"
-      },
-      cache: "no-store"
-    }
-  );
-  void recordPubgApiCall({ callType: "player_lookup", endpoint, shard, statusCode: response.status, durationMs: Date.now() - start, success: response.ok });
-
-  if (!response.ok) return null;
-  const payload = (await response.json()) as {
-    data?: Array<{ id: string; attributes?: { name?: string } }>;
-  };
-  const player = payload.data?.[0];
-  if (!player) return null;
-
-  return {
-    playerId: player.id,
-    playerName: player.attributes?.name ?? playerName
-  };
-}
-
-async function lookupPlayerAcrossShards(playerName: string, platform: string, preferredShard?: string | null) {
-  const shards = preferredShard
-    ? [preferredShard, ...getCandidateShards(platform).filter((s) => s !== preferredShard)]
-    : getCandidateShards(platform);
-
-  for (const shard of shards) {
-    const found = await getPlayerWithMatches(shard, playerName);
-    if (found) {
-      return {
-        shard,
-        playerId: found.playerId,
-        playerName: found.playerName,
-        verified: true
-      };
-    }
-  }
-
-  return null;
 }
 
 async function upsertIdentityLinkEvent(input: {
@@ -158,7 +103,11 @@ async function maybeAutoLinkKnownPlayer(input: PubgTwitchIdentityInput) {
   if (!best) return null;
   if (second && best.similarity - second.similarity < 0.04) return null;
 
-  const resolved = await lookupPlayerAcrossShards(best.row.playerName, best.row.platform, best.row.shard).catch(() => null);
+  const resolved = await lookupPlayerAcrossShards_pubgApi({
+    playerName: best.row.playerName,
+    platform: best.row.platform as PubgPlatform,
+    preferredShard: best.row.shard
+  }).catch(() => null);
   const normalizedPubg = normalizeForLinking(resolved?.playerName ?? best.row.playerName);
   const playerId = resolved?.playerId ?? `unverified:${best.row.platform}:${best.row.shard}:${normalizedPubg}`;
   const shard = resolved?.shard ?? best.row.shard;
@@ -302,7 +251,7 @@ async function maybeAutoLinkByUserClaims(input: PubgTwitchIdentityInput) {
   if (!best) return null;
   if (second && best.score - second.score < 0.03) return null;
 
-  const fallbackShard = getCandidateShards(best.platform)[0] ?? "pc-na";
+  const fallbackShard = getCandidateShards(best.platform as PubgPlatform)[0] ?? "pc-na";
   const fallbackPlayerId = `profile-claim:${best.platform}:${best.normalized}`;
 
   await db.pubgStreamerIdentityLink.upsert({
