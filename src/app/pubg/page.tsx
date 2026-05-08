@@ -48,6 +48,12 @@ export default function PubgHubPage() {
       >
         Open Full Map Intel
       </Link>
+      <Link
+        href="/pubg/meta"
+        className="ml-2 inline-flex border border-[#2d2d2d] bg-[#111] px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#c8bda0] hover:border-[#d7b67a] hover:text-[#f1d6aa]"
+      >
+        Regional Meta
+      </Link>
     </div>
   );
 }

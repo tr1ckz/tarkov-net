@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Card, CardTitle } from "@/components/ui/card";
 import { pubgMaps } from "@/lib/pubg-data";
+import { PubgMapOverlay } from "@/components/pubg-map-overlay";
 
 type Props = {
   params: { slug: string };
@@ -41,6 +42,32 @@ export default function PubgMapDetailPage({ params }: Props) {
             <p className="text-xs uppercase tracking-[0.12em] text-[#d7b67a]">Endgame Notes</p>
             <p className="mt-2 text-sm text-[#c8bda0]">{map.endgameNotes}</p>
           </div>
+        </div>
+      </Card>
+
+      <Card>
+        <CardTitle className="mb-3">Interactive Tactical Overlay</CardTitle>
+        <p className="mb-3 text-sm text-[#b4ab9b]">Toggle hot drops, secret rooms, and vehicle routes to shape your macro plan.</p>
+        <PubgMapOverlay map={map} />
+      </Card>
+
+      <Card>
+        <CardTitle className="mb-3">Vehicle Route Priorities</CardTitle>
+        <div className="space-y-2 text-sm text-[#c8bda0]">
+          {map.vehicleRoutes.map((route) => (
+            <p key={route}>• {route}</p>
+          ))}
+        </div>
+      </Card>
+
+      <Card>
+        <CardTitle className="mb-3">Priority Compounds</CardTitle>
+        <div className="flex flex-wrap gap-2">
+          {map.priorityCompounds.map((compound) => (
+            <span key={compound} className="border border-[#5e4d34] bg-[#1a1510] px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-[#e2d2af]">
+              {compound}
+            </span>
+          ))}
         </div>
       </Card>
 
