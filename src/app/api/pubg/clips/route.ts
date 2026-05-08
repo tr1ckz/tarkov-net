@@ -215,10 +215,13 @@ export async function GET(request: Request) {
       const encounters = await getRecentEncounterNames({
         shard: resolvedPlayer.shard,
         playerName: resolvedPlayer.playerName,
-        maxMatches: 7,
+        maxMatches: 12,
         maxOpponents: 25
       });
       pushVerbose(`encounters fetched count=${encounters.length}`);
+      if (encounters.length === 0) {
+        pushVerbose("no opponents extracted from recent matches; downstream twitch mapping skipped");
+      }
 
       const debug = {
         encountersFound: encounters.length,

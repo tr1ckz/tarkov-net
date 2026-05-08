@@ -11,10 +11,18 @@ type PubgPlayerResponse = {
 };
 
 type PubgMatchResponse = {
+  data?: {
+    attributes?: {
+      createdAt?: string;
+    };
+  };
   included?: Array<{
     type: string;
     attributes?: {
       URL?: string;
+      stats?: {
+        name?: string;
+      };
     };
   }>;
 };
@@ -143,37 +151,35 @@ export async function getRecentEncounterNames(options: {
   const matchIds = player.matchIds.slice(0, maxMatches);
 
   for (const matchId of matchIds) {
-    const telemetryUrl = await getMatchTelemetryUrl(shard, matchId);
-    if (!telemetryUrl) continue;
+    const matchPayload = await pubgGet<PubgMatchResponse>(
+      `/shards/${encodeURIComponent(shard)}/matches/${encodeURIComponent(matchId)}`
+    );
+    const matchCreatedAt = matchPayload.data?.attributes?.createdAt ?? null;
 
-    const telemetryResponse = await fetch(telemetryUrl, { cache: "no-store" });
-    if (!telemetryResponse.ok) continue;
+    const participantNames = Array.from(
+      new Set(
+        (matchPayload.included ?? [])
+          .filter((entry) => entry.type === "participant")
+          .map((entry) => entry.attributes?.stats?.name?.trim())
+          .filter((name): name is string => Boolean(name))
+      )
+    );
 
-    const events = (await telemetryResponse.json()) as KillEvent[];
+    for (const participantName of participantNames) {
+      if (participantName === playerName) continue;
 
-    for (const event of events) {
-      if (event?._T !== "LogPlayerKill") continue;
+      const current = encounterStats.get(participantName) ?? { count: 0, lastSeenAt: null };
+      const previousLastSeenMs = current.lastSeenAt ? Date.parse(current.lastSeenAt) : Number.NaN;
+      const matchCreatedAtMs = matchCreatedAt ? Date.parse(matchCreatedAt) : Number.NaN;
+      const lastSeenAt =
+        Number.isNaN(matchCreatedAtMs) || (!Number.isNaN(previousLastSeenMs) && previousLastSeenMs >= matchCreatedAtMs)
+          ? current.lastSeenAt
+          : matchCreatedAt;
 
-      const killerName = event.killer?.name ?? event.attacker?.name ?? null;
-      const victimName = event.victim?.name ?? null;
-
-      if (!killerName || !victimName) continue;
-
-      if (killerName === playerName && victimName !== playerName) {
-        const current = encounterStats.get(victimName) ?? { count: 0, lastSeenAt: null };
-        encounterStats.set(victimName, {
-          count: current.count + 1,
-          lastSeenAt: event._D ?? current.lastSeenAt
-        });
-      }
-
-      if (victimName === playerName && killerName !== playerName) {
-        const current = encounterStats.get(killerName) ?? { count: 0, lastSeenAt: null };
-        encounterStats.set(killerName, {
-          count: current.count + 1,
-          lastSeenAt: event._D ?? current.lastSeenAt
-        });
-      }
+      encounterStats.set(participantName, {
+        count: current.count + 1,
+        lastSeenAt
+      });
     }
   }
 
