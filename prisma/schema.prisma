@@ -17,9 +17,25 @@ model User {
   tarkovProfileMode String?
   tarkovPveProfileId String?
   tarkovArenaProfileId String?
+  role          String     @default("USER")
+  isSuspended   Boolean    @default(false)
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
   favorites     Favorite[]
+  inviteCodes   InviteCode[] @relation("InviteCreator")
+  usedInvite    InviteCode?  @relation("InviteUsed", fields: [usedInviteId], references: [id])
+  usedInviteId  String?    @unique
+}
+
+model InviteCode {
+  id          String    @id @default(cuid())
+  code        String    @unique
+  createdById String
+  isRevoked   Boolean   @default(false)
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+  createdBy   User      @relation("InviteCreator", fields: [createdById], references: [id])
+  usedBy      User?     @relation("InviteUsed")
 }
 
 model Favorite {

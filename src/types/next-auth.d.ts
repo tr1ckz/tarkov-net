@@ -6,6 +6,7 @@ declare module "next-auth" {
       id: string;
       email: string;
       name: string;
+      role: string;
       gameName: string | null;
       tarkovProfileId: string | null;
       tarkovProfileMode: string | null;
@@ -19,6 +20,7 @@ declare module "next-auth/jwt" {
   interface JWT {
     userId: string;
     name: string;
+    role?: string;
     gameName?: string | null;
     tarkovProfileId?: string | null;
     tarkovProfileMode?: string | null;

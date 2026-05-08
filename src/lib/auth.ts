@@ -37,6 +37,10 @@ export const authOptions: NextAuthOptions = {
           return null;
         }
 
+        if (user.isSuspended) {
+          return null;
+        }
+
         const validPassword = await bcrypt.compare(parsed.data.password, user.passwordHash);
         if (!validPassword) {
           return null;
@@ -46,6 +50,7 @@ export const authOptions: NextAuthOptions = {
           id: user.id,
           email: user.email,
           name: user.displayName,
+          role: user.role,
           gameName: user.gameName ?? null,
           tarkovProfileId: user.tarkovProfileId ?? null,
           tarkovProfileMode: user.tarkovProfileMode ?? null,
@@ -60,6 +65,7 @@ export const authOptions: NextAuthOptions = {
       if (user) {
         token.userId = user.id;
         token.name = user.name ?? "Observer";
+        token.role = (user as { role?: string }).role ?? "USER";
         token.gameName = (user as { gameName?: string | null }).gameName ?? null;
         token.tarkovProfileId = (user as { tarkovProfileId?: string | null }).tarkovProfileId ?? null;
         token.tarkovProfileMode = (user as { tarkovProfileMode?: string | null }).tarkovProfileMode ?? null;
@@ -75,6 +81,7 @@ export const authOptions: NextAuthOptions = {
           select: {
             displayName: true,
             email: true,
+            role: true,
             gameName: true,
             tarkovProfileId: true,
             tarkovProfileMode: true,
@@ -86,6 +93,7 @@ export const authOptions: NextAuthOptions = {
         session.user.id = token.userId;
         session.user.name = dbUser?.displayName ?? token.name;
         session.user.email = dbUser?.email ?? (token.email as string);
+        session.user.role = dbUser?.role ?? token.role ?? "USER";
         session.user.gameName = dbUser?.gameName ?? token.gameName ?? null;
         session.user.tarkovProfileId = dbUser?.tarkovProfileId ?? token.tarkovProfileId ?? null;
         session.user.tarkovProfileMode = dbUser?.tarkovProfileMode ?? token.tarkovProfileMode ?? null;

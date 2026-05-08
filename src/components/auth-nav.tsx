@@ -10,9 +10,10 @@ type Props = {
   signedIn: boolean;
   displayName?: string;
   gameName?: string | null;
+  role?: string | null;
 };
 
-export function AuthNav({ signedIn, displayName, gameName }: Props) {
+export function AuthNav({ signedIn, displayName, gameName, role }: Props) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -74,6 +75,15 @@ export function AuthNav({ signedIn, displayName, gameName }: Props) {
             >
               Profile Settings
             </Link>
+            {role === "ADMIN" && (
+              <Link
+                href="/admin"
+                className="block border border-transparent px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-[#8fa070] hover:border-[#49533a] hover:bg-[#161616] hover:text-[#e2d2af]"
+                onClick={() => setOpen(false)}
+              >
+                Admin Panel
+              </Link>
+            )}
             <button
               type="button"
               onClick={() => signOut({ callbackUrl: "/login" })}

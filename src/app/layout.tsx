@@ -69,6 +69,7 @@ export default async function RootLayout({
                   signedIn={Boolean(session?.user)}
                   displayName={session?.user?.name ?? undefined}
                   gameName={session?.user?.gameName ?? null}
+                  role={(session?.user as { role?: string })?.role ?? null}
                 />
               </div>
             </div>

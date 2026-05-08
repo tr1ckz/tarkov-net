@@ -6,7 +6,8 @@ import { prisma } from "@/lib/prisma";
 const registerSchema = z.object({
   displayName: z.string().min(2).max(40),
   email: z.string().email(),
-  password: z.string().min(8)
+  password: z.string().min(8),
+  inviteCode: z.string().optional()
 });
 
 export async function POST(request: Request) {
@@ -24,15 +25,47 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Email already exists" }, { status: 409 });
   }
 
+  // Count existing users — first user becomes admin, no invite needed
+  const userCount = await prisma.user.count();
+  const isFirstUser = userCount === 0;
+
+  let inviteRecord = null;
+
+  if (!isFirstUser) {
+    const code = parsed.data.inviteCode?.trim();
+    if (!code) {
+      return NextResponse.json({ error: "An invite code is required to register" }, { status: 403 });
+    }
+
+    inviteRecord = await prisma.inviteCode.findUnique({
+      where: { code },
+      include: { usedBy: { select: { id: true } } }
+    });
+
+    if (!inviteRecord || inviteRecord.isRevoked) {
+      return NextResponse.json({ error: "Invalid or revoked invite code" }, { status: 403 });
+    }
+
+    if (inviteRecord.usedBy !== null) {
+      return NextResponse.json({ error: "Invite code has already been used" }, { status: 403 });
+    }
+
+    if (inviteRecord.expiresAt && inviteRecord.expiresAt < new Date()) {
+      return NextResponse.json({ error: "Invite code has expired" }, { status: 403 });
+    }
+  }
+
   const passwordHash = await bcrypt.hash(parsed.data.password, 10);
 
-  await prisma.user.create({
+  const user = await prisma.user.create({
     data: {
       displayName: parsed.data.displayName,
       email,
-      passwordHash
+      passwordHash,
+      role: isFirstUser ? "ADMIN" : "USER",
+      ...(inviteRecord ? { usedInviteId: inviteRecord.id } : {})
     }
   });
 
-  return NextResponse.json({ ok: true }, { status: 201 });
+  return NextResponse.json({ ok: true, role: user.role }, { status: 201 });
 }

@@ -2,14 +2,16 @@
 
 import Link from "next/link";
 import { FormEvent, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export function RegisterForm() {
+  const searchParams = useSearchParams();
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [inviteCode, setInviteCode] = useState(searchParams.get("invite") ?? "");
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
   const router = useRouter();
@@ -22,7 +24,7 @@ export function RegisterForm() {
       const response = await fetch("/api/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ displayName, email, password })
+        body: JSON.stringify({ displayName, email, password, inviteCode: inviteCode.trim() || undefined })
       });
 
       if (!response.ok) {
@@ -58,6 +60,14 @@ export function RegisterForm() {
         minLength={8}
         required
       />
+      <div className="space-y-1">
+        <Input
+          value={inviteCode}
+          onChange={(event) => setInviteCode(event.target.value)}
+          placeholder="Invite Code (required unless first user)"
+        />
+        <p className="text-xs text-[#7f7768]">Required for all accounts except the first (admin) account.</p>
+      </div>
       {error && <p className="text-sm text-red-400">{error}</p>}
       <Button type="submit" className="w-full" disabled={pending}>
         {pending ? "Creating" : "Create account"}
