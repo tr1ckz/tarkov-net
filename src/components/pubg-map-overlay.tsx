@@ -21,9 +21,6 @@ type MapCalibration = {
   yScale: number;
 };
 
-type CalibrationOverrides = Partial<Record<PubgMapIntel["slug"], MapCalibration>>;
-type EntityOverrides = Partial<Record<PubgMapIntel["slug"], PubgMapMarker[]>>;
-
 type RenderBox = {
   left: number;
   top: number;
@@ -70,28 +67,6 @@ function removeCalibration(x: number, y: number, calibration: MapCalibration) {
     x: clampPercent(((x - calibration.xOffset) * 100) / safeXScale),
     y: clampPercent(((y - calibration.yOffset) * 100) / safeYScale),
   };
-}
-
-function readOverrides(): CalibrationOverrides {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = localStorage.getItem("pubg-map-calibration-overrides");
-    if (!raw) return {};
-    return JSON.parse(raw) as CalibrationOverrides;
-  } catch {
-    return {};
-  }
-}
-
-function readEntityOverrides(): EntityOverrides {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = localStorage.getItem("pubg-map-entity-overrides");
-    if (!raw) return {};
-    return JSON.parse(raw) as EntityOverrides;
-  } catch {
-    return {};
-  }
 }
 
 const MIN_ZOOM = 1;
@@ -144,6 +119,7 @@ export function PubgMapOverlay({ map }: Props) {
   const [newEntityLabel, setNewEntityLabel] = useState("New Marker");
   const [newEntityType, setNewEntityType] = useState<PubgMapMarker["type"]>("hot-drop");
   const [newEntityNotes, setNewEntityNotes] = useState("Added in admin editor");
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   // pan/zoom state
   const [zoom, setZoom] = useState(1);
@@ -213,19 +189,41 @@ export function PubgMapOverlay({ map }: Props) {
   }, []);
 
   useEffect(() => {
-    const overrides = readOverrides();
-    setCalibration(overrides[map.slug] ?? getBaseCalibration(map.slug));
+    setCalibration(getBaseCalibration(map.slug));
     setCapturedPoint(null);
-  }, [map.slug]);
+    setEditableMarkers(mergedMarkers);
+    setSaveStatus("idle");
 
-  useEffect(() => {
-    const overrides = readEntityOverrides();
-    const mapEntities = overrides[map.slug];
-    if (mapEntities?.length) {
-      setEditableMarkers(mapEntities);
-    } else {
-      setEditableMarkers(mergedMarkers);
+    let cancelled = false;
+
+    async function loadServerConfig() {
+      try {
+        const response = await fetch(`/api/pubg/map-config/${map.slug}`, { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = (await response.json()) as {
+          calibration?: MapCalibration | null;
+          entities?: PubgMapMarker[] | null;
+        };
+
+        if (cancelled) return;
+
+        if (payload.calibration) {
+          setCalibration(payload.calibration);
+        }
+
+        if (payload.entities && payload.entities.length) {
+          setEditableMarkers(payload.entities);
+        }
+      } catch {
+        // fall back to defaults if server config cannot be loaded
+      }
     }
+
+    void loadServerConfig();
+
+    return () => {
+      cancelled = true;
+    };
   }, [map.slug, mergedMarkers]);
 
   useEffect(() => {
@@ -236,39 +234,45 @@ export function PubgMapOverlay({ map }: Props) {
     recomputeRenderBox();
   }, [recomputeRenderBox, zoom]);
 
+  async function saveServerConfig(payload: { calibration?: MapCalibration | null; entities?: PubgMapMarker[] | null }) {
+    setSaveStatus("saving");
+    try {
+      const response = await fetch(`/api/pubg/map-config/${map.slug}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        throw new Error("Map config save failed");
+      }
+
+      setSaveStatus("saved");
+      window.setTimeout(() => setSaveStatus("idle"), 1400);
+    } catch {
+      setSaveStatus("error");
+    }
+  }
+
   function persistCalibration(nextCalibration: MapCalibration) {
-    const overrides = readOverrides();
-    const nextOverrides: CalibrationOverrides = {
-      ...overrides,
-      [map.slug]: nextCalibration,
-    };
-    localStorage.setItem("pubg-map-calibration-overrides", JSON.stringify(nextOverrides));
     setCalibration(nextCalibration);
+    void saveServerConfig({ calibration: nextCalibration });
   }
 
   function persistEntities(nextMarkers: PubgMapMarker[]) {
-    const overrides = readEntityOverrides();
-    const nextOverrides: EntityOverrides = {
-      ...overrides,
-      [map.slug]: nextMarkers,
-    };
-    localStorage.setItem("pubg-map-entity-overrides", JSON.stringify(nextOverrides));
     setEditableMarkers(nextMarkers);
+    void saveServerConfig({ entities: nextMarkers });
   }
 
   function resetEntitiesToDefaults() {
-    const overrides = readEntityOverrides();
-    delete overrides[map.slug];
-    localStorage.setItem("pubg-map-entity-overrides", JSON.stringify(overrides));
     setEditableMarkers(mergedMarkers);
     setActiveMarkerId(null);
+    void saveServerConfig({ entities: null });
   }
 
   function resetCalibration() {
-    const overrides = readOverrides();
-    delete overrides[map.slug];
-    localStorage.setItem("pubg-map-calibration-overrides", JSON.stringify(overrides));
     setCalibration(getBaseCalibration(map.slug));
+    void saveServerConfig({ calibration: null });
   }
 
   function toggleAdminMode() {
@@ -593,9 +597,12 @@ export function PubgMapOverlay({ map }: Props) {
 
       {adminMode && (
         <div className="border border-[#3a3426] bg-[#14110b] p-3">
-          <p className="text-[11px] uppercase tracking-[0.14em] text-[#d2b277]">Admin Pinpoint Editor (Local)</p>
+          <p className="text-[11px] uppercase tracking-[0.14em] text-[#d2b277]">Admin Pinpoint Editor (Global)</p>
           <p className="mt-1 text-xs text-[#a69475]">
             Tune calibration for {map.name}. Click anywhere on map to capture coordinates (copied to clipboard).
+          </p>
+          <p className="mt-1 text-[11px] uppercase tracking-[0.1em] text-[#8f826a]">
+            Save status: {saveStatus}
           </p>
 
           <div className="mt-3 grid gap-2 sm:grid-cols-2">

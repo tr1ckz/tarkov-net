@@ -124,3 +124,15 @@ model CachedRaidIntel {
 
   @@index([gameMode, fetchedAt])
 }
+
+model PubgMapConfig {
+  id              String   @id @default(cuid())
+  mapSlug         String   @unique
+  calibrationJson String?
+  entitiesJson    String?
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([mapSlug])
+}
