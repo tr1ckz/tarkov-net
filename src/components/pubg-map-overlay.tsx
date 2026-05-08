@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState, useCallback, useEffect } from "react";
 import type { PubgMapIntel, PubgMapMarker } from "@/lib/pubg-data";
+import { pubgImportedMarkersBySlug } from "@/lib/pubg-map-pois";
 
 type Props = {
   map: PubgMapIntel;
@@ -259,7 +260,17 @@ export function PubgMapOverlay({ map }: Props) {
           }))
         : [];
 
-    return [...map.markers, ...derived, ...destonKeys];
+    const imported = pubgImportedMarkersBySlug[map.slug] ?? [];
+    const base = [...map.markers, ...derived, ...destonKeys];
+    const existing = new Set(base.map((m) => `${m.type}|${Math.round(m.x * 10)}|${Math.round(m.y * 10)}`));
+    const extras = imported.filter((m) => {
+      const key = `${m.type}|${Math.round(m.x * 10)}|${Math.round(m.y * 10)}`;
+      if (existing.has(key)) return false;
+      existing.add(key);
+      return true;
+    });
+
+    return [...base, ...extras];
   }, [map.markers, map.secretRooms, map.slug]);
 
   const visibleMarkers = useMemo(
