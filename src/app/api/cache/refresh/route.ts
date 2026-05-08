@@ -12,12 +12,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  await Promise.all([
-    refreshMarketCache("regular", { force: true }),
-    refreshMarketCache("pve", { force: true }),
-    refreshRaidIntelCache("regular", { force: true }),
-    refreshRaidIntelCache("pve", { force: true })
-  ]);
+  // Run refresh jobs sequentially to minimize SQLite write lock contention in production.
+  await refreshMarketCache("regular", { force: true });
+  await refreshMarketCache("pve", { force: true });
+  await refreshRaidIntelCache("regular", { force: true });
+  await refreshRaidIntelCache("pve", { force: true });
 
   return NextResponse.json({ ok: true, refreshed: ["regular", "pve"], raidIntelRefreshed: true });
 }

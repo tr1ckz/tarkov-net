@@ -31,9 +31,9 @@
       </Port>
     </Publish>
   </Networking>
-  <Config Name="Appdata" Target="/app/data" Default="/mnt/user/appdata/tarkov-net/data" Mode="rw" Description="Persistent SQLite data directory. Do NOT mount /app/prisma." Type="Path" Display="always" Required="true" Mask="false"/>
+  <Config Name="Appdata" Target="/app/data" Default="/mnt/cache/appdata/tarkov-net/data" Mode="rw" Description="Persistent SQLite data directory on cache for low-latency I/O. Do NOT mount /app/prisma." Type="Path" Display="always" Required="true" Mask="false"/>
   <Config Name="NEXTAUTH_URL" Target="NEXTAUTH_URL" Default="http://YOUR_UNRAID_IP:3000" Mode="" Description="Public URL for NextAuth callbacks" Type="Variable" Display="always" Required="true" Mask="false"/>
   <Config Name="NEXTAUTH_SECRET" Target="NEXTAUTH_SECRET" Default="change-me" Mode="" Description="Long random secret for session encryption" Type="Variable" Display="always" Required="true" Mask="true"/>
-  <Config Name="DATABASE_URL" Target="DATABASE_URL" Default="file:/app/data/dev.db" Mode="" Description="SQLite database path inside the container" Type="Variable" Display="always" Required="true" Mask="false"/>
+  <Config Name="DATABASE_URL" Target="DATABASE_URL" Default="file:/app/data/dev.db?connection_limit=1" Mode="" Description="SQLite database path inside the container (single connection to reduce lock timeouts)" Type="Variable" Display="always" Required="true" Mask="false"/>
   <Config Name="CACHE_REFRESH_SECRET" Target="CACHE_REFRESH_SECRET" Default="" Mode="" Description="Optional token for /api/cache/refresh" Type="Variable" Display="advanced" Required="false" Mask="true"/>
 </Container>

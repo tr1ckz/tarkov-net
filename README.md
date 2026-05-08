@@ -52,7 +52,8 @@ npm run dev
 ## Unraid Deployment
 
 1. Configure `NEXTAUTH_URL` and `NEXTAUTH_SECRET` in `docker-compose.yaml`
-2. Keep SQLite data on a dedicated mounted path (`./data` -> `/app/data`) and use `DATABASE_URL=file:/app/data/dev.db`
+2. Keep SQLite data on a dedicated mounted path (`./data` -> `/app/data`) and use `DATABASE_URL=file:/app/data/dev.db?connection_limit=1`
+3. On Unraid, prefer a cache-backed host path like `/mnt/cache/appdata/tarkov-net/data` to avoid slow FUSE writes.
 3. Build and start:
 
 ```bash
