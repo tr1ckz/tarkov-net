@@ -31,7 +31,7 @@
       </Port>
     </Publish>
   </Networking>
-  <Config Name="Appdata" Target="/app/data" Default="/mnt/user/appdata/tarkov-net/data" Mode="rw" Description="Persistent SQLite data directory" Type="Path" Display="always" Required="true" Mask="false"/>
+  <Config Name="Appdata" Target="/app/data" Default="/mnt/user/appdata/tarkov-net/data" Mode="rw" Description="Persistent SQLite data directory. Do NOT mount /app/prisma." Type="Path" Display="always" Required="true" Mask="false"/>
   <Config Name="NEXTAUTH_URL" Target="NEXTAUTH_URL" Default="http://YOUR_UNRAID_IP:3000" Mode="" Description="Public URL for NextAuth callbacks" Type="Variable" Display="always" Required="true" Mask="false"/>
   <Config Name="NEXTAUTH_SECRET" Target="NEXTAUTH_SECRET" Default="change-me" Mode="" Description="Long random secret for session encryption" Type="Variable" Display="always" Required="true" Mask="true"/>
   <Config Name="DATABASE_URL" Target="DATABASE_URL" Default="file:/app/data/dev.db" Mode="" Description="SQLite database path inside the container" Type="Variable" Display="always" Required="true" Mask="false"/>
