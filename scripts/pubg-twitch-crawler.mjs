@@ -696,6 +696,15 @@ async function indexStreams() {
     });
   }
 
+  // Run discovery worker (self-throttled to DISCOVERY_INTERVAL_MS, default 1 hour)
+  try {
+    await runDiscoveryWorker();
+  } catch (error) {
+    log("error", "discovery worker failed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+
   log("info", "index run completed", {
     runId,
     gameIds: streamPayload.gameIds,
@@ -717,6 +726,108 @@ async function indexStreams() {
       eventSubSyncIntervalMs: EVENTSUB_SYNC_INTERVAL_MS,
       profileMapping: profileMappingSummary
     }
+  });
+}
+
+// ─── DISCOVERY WORKER ────────────────────────────────────────────────────────
+// Polls the PUBG /samples endpoint hourly to build a local player name index.
+// This enables fast case-insensitive search without hitting the PUBG API live.
+
+const DISCOVERY_INTERVAL_MS = Number(process.env.PUBG_DISCOVERY_INTERVAL_MS ?? "3600000"); // 1 hour
+const DISCOVERY_MATCHES_PER_RUN = Math.max(1, Math.min(100, Number(process.env.PUBG_DISCOVERY_MATCHES ?? "50")));
+const DISCOVERY_SHARDS = (process.env.PUBG_DISCOVERY_SHARDS ?? "pc-na,pc-eu,pc-as").split(",").map((s) => s.trim()).filter(Boolean);
+let lastDiscoveryMs = 0;
+
+async function fetchSampleMatchIds(shard) {
+  try {
+    const payload = await pubgGet(`/shards/${encodeURIComponent(shard)}/samples`);
+    return (payload.data?.relationships?.matches?.data ?? []).map((m) => m.id);
+  } catch (error) {
+    log("warn", "discovery: samples fetch failed", {
+      shard,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return [];
+  }
+}
+
+async function fetchMatchParticipantNames(shard, matchId) {
+  try {
+    const payload = await pubgGet(`/shards/${encodeURIComponent(shard)}/matches/${encodeURIComponent(matchId)}`);
+    const names = [];
+    for (const item of payload.included ?? []) {
+      if (item.type === "participant") {
+        const name = item.attributes?.stats?.name;
+        if (name && typeof name === "string" && name.trim().length > 0) {
+          names.push(name.trim());
+        }
+      }
+    }
+    return names;
+  } catch {
+    return [];
+  }
+}
+
+async function runDiscoveryWorker() {
+  const now = Date.now();
+  const shouldRun = now - lastDiscoveryMs >= DISCOVERY_INTERVAL_MS;
+  if (!shouldRun) return;
+
+  lastDiscoveryMs = now;
+  const startedAt = Date.now();
+  log("info", "discovery: started", { shards: DISCOVERY_SHARDS, matchesPerRun: DISCOVERY_MATCHES_PER_RUN });
+
+  let totalNames = 0;
+  let totalUpserted = 0;
+
+  for (const shard of DISCOVERY_SHARDS) {
+    const platform = shard.startsWith("xbox") ? "xbox" : shard.startsWith("psn") ? "psn" : "steam";
+    let matchIds = await fetchSampleMatchIds(shard);
+    if (matchIds.length === 0) continue;
+
+    // Shuffle and cap so we don't hammer the API
+    matchIds = matchIds.sort(() => Math.random() - 0.5).slice(0, DISCOVERY_MATCHES_PER_RUN);
+
+    for (const matchId of matchIds) {
+      const names = await fetchMatchParticipantNames(shard, matchId);
+      if (names.length === 0) continue;
+      totalNames += names.length;
+
+      // Batch upsert names
+      for (const name of names) {
+        try {
+          await prisma.pubgKnownPlayer.upsert({
+            where: { playerName_platform_shard: { playerName: name, platform, shard } },
+            create: {
+              playerName: name,
+              playerNameLower: name.toLowerCase(),
+              platform,
+              shard,
+              seenCount: 1
+            },
+            update: {
+              playerNameLower: name.toLowerCase(),
+              lastSeenAt: new Date(),
+              seenCount: { increment: 1 }
+            }
+          });
+          totalUpserted += 1;
+        } catch {
+          // ignore individual upsert failures
+        }
+      }
+
+      // Small delay between match fetches to respect PUBG rate limits
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  }
+
+  log("info", "discovery: completed", {
+    shards: DISCOVERY_SHARDS,
+    totalNamesFound: totalNames,
+    totalUpserted,
+    durationMs: Date.now() - startedAt
   });
 }
 

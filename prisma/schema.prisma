@@ -253,3 +253,20 @@ model PubgStreamerIdentityLink {
   @@index([pubgNameNormalized])
   @@index([lastLinkedAt])
 }
+
+// Player name index built from PUBG /samples endpoint (hourly discovery worker)
+model PubgKnownPlayer {
+  id              String   @id @default(cuid())
+  playerName      String
+  playerNameLower String
+  platform        String
+  shard           String
+  firstSeenAt     DateTime @default(now())
+  lastSeenAt      DateTime @default(now())
+  seenCount       Int      @default(1)
+
+  @@unique([playerName, platform, shard])
+  @@index([playerNameLower])
+  @@index([platform, shard])
+  @@index([lastSeenAt])
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type Clip = {
   id: string;
@@ -117,6 +117,9 @@ export function PubgClipsPanel() {
     shard: string;
     matchCount: number;
   } | null>(null);
+  const [searchSuggestions, setSearchSuggestions] = useState<Array<{ playerName: string; shard: string }>>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [setupHint, setSetupHint] = useState<string | null>(null);
   const [clips, setClips] = useState<Clip[]>([]);
@@ -215,8 +218,25 @@ export function PubgClipsPanel() {
       setLiveLookupProfile(null);
       setLiveLookupError(null);
       setLiveLookupLoading(false);
+      setSearchSuggestions([]);
+      setShowSuggestions(false);
       return;
     }
+
+    // Debounce local player-search suggestions (300ms)
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      const params = new URLSearchParams({ q: candidate, platform: pendingPlatform, limit: "8" });
+      fetch(`/api/pubg/player-search?${params.toString()}`, { cache: "no-store" })
+        .then((r) => r.json())
+        .then((payload: { results?: Array<{ playerName: string; shard: string }> }) => {
+          setSearchSuggestions(payload.results ?? []);
+          setShowSuggestions((payload.results?.length ?? 0) > 0);
+        })
+        .catch(() => {
+          setSearchSuggestions([]);
+        });
+    }, 300);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => {
@@ -256,6 +276,7 @@ export function PubgClipsPanel() {
     return () => {
       clearTimeout(timeout);
       controller.abort();
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     };
   }, [pendingPlayerName, pendingPlatform]);
 
@@ -370,12 +391,35 @@ export function PubgClipsPanel() {
         </p>
 
         <form onSubmit={onAccountSubmit} className="mt-3 grid gap-2 sm:grid-cols-4">
-          <input
-            value={pendingPlayerName}
-            onChange={(e) => setPendingPlayerName(e.target.value)}
-            placeholder="your PUBG username"
-            className="sm:col-span-2 w-full border border-[#2d2d2d] bg-[#0b0b0b] px-3 py-2 text-sm text-[#e2d2af] outline-none focus:border-[#f5c842]"
-          />
+          <div className="relative sm:col-span-2">
+            <input
+              value={pendingPlayerName}
+              onChange={(e) => { setPendingPlayerName(e.target.value); setShowSuggestions(true); }}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+              onFocus={() => searchSuggestions.length > 0 && setShowSuggestions(true)}
+              placeholder="your PUBG username"
+              className="w-full border border-[#2d2d2d] bg-[#0b0b0b] px-3 py-2 text-sm text-[#e2d2af] outline-none focus:border-[#f5c842]"
+            />
+            {showSuggestions && searchSuggestions.length > 0 && (
+              <ul className="absolute left-0 right-0 top-full z-20 border border-[#3d3d3d] bg-[#0f0f0f] shadow-lg">
+                {searchSuggestions.map((s) => (
+                  <li key={`${s.playerName}:${s.shard}`}>
+                    <button
+                      type="button"
+                      onMouseDown={() => {
+                        setPendingPlayerName(s.playerName);
+                        setShowSuggestions(false);
+                      }}
+                      className="w-full px-3 py-2 text-left text-sm text-[#e2d2af] hover:bg-[#1a1a1a] flex justify-between"
+                    >
+                      <span>{s.playerName}</span>
+                      <span className="text-[10px] text-[#7f7768]">{s.shard}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
           <select
             value={pendingPlatform}
             onChange={(e) => setPendingPlatform(e.target.value)}
