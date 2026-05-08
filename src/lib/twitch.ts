@@ -41,6 +41,28 @@ type TwitchClipsResponse = {
   data: TwitchClip[];
 };
 
+export type TwitchVideo = {
+  id: string;
+  user_id: string;
+  user_login: string;
+  user_name: string;
+  title: string;
+  description: string;
+  created_at: string;
+  published_at: string;
+  url: string;
+  thumbnail_url: string;
+  viewable: string;
+  view_count: number;
+  language: string;
+  type: string;
+  duration: string;
+};
+
+type TwitchVideosResponse = {
+  data: TwitchVideo[];
+};
+
 type TwitchSearchChannel = {
   id: string;
   broadcaster_login: string;
@@ -141,6 +163,30 @@ export async function searchChannelsByName(query: string, first = 8): Promise<Tw
   const capped = Math.max(1, Math.min(first, 20));
   const payload = await twitchGet<TwitchSearchChannelsResponse>(
     `/search/channels?query=${encodeURIComponent(cleaned)}&first=${capped}`
+  );
+  return payload.data;
+}
+
+export function parseTwitchDurationToSeconds(duration: string): number {
+  const regex = /(\d+)([hms])/g;
+  let total = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(duration)) !== null) {
+    const value = Number(match[1]);
+    const unit = match[2];
+    if (unit === "h") total += value * 3600;
+    if (unit === "m") total += value * 60;
+    if (unit === "s") total += value;
+  }
+
+  return total;
+}
+
+export async function getVideosByUserId(userId: string, first = 8): Promise<TwitchVideo[]> {
+  const capped = Math.max(1, Math.min(first, 20));
+  const payload = await twitchGet<TwitchVideosResponse>(
+    `/videos?user_id=${encodeURIComponent(userId)}&type=archive&first=${capped}`
   );
   return payload.data;
 }

@@ -21,6 +21,7 @@ type PubgMatchResponse = {
 
 type KillEvent = {
   _T?: string;
+  _D?: string;
   killer?: { name?: string | null } | null;
   victim?: { name?: string | null } | null;
   attacker?: { name?: string | null } | null;
@@ -138,7 +139,7 @@ export async function getRecentEncounterNames(options: {
     return [];
   }
 
-  const encounterCounts = new Map<string, number>();
+  const encounterStats = new Map<string, { count: number; lastSeenAt: string | null }>();
   const matchIds = player.matchIds.slice(0, maxMatches);
 
   for (const matchId of matchIds) {
@@ -159,17 +160,25 @@ export async function getRecentEncounterNames(options: {
       if (!killerName || !victimName) continue;
 
       if (killerName === playerName && victimName !== playerName) {
-        encounterCounts.set(victimName, (encounterCounts.get(victimName) ?? 0) + 1);
+        const current = encounterStats.get(victimName) ?? { count: 0, lastSeenAt: null };
+        encounterStats.set(victimName, {
+          count: current.count + 1,
+          lastSeenAt: event._D ?? current.lastSeenAt
+        });
       }
 
       if (victimName === playerName && killerName !== playerName) {
-        encounterCounts.set(killerName, (encounterCounts.get(killerName) ?? 0) + 1);
+        const current = encounterStats.get(killerName) ?? { count: 0, lastSeenAt: null };
+        encounterStats.set(killerName, {
+          count: current.count + 1,
+          lastSeenAt: event._D ?? current.lastSeenAt
+        });
       }
     }
   }
 
-  return Array.from(encounterCounts.entries())
-    .sort((a, b) => b[1] - a[1])
+  return Array.from(encounterStats.entries())
+    .sort((a, b) => b[1].count - a[1].count)
     .slice(0, maxOpponents)
-    .map(([name, count]) => ({ name, count }));
+    .map(([name, stats]) => ({ name, count: stats.count, lastSeenAt: stats.lastSeenAt }));
 }

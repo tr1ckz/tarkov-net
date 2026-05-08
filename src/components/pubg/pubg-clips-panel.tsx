@@ -12,6 +12,7 @@ type Clip = {
   created_at: string;
   view_count: number;
   encounterWith?: string;
+  sourceType?: "vod" | "clip";
 };
 
 type ClipsResponse = {
@@ -26,6 +27,8 @@ type ClipsResponse = {
     directLoginMatches: number;
     searchChannelMatches: number;
     channelsWithClips: number;
+    vodMoments?: number;
+    resolvedShard?: string;
   };
   error?: string;
   setup?: string;
@@ -54,8 +57,7 @@ export function PubgClipsPanel() {
   const [pendingPlayerName, setPendingPlayerName] = useState("");
   const [platform, setPlatform] = useState("steam");
   const [pendingPlatform, setPendingPlatform] = useState("steam");
-  const [shard, setShard] = useState("pc-na");
-  const [pendingShard, setPendingShard] = useState("pc-na");
+  const [resolvedShard, setResolvedShard] = useState("");
   const [loading, setLoading] = useState(false);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,6 +70,8 @@ export function PubgClipsPanel() {
       directLoginMatches: number;
       searchChannelMatches: number;
       channelsWithClips: number;
+      vodMoments?: number;
+      resolvedShard?: string;
     };
   } | null>(null);
 
@@ -79,7 +83,6 @@ export function PubgClipsPanel() {
       const parsed = JSON.parse(saved) as {
         playerName?: string;
         platform?: string;
-        shard?: string;
       };
 
       if (parsed.playerName) {
@@ -91,11 +94,6 @@ export function PubgClipsPanel() {
       if (parsed.platform) {
         setPendingPlatform(parsed.platform);
         setPlatform(parsed.platform);
-      }
-
-      if (parsed.shard) {
-        setPendingShard(parsed.shard);
-        setShard(parsed.shard);
       }
     } catch {
       // ignore malformed local cache
@@ -111,10 +109,9 @@ export function PubgClipsPanel() {
     if (mode === "encounters" && playerName) {
       params.set("playerName", playerName);
       params.set("platform", platform);
-      params.set("shard", shard);
     }
     return `/api/pubg/clips?${params.toString()}`;
-  }, [mode, playerName, platform, shard, streamer]);
+  }, [mode, playerName, platform, streamer]);
 
   useEffect(() => {
     let cancelled = false;
@@ -140,6 +137,9 @@ export function PubgClipsPanel() {
 
         setClips(payload.clips ?? []);
         setResultMeta({ encountersScanned: payload.encountersScanned, debug: payload.debug });
+        if (payload.profile?.shard) {
+          setResolvedShard(payload.profile.shard);
+        }
       } catch (err) {
         if (cancelled) return;
         setClips([]);
@@ -170,14 +170,13 @@ export function PubgClipsPanel() {
     setMode("encounters");
     setPlayerName(nextName);
     setPlatform(pendingPlatform);
-    setShard(pendingShard);
+    setResolvedShard("");
 
     localStorage.setItem(
       "pubg-clips-profile",
       JSON.stringify({
         playerName: nextName,
-        platform: pendingPlatform,
-        shard: pendingShard
+        platform: pendingPlatform
       })
     );
   }
@@ -193,8 +192,7 @@ export function PubgClipsPanel() {
     try {
       const params = new URLSearchParams({
         playerName: nextName,
-        platform: pendingPlatform,
-        shard: pendingShard
+        platform: pendingPlatform
       });
       const response = await fetch(`/api/pubg/player-lookup?${params.toString()}`, {
         cache: "no-store"
@@ -214,9 +212,8 @@ export function PubgClipsPanel() {
       };
 
       setPendingPlayerName(profile.playerName);
-      setPendingShard(profile.shard);
       setPlayerName(profile.playerName);
-      setShard(profile.shard);
+      setResolvedShard(profile.shard);
       setPlatform(pendingPlatform);
       setMode("encounters");
 
@@ -224,8 +221,7 @@ export function PubgClipsPanel() {
         "pubg-clips-profile",
         JSON.stringify({
           playerName: profile.playerName,
-          platform: pendingPlatform,
-          shard: profile.shard
+          platform: pendingPlatform
         })
       );
     } catch (err) {
@@ -246,6 +242,7 @@ export function PubgClipsPanel() {
     setStreamer("");
     setPendingPlayerName("");
     setPlayerName("");
+    setResolvedShard("");
     setMode("pubg");
     localStorage.removeItem("pubg-clips-profile");
   }
@@ -275,18 +272,9 @@ export function PubgClipsPanel() {
             <option value="psn">PSN</option>
             <option value="kakao">Kakao</option>
           </select>
-          <select
-            value={pendingShard}
-            onChange={(e) => setPendingShard(e.target.value)}
-            className="w-full border border-[#2d2d2d] bg-[#0b0b0b] px-3 py-2 text-sm text-[#e2d2af] outline-none focus:border-[#f5c842]"
-          >
-            <option value="pc-na">pc-na</option>
-            <option value="pc-eu">pc-eu</option>
-            <option value="pc-as">pc-as</option>
-            <option value="xbox-na">xbox-na</option>
-            <option value="xbox-eu">xbox-eu</option>
-            <option value="xbox-as">xbox-as</option>
-          </select>
+          <div className="w-full border border-[#2d2d2d] bg-[#0b0b0b] px-3 py-2 text-xs uppercase tracking-[0.12em] text-[#7f7768]">
+            shard auto-resolve
+          </div>
           <button
             type="submit"
             className="sm:col-span-4 border border-[#5e4d34] bg-[#1a1510] px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
@@ -340,7 +328,7 @@ export function PubgClipsPanel() {
 
       {mode === "encounters" && playerName && (
         <div className="border border-[#2d2d2d] bg-[#111] px-3 py-2 text-xs uppercase tracking-[0.12em] text-[#9a9080]">
-          My account: <span className="text-[#e2d2af]">{playerName}</span> · {platform} · {shard}
+          My account: <span className="text-[#e2d2af]">{playerName}</span> · {platform} · {resolvedShard || "resolving..."}
           {typeof resultMeta?.encountersScanned === "number" && (
             <span className="ml-2 text-[#7f7768]">(encounters scanned: {resultMeta.encountersScanned})</span>
           )}
@@ -386,6 +374,11 @@ export function PubgClipsPanel() {
                     Encounter: {clip.encounterWith}
                   </p>
                 )}
+                {clip.sourceType && (
+                  <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[#6f675a]">
+                    Source: {clip.sourceType === "vod" ? "VOD Moment" : "Clip"}
+                  </p>
+                )}
                 <p className="mt-1 text-[11px] text-[#7f7768]">
                   {clip.view_count.toLocaleString()} views · {formatRelativeTime(clip.created_at)}
                 </p>
@@ -398,7 +391,7 @@ export function PubgClipsPanel() {
           No clips found for this filter.
           {mode === "encounters" && resultMeta?.debug && (
             <p className="mt-2 text-xs uppercase tracking-[0.1em] text-[#6f675a]">
-              Debug: encounters {resultMeta.debug.encountersFound}, candidate channels {resultMeta.debug.directLoginMatches}, clips channels {resultMeta.debug.channelsWithClips}
+              Debug: encounters {resultMeta.debug.encountersFound}, candidate channels {resultMeta.debug.directLoginMatches}, clips channels {resultMeta.debug.channelsWithClips}, vod moments {resultMeta.debug.vodMoments ?? 0}
             </p>
           )}
         </div>

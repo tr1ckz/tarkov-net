@@ -4,9 +4,16 @@ import {
   findGameIdByName,
   getClipsByBroadcasterId,
   getClipsByGameId,
+  getVideosByUserId,
+  parseTwitchDurationToSeconds,
   searchChannelsByName
 } from "@/lib/twitch";
-import { getPlayerWithMatches, getRecentEncounterNames } from "@/lib/pubg-api";
+import {
+  getCandidateShards,
+  getRecentEncounterNames,
+  lookupPlayerAcrossShards,
+  type PubgPlatform
+} from "@/lib/pubg-api";
 
 export const dynamic = "force-dynamic";
 
@@ -24,31 +31,88 @@ function getLoginCandidates(pubgName: string) {
   return Array.from(new Set([lower, compact, underscore, stripped])).filter(Boolean);
 }
 
+function parsePlatform(value: string): PubgPlatform {
+  if (value === "xbox" || value === "psn" || value === "kakao") return value;
+  return "steam";
+}
+
+function pickClosestVodMoment(
+  videos: Array<{
+    created_at: string;
+    duration: string;
+    url: string;
+    thumbnail_url: string;
+    title: string;
+    user_name: string;
+    user_login: string;
+    user_id: string;
+    id: string;
+  }>,
+  encounterIso: string | null
+) {
+  if (!encounterIso || !videos.length) return null;
+
+  const encounterTime = Date.parse(encounterIso);
+  if (Number.isNaN(encounterTime)) return null;
+
+  let best: {
+    video: (typeof videos)[number];
+    offsetSeconds: number;
+    delta: number;
+  } | null = null;
+
+  for (const video of videos) {
+    const start = Date.parse(video.created_at);
+    if (Number.isNaN(start)) continue;
+
+    const durationSeconds = parseTwitchDurationToSeconds(video.duration);
+    if (durationSeconds <= 0) continue;
+
+    const end = start + durationSeconds * 1000;
+    const rawOffset = Math.floor((encounterTime - start) / 1000);
+    const offsetSeconds = Math.max(0, Math.min(rawOffset, Math.max(0, durationSeconds - 1)));
+
+    const outside = encounterTime < start || encounterTime > end;
+    const delta = outside ? Math.min(Math.abs(encounterTime - start), Math.abs(encounterTime - end)) : 0;
+
+    if (!best || delta < best.delta) {
+      best = { video, offsetSeconds, delta };
+    }
+  }
+
+  return best;
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const streamer = searchParams.get("streamer")?.trim().toLowerCase() ?? "";
   const playerName = searchParams.get("playerName")?.trim() ?? "";
-  const shard = searchParams.get("shard")?.trim().toLowerCase() || "pc-na";
-  const platform = searchParams.get("platform")?.trim().toLowerCase() ?? "steam";
+  const requestedShard = searchParams.get("shard")?.trim().toLowerCase() ?? "";
+  const platform = parsePlatform(searchParams.get("platform")?.trim().toLowerCase() ?? "steam");
   const limit = Number(searchParams.get("limit") ?? "20");
 
   try {
     if (playerName) {
-      const resolvedPlayer = await getPlayerWithMatches(shard, playerName);
+      const resolvedPlayer = await lookupPlayerAcrossShards({
+        playerName,
+        platform,
+        preferredShard: requestedShard || undefined
+      });
       if (!resolvedPlayer) {
         return NextResponse.json(
           {
             clips: [],
             source: "encounters",
-            error: "Player not found on selected shard. Use Lookup first to resolve the correct shard.",
-            lookupNeeded: true
+            error: "Player not found. Use Lookup Player to resolve platform/shard.",
+            lookupNeeded: true,
+            searchedShards: getCandidateShards(platform)
           },
           { status: 404 }
         );
       }
 
       const encounters = await getRecentEncounterNames({
-        shard,
+        shard: resolvedPlayer.shard,
         playerName: resolvedPlayer.playerName,
         maxMatches: 7,
         maxOpponents: 25
@@ -58,7 +122,9 @@ export async function GET(request: Request) {
         encountersFound: encounters.length,
         directLoginMatches: 0,
         searchChannelMatches: 0,
-        channelsWithClips: 0
+        channelsWithClips: 0,
+        vodMoments: 0,
+        resolvedShard: resolvedPlayer.shard
       };
 
       const clips = [] as Array<{
@@ -78,6 +144,7 @@ export async function GET(request: Request) {
         thumbnail_url: string;
         duration: number;
         encounterWith: string;
+        sourceType: "vod" | "clip";
       }>;
 
       for (const encounter of encounters) {
@@ -104,13 +171,44 @@ export async function GET(request: Request) {
           if (!broadcasterId) continue;
           debug.directLoginMatches += 1;
 
+          const videos = await getVideosByUserId(broadcasterId, 8);
+          const bestVod = pickClosestVodMoment(videos, encounter.lastSeenAt ?? null);
+          if (bestVod) {
+            debug.vodMoments += 1;
+            const vodUrl = `${bestVod.video.url}?t=${bestVod.offsetSeconds}s`;
+            clips.push({
+              id: `vod-${bestVod.video.id}-${encounter.name}`,
+              url: vodUrl,
+              embed_url: vodUrl,
+              broadcaster_id: bestVod.video.user_id,
+              broadcaster_name: bestVod.video.user_name,
+              creator_id: bestVod.video.user_id,
+              creator_name: bestVod.video.user_name,
+              video_id: bestVod.video.id,
+              game_id: "",
+              language: "",
+              title: `[VOD Moment] ${bestVod.video.title}`,
+              view_count: 0,
+              created_at: bestVod.video.created_at,
+              thumbnail_url: bestVod.video.thumbnail_url
+                .replace("%{width}", "640")
+                .replace("%{height}", "360"),
+              duration: 0,
+              encounterWith: encounter.name,
+              sourceType: "vod"
+            });
+            if (clips.length >= limit) break;
+            continue;
+          }
+
           const found = await getClipsByBroadcasterId(broadcasterId, 2);
           if (found.length) debug.channelsWithClips += 1;
 
           for (const clip of found) {
             clips.push({
               ...clip,
-              encounterWith: encounter.name
+              encounterWith: encounter.name,
+              sourceType: "clip"
             });
             if (clips.length >= limit) break;
           }
@@ -124,7 +222,7 @@ export async function GET(request: Request) {
       return NextResponse.json({
         clips,
         source: "encounters",
-        profile: { playerName: resolvedPlayer.playerName, shard, platform },
+        profile: { playerName: resolvedPlayer.playerName, shard: resolvedPlayer.shard, platform },
         encountersScanned: encounters.length,
         debug
       });
