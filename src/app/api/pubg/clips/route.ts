@@ -165,15 +165,27 @@ export async function GET(request: Request) {
   const requestedShard = searchParams.get("shard")?.trim().toLowerCase() ?? "";
   const platform = parsePlatform(searchParams.get("platform")?.trim().toLowerCase() ?? "steam");
   const limit = Number(searchParams.get("limit") ?? "20");
+  const verboseMessages: string[] = [];
+
+  const pushVerbose = (message: string) => {
+    if (verboseMessages.length >= 200) return;
+    verboseMessages.push(`${new Date().toISOString()} ${message}`);
+  };
+
+  pushVerbose(
+    `request start mode=${playerName ? "encounters" : streamer ? "streamer" : "pubg"} player=${playerName || "-"} streamer=${streamer || "-"} platform=${platform} requestedShard=${requestedShard || "-"} limit=${limit} probe=${probeMode ? "1" : "0"}`
+  );
 
   try {
     if (playerName) {
+      pushVerbose(`encounters lookup start player=${playerName}`);
       const resolvedPlayer = await lookupPlayerAcrossShards({
         playerName,
         platform,
         preferredShard: requestedShard || undefined
       });
       if (!resolvedPlayer) {
+        pushVerbose("encounters lookup result=not_found");
         await writePubgLinkRunLog({
           source: "encounters",
           status: "empty",
@@ -183,7 +195,7 @@ export async function GET(request: Request) {
           encountersFound: 0,
           clipsReturned: 0,
           errorMessage: "Player not found across candidate shards",
-          metadata: { searchedShards: getCandidateShards(platform) }
+          metadata: { searchedShards: getCandidateShards(platform), verboseMessages }
         });
 
         return NextResponse.json(
@@ -198,12 +210,15 @@ export async function GET(request: Request) {
         );
       }
 
+      pushVerbose(`encounters lookup resolved player=${resolvedPlayer.playerName} shard=${resolvedPlayer.shard}`);
+
       const encounters = await getRecentEncounterNames({
         shard: resolvedPlayer.shard,
         playerName: resolvedPlayer.playerName,
         maxMatches: 7,
         maxOpponents: 25
       });
+      pushVerbose(`encounters fetched count=${encounters.length}`);
 
       const debug = {
         encountersFound: encounters.length,
@@ -234,6 +249,7 @@ export async function GET(request: Request) {
       }> = [];
 
       await ensurePubgStreamerIndexFresh();
+      pushVerbose("active streamer index ensured fresh");
 
       const clips = [] as Array<{
         id: string;
@@ -256,11 +272,13 @@ export async function GET(request: Request) {
       }>;
 
       for (const encounter of encounters) {
+        pushVerbose(`encounter scan name=${encounter.name} lastSeenAt=${encounter.lastSeenAt ?? "-"}`);
         const candidates = new Set<string>(getLoginCandidates(encounter.name));
         const encounterNormalized = normalizeName(encounter.name);
 
         const matchedLiveStreamers = await findMatchedActiveStreamers(encounter.name);
         if (matchedLiveStreamers.length) {
+          pushVerbose(`active index matches for ${encounter.name}: ${matchedLiveStreamers.length}`);
           debug.activeIndexMatches += matchedLiveStreamers.length;
           for (const streamerMatch of matchedLiveStreamers) {
             candidates.add(streamerMatch.userLogin.toLowerCase());
@@ -268,6 +286,7 @@ export async function GET(request: Request) {
             const encounterMs = encounter.lastSeenAt ? Date.parse(encounter.lastSeenAt) : Number.NaN;
             const streamStartMs = streamerMatch.streamStartedAt.getTime();
             if (!Number.isNaN(encounterMs) && encounterMs >= streamStartMs) {
+              pushVerbose(`active overlap match encounter=${encounter.name} twitch=${streamerMatch.userLogin}`);
               debug.activeOverlapMatches += 1;
               const offset = computeVodOffsetSeconds(encounter.lastSeenAt!, streamerMatch.streamStartedAt.toISOString());
               const liveUrl = `https://www.twitch.tv/${streamerMatch.userLogin}?t=${offset}s`;
@@ -320,6 +339,7 @@ export async function GET(request: Request) {
         if (clips.length >= limit) break;
 
         const searched = await searchChannelsByName(encounter.name, 8);
+        pushVerbose(`channel search results for ${encounter.name}: ${searched.length}`);
         for (const channel of searched) {
           const loginNormalized = normalizeName(channel.broadcaster_login);
           const displayNormalized = normalizeName(channel.display_name);
@@ -337,11 +357,13 @@ export async function GET(request: Request) {
         for (const login of candidates) {
           const broadcasterId = await findBroadcasterIdByLogin(login);
           if (!broadcasterId) continue;
+          pushVerbose(`candidate resolved login=${login} broadcasterId=${broadcasterId}`);
           debug.directLoginMatches += 1;
 
           const videos = await getVideosByUserId(broadcasterId, 8);
           const bestVod = pickClosestVodMoment(videos, encounter.lastSeenAt ?? null);
           if (bestVod) {
+            pushVerbose(`vod moment matched encounter=${encounter.name} twitch=${bestVod.video.user_login} video=${bestVod.video.id}`);
             debug.vodMoments += 1;
             const vodUrl = `${bestVod.video.url}?t=${bestVod.offsetSeconds}s`;
 
@@ -392,6 +414,7 @@ export async function GET(request: Request) {
           }
 
           const found = await getClipsByBroadcasterId(broadcasterId, 2);
+          pushVerbose(`clip fetch login=${login} clips=${found.length}`);
           if (found.length) debug.channelsWithClips += 1;
 
           for (const clip of found) {
@@ -432,6 +455,7 @@ export async function GET(request: Request) {
 
       if (linkEvents.length) {
         debug.linkEventsQueued = linkEvents.length;
+        pushVerbose(`link events queued=${linkEvents.length}`);
         const dedupeKeys = Array.from(new Set(linkEvents.map((event) => event.dedupeKey)));
         const existing = await prisma.pubgLinkEvent.findMany({
           where: { dedupeKey: { in: dedupeKeys } },
@@ -439,11 +463,13 @@ export async function GET(request: Request) {
         });
         const existingKeys = new Set(existing.map((row) => row.dedupeKey));
         const dataToInsert = linkEvents.filter((event) => !existingKeys.has(event.dedupeKey));
+        pushVerbose(`link events dedupe existing=${existingKeys.size} toInsert=${dataToInsert.length}`);
 
         const createManyResult = await prisma.pubgLinkEvent.createMany({
           data: dataToInsert
         });
         debug.linkEventsPersisted = createManyResult.count;
+        pushVerbose(`link events persisted=${createManyResult.count}`);
       }
 
       console.info("[pubg-clips] link metrics", {
@@ -471,7 +497,8 @@ export async function GET(request: Request) {
         metadata: {
           resolvedShard: debug.resolvedShard,
           encountersScanned: encounters.length,
-          probeMode
+          probeMode,
+          verboseMessages
         }
       });
 
@@ -485,50 +512,60 @@ export async function GET(request: Request) {
     }
 
     if (streamer) {
+      pushVerbose(`streamer mode start streamer=${streamer}`);
       const broadcasterId = await findBroadcasterIdByLogin(streamer);
       if (!broadcasterId) {
+        pushVerbose("streamer lookup result=not_found");
         await writePubgLinkRunLog({
           source: "streamer",
           status: "empty",
           playerName: streamer,
           clipsReturned: 0,
-          errorMessage: "Streamer login not found"
+          errorMessage: "Streamer login not found",
+          metadata: { verboseMessages }
         });
         return NextResponse.json({ clips: [], source: "streamer", streamer });
       }
 
       const clips = await getClipsByBroadcasterId(broadcasterId, limit);
+      pushVerbose(`streamer mode clips fetched broadcasterId=${broadcasterId} clips=${clips.length}`);
       await writePubgLinkRunLog({
         source: "streamer",
         status: clips.length ? "ok" : "empty",
         playerName: streamer,
         clipsReturned: clips.length,
-        metadata: { limit, probeMode }
+        metadata: { limit, probeMode, verboseMessages }
       });
       return NextResponse.json({ clips, source: "streamer", streamer });
     }
 
     // Twitch canonical PUBG name is currently PUBG: BATTLEGROUNDS.
+    pushVerbose("pubg mode start");
     const pubgGameId = await findGameIdByName("PUBG: BATTLEGROUNDS");
     if (!pubgGameId) {
+      pushVerbose("pubg game id lookup result=not_found");
       await writePubgLinkRunLog({
         source: "pubg",
         status: "error",
-        errorMessage: "PUBG game id not found in Twitch"
+        errorMessage: "PUBG game id not found in Twitch",
+        metadata: { verboseMessages }
       });
       return NextResponse.json({ clips: [], source: "pubg" });
     }
 
+    pushVerbose(`pubg game id resolved gameId=${pubgGameId}`);
     const clips = await getClipsByGameId(pubgGameId, limit);
+    pushVerbose(`pubg clips fetched count=${clips.length}`);
     await writePubgLinkRunLog({
       source: "pubg",
       status: clips.length ? "ok" : "empty",
       clipsReturned: clips.length,
-      metadata: { limit, gameId: pubgGameId, probeMode }
+      metadata: { limit, gameId: pubgGameId, probeMode, verboseMessages }
     });
     return NextResponse.json({ clips, source: "pubg" });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to load clips";
+    pushVerbose(`request failed message=${message}`);
 
     await writePubgLinkRunLog({
       source: playerName ? "encounters" : streamer ? "streamer" : "pubg",
@@ -536,7 +573,8 @@ export async function GET(request: Request) {
       playerName: playerName || streamer || undefined,
       platform: playerName ? platform : undefined,
       requestedShard: playerName ? requestedShard : undefined,
-      errorMessage: message
+      errorMessage: message,
+      metadata: { verboseMessages }
     });
 
     // Missing credentials is a setup issue, return a clear message.

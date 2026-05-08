@@ -24,6 +24,10 @@ type InviteRow = {
 };
 
 type PubgLinkingStats = {
+  build: {
+    gitSha: string;
+    nodeEnv: string;
+  };
   totals: {
     totalEvents: number;
     totalRuns: number;
@@ -82,6 +86,7 @@ type PubgLinkingStats = {
     linkEventsQueued: number;
     linkEventsPersisted: number;
     errorMessage: string | null;
+    verboseMessages: string[];
   }>;
 };
 
@@ -403,6 +408,10 @@ export default function AdminPage() {
       {/* PUBG Linking Tab */}
       {tab === "pubg" && (
         <div className="space-y-5">
+          <p className="text-[11px] uppercase tracking-widest text-[#7f7768]">
+            Build: {pubgStats?.build?.gitSha?.slice(0, 12) || "unknown"} | env: {pubgStats?.build?.nodeEnv || "unknown"}
+          </p>
+
           <div className="flex items-center justify-between">
             <p className="text-xs uppercase tracking-widest text-[#7f7768]">
               Last 24h runs: {pubgStats?.totals.runs24h ?? 0} | ok {pubgStats?.totals.runs24hOk ?? 0} | empty {pubgStats?.totals.runs24hEmpty ?? 0} | errors {pubgStats?.totals.runs24hError ?? 0}
@@ -486,6 +495,13 @@ export default function AdminPage() {
                     <span className="text-[#666]">persisted: {run.linkEventsPersisted}</span>
                   </div>
                   {run.errorMessage && <div className="mt-1 text-[#e07070]">{run.errorMessage}</div>}
+                  {run.verboseMessages?.length > 0 && (
+                    <div className="mt-2 border border-[#1a1a1a] bg-[#090909] px-2 py-1 text-[11px] text-[#8e8e8e]">
+                      {run.verboseMessages.slice(-4).map((line, lineIdx) => (
+                        <div key={`${run.createdAt}-${idx}-line-${lineIdx}`}>{line}</div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
               {(pubgStats?.recentRuns.length ?? 0) === 0 && <p className="text-xs text-[#555]">No linker runs captured yet. Trigger a PUBG clip lookup to generate logs.</p>}

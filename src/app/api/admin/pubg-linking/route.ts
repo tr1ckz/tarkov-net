@@ -5,6 +5,11 @@ import { prisma } from "@/lib/prisma";
 
 type CountRow = { count: number };
 
+type RunMetadata = {
+  verboseMessages?: string[];
+  [key: string]: unknown;
+};
+
 function requireAdmin(session: Session | null) {
   if (!session?.user || (session.user as { role?: string }).role !== "ADMIN") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -15,6 +20,15 @@ function requireAdmin(session: Session | null) {
 function normalizeCount(value: number | bigint | null | undefined) {
   if (typeof value === "bigint") return Number(value);
   return Number(value ?? 0);
+}
+
+function parseRunMetadata(value: string | null): RunMetadata | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as RunMetadata;
+  } catch {
+    return null;
+  }
 }
 
 export async function GET() {
@@ -105,7 +119,8 @@ export async function GET() {
         channelsWithClips: true,
         linkEventsQueued: true,
         linkEventsPersisted: true,
-        errorMessage: true
+        errorMessage: true,
+        metadataJson: true
       }
     }),
     prisma.pubgActiveStreamer.count(),
@@ -152,6 +167,14 @@ export async function GET() {
   );
 
   return NextResponse.json({
+    build: {
+      gitSha:
+        process.env.GIT_SHA ??
+        process.env.NEXT_PUBLIC_GIT_SHA ??
+        process.env.VERCEL_GIT_COMMIT_SHA ??
+        "unknown",
+      nodeEnv: process.env.NODE_ENV ?? "unknown"
+    },
     totals: {
       totalEvents,
       totalRuns,
@@ -174,6 +197,12 @@ export async function GET() {
     topPubg: topPubgWithReach,
     topTwitch: topTwitchWithReach,
     recent,
-    recentRuns
+    recentRuns: recentRuns.map((run) => {
+      const metadata = parseRunMetadata(run.metadataJson);
+      return {
+        ...run,
+        verboseMessages: metadata?.verboseMessages ?? []
+      };
+    })
   });
 }
