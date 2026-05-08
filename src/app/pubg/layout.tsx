@@ -12,6 +12,13 @@ export default function PubgLayout({ children }: { children: React.ReactNode }) 
       <div className="flex flex-1 flex-col gap-4 lg:flex-row">
         <aside className="border border-[#2d2d2d] bg-[#141414] p-2 lg:w-48 lg:shrink-0">
           <nav className="flex flex-wrap gap-2 lg:flex-col lg:gap-1">
+            <Link
+              href="/pubg/clips"
+              className="flex items-center justify-between border border-[#2d2d2d] bg-[#111] px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-[#c8bda0] hover:border-[#f5c842] hover:text-[#f5c842]"
+            >
+              <span>Clips</span>
+              <span className="text-[10px] text-[#5a5450]">Live</span>
+            </Link>
             {pubgMaps.map((map) => (
               <Link
                 key={map.slug}

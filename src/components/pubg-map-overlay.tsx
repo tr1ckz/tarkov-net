@@ -181,8 +181,8 @@ export function PubgMapOverlay({ map }: Props) {
       {/* ── map canvas ── */}
       <div
         ref={containerRef}
-        className="relative overflow-hidden border border-[#2d2d2d] bg-[#0a0a0a]"
-        style={{ height: "85vh", minHeight: 600, cursor: dragging.current ? "grabbing" : "grab" }}
+        className="relative mx-auto aspect-square w-full max-w-[85vh] overflow-hidden border border-[#2d2d2d] bg-[#0a0a0a]"
+        style={{ cursor: dragging.current ? "grabbing" : "grab" }}
         onWheel={onWheel}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
@@ -206,7 +206,7 @@ export function PubgMapOverlay({ map }: Props) {
           <img
             src={map.mapImage}
             alt={`${map.name} map`}
-            className="h-full w-full object-cover select-none"
+            className="h-full w-full object-fill select-none"
             draggable={false}
             loading="eager"
           />
