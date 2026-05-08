@@ -85,6 +85,8 @@ export default async function TarkovDashboardPage({ searchParams }: DashboardPag
         totalItems={dashboard.total}
         query={query}
         pageSize={dashboard.pageSize}
+        mode={mode}
+        basePath="/tarkov"
         trendByItem={trendByItem}
       />
     </Card>

@@ -7,7 +7,7 @@ import { PriceAlertBadge } from "@/components/price-alert-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { compactPrice, formatDateTime, formatRelativeTime, fullPrice } from "@/lib/utils";
 import { getBestTraderBuyback, getFleaPrice, trendDirection } from "@/lib/tarkov";
-import { MarketItem } from "@/types/tarkov";
+import { GameMode, MarketItem } from "@/types/tarkov";
 
 type TrendSnapshot = {
   direction: "up" | "down" | "flat";
@@ -22,6 +22,8 @@ type Props = {
   totalItems: number;
   query: string;
   pageSize: number;
+  mode: GameMode;
+  basePath: string;
   trendByItem?: Map<string, TrendSnapshot>;
 };
 
@@ -55,7 +57,7 @@ function TrendSparkline({ item }: { item: MarketItem }) {
   );
 }
 
-function buildPageHref(page: number, query: string) {
+function buildPageHref(basePath: string, page: number, query: string) {
   const params = new URLSearchParams();
   if (page > 1) {
     params.set("page", String(page));
@@ -64,10 +66,10 @@ function buildPageHref(page: number, query: string) {
     params.set("q", query);
   }
   const search = params.toString();
-  return search ? `/?${search}` : "/";
+  return search ? `${basePath}?${search}` : basePath;
 }
 
-export function DashboardTable({ items, favoriteIds, currentPage, totalPages, totalItems, query, pageSize, trendByItem }: Props) {
+export function DashboardTable({ items, favoriteIds, currentPage, totalPages, totalItems, query, pageSize, mode, basePath, trendByItem }: Props) {
   const start = totalItems ? (currentPage - 1) * pageSize + 1 : 0;
   const end = Math.min(currentPage * pageSize, totalItems);
   const exportRows = items.map((item) => {
@@ -99,7 +101,7 @@ export function DashboardTable({ items, favoriteIds, currentPage, totalPages, to
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 md:flex-row md:items-center">
-        <DashboardSearch initialQuery={query} pageTerms={pageTerms} />
+        <DashboardSearch initialQuery={query} pageTerms={pageTerms} mode={mode} />
         <div className="flex flex-wrap items-center gap-2 md:ml-auto">
           <div className="text-sm text-muted-foreground">
             {totalItems ? `Showing ${start}-${end} of ${totalItems}` : "No items found"}
@@ -211,7 +213,7 @@ export function DashboardTable({ items, favoriteIds, currentPage, totalPages, to
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Link
-              href={buildPageHref(Math.max(1, currentPage - 1), query)}
+              href={buildPageHref(basePath, Math.max(1, currentPage - 1), query)}
               className={`inline-flex items-center justify-center border px-3 py-2 text-sm font-semibold uppercase tracking-wider ${
                 currentPage === 1 ? "pointer-events-none border-[#2d2d2d] text-[#555] opacity-50" : "border-[#2d2d2d] text-[#c8bda0] hover:bg-[#5e6a4b] hover:border-[#5e6a4b] hover:text-[#e2d2af]"
               }`}
@@ -228,7 +230,7 @@ export function DashboardTable({ items, favoriteIds, currentPage, totalPages, to
               return (
                 <Link
                   key={pageNumber}
-                  href={buildPageHref(pageNumber, query)}
+                  href={buildPageHref(basePath, pageNumber, query)}
                   className={`inline-flex min-w-10 items-center justify-center border px-3 py-2 text-sm font-semibold uppercase tracking-wider ${
                     pageNumber === currentPage
                       ? "border-[#e2d2af] bg-[#e2d2af] text-[#0e0e0e]"
@@ -240,7 +242,7 @@ export function DashboardTable({ items, favoriteIds, currentPage, totalPages, to
               );
             })}
             <Link
-              href={buildPageHref(Math.min(totalPages, currentPage + 1), query)}
+              href={buildPageHref(basePath, Math.min(totalPages, currentPage + 1), query)}
               className={`inline-flex items-center justify-center border px-3 py-2 text-sm font-semibold uppercase tracking-wider ${
                 currentPage === totalPages
                   ? "pointer-events-none border-[#2d2d2d] text-[#555] opacity-50"

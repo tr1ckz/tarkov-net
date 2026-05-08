@@ -10,6 +10,7 @@ function parseMode(value: string | null): GameMode {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const query = searchParams.get("q")?.trim() ?? "";
+  const normalizedQuery = query.toLowerCase();
   const mode = parseMode(searchParams.get("mode"));
 
   if (query.length < 2) {
@@ -23,7 +24,7 @@ export async function GET(request: Request) {
         OR: [
           { name: { contains: query } },
           { shortName: { contains: query } },
-          { normalizedName: { contains: query } }
+          { normalizedName: { contains: normalizedQuery } }
         ]
       }
     },
@@ -38,7 +39,7 @@ export async function GET(request: Request) {
       }
     },
     orderBy: [{ lastLowPrice: "desc" }, { avg24hPrice: "desc" }],
-    take: 10
+    take: 20
   });
 
   if (cached.length) {
@@ -55,7 +56,7 @@ export async function GET(request: Request) {
 
   const live = await getDashboardItemsFromLive(mode, {
     page: 1,
-    pageSize: 10,
+    pageSize: 20,
     query
   });
 
