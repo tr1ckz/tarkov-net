@@ -22,6 +22,7 @@ type MapCalibration = {
 };
 
 type CalibrationOverrides = Partial<Record<PubgMapIntel["slug"], MapCalibration>>;
+type EntityOverrides = Partial<Record<PubgMapIntel["slug"], PubgMapMarker[]>>;
 
 type RenderBox = {
   left: number;
@@ -82,6 +83,17 @@ function readOverrides(): CalibrationOverrides {
   }
 }
 
+function readEntityOverrides(): EntityOverrides {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem("pubg-map-entity-overrides");
+    if (!raw) return {};
+    return JSON.parse(raw) as EntityOverrides;
+  } catch {
+    return {};
+  }
+}
+
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 6;
 const ZOOM_STEP = 0.18;
@@ -128,11 +140,18 @@ export function PubgMapOverlay({ map }: Props) {
   } | null>(null);
   const [renderBox, setRenderBox] = useState<RenderBox>({ left: 0, top: 0, width: 1, height: 1 });
   const [imageRatio, setImageRatio] = useState(1);
+  const [editableMarkers, setEditableMarkers] = useState<PubgMapMarker[]>([]);
+  const [newEntityLabel, setNewEntityLabel] = useState("New Marker");
+  const [newEntityType, setNewEntityType] = useState<PubgMapMarker["type"]>("hot-drop");
+  const [newEntityNotes, setNewEntityNotes] = useState("Added in admin editor");
 
   // pan/zoom state
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const dragging = useRef(false);
+  const draggingMarkerId = useRef<string | null>(null);
+  const movedMarkerDuringDrag = useRef(false);
+  const markersRef = useRef<PubgMapMarker[]>([]);
   const dragStart = useRef({ mx: 0, my: 0, px: 0, py: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -171,8 +190,8 @@ export function PubgMapOverlay({ map }: Props) {
   }, [map.markers, map.secretRooms, map.slug]);
 
   const visibleMarkers = useMemo(
-    () => mergedMarkers.filter((m) => activeTypes[m.type]),
-    [mergedMarkers, activeTypes]
+    () => editableMarkers.filter((m) => activeTypes[m.type]),
+    [editableMarkers, activeTypes]
   );
 
   const activeMarker = visibleMarkers.find((m) => m.id === activeMarkerId) ?? null;
@@ -200,6 +219,20 @@ export function PubgMapOverlay({ map }: Props) {
   }, [map.slug]);
 
   useEffect(() => {
+    const overrides = readEntityOverrides();
+    const mapEntities = overrides[map.slug];
+    if (mapEntities?.length) {
+      setEditableMarkers(mapEntities);
+    } else {
+      setEditableMarkers(mergedMarkers);
+    }
+  }, [map.slug, mergedMarkers]);
+
+  useEffect(() => {
+    markersRef.current = editableMarkers;
+  }, [editableMarkers]);
+
+  useEffect(() => {
     recomputeRenderBox();
   }, [recomputeRenderBox, zoom]);
 
@@ -211,6 +244,24 @@ export function PubgMapOverlay({ map }: Props) {
     };
     localStorage.setItem("pubg-map-calibration-overrides", JSON.stringify(nextOverrides));
     setCalibration(nextCalibration);
+  }
+
+  function persistEntities(nextMarkers: PubgMapMarker[]) {
+    const overrides = readEntityOverrides();
+    const nextOverrides: EntityOverrides = {
+      ...overrides,
+      [map.slug]: nextMarkers,
+    };
+    localStorage.setItem("pubg-map-entity-overrides", JSON.stringify(nextOverrides));
+    setEditableMarkers(nextMarkers);
+  }
+
+  function resetEntitiesToDefaults() {
+    const overrides = readEntityOverrides();
+    delete overrides[map.slug];
+    localStorage.setItem("pubg-map-entity-overrides", JSON.stringify(overrides));
+    setEditableMarkers(mergedMarkers);
+    setActiveMarkerId(null);
   }
 
   function resetCalibration() {
@@ -232,6 +283,49 @@ export function PubgMapOverlay({ map }: Props) {
     setActiveTypes((prev) => ({ ...prev, [type]: !prev[type] }));
     setActiveMarkerId(null);
   };
+
+  const getPointerCoords = useCallback(
+    (clientX: number, clientY: number) => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+
+      const localX = (clientX - rect.left - pan.x) / zoom;
+      const localY = (clientY - rect.top - pan.y) / zoom;
+      const calibratedX = clampPercent(((localX - renderBox.left) / Math.max(1, renderBox.width)) * 100);
+      const calibratedY = clampPercent(((localY - renderBox.top) / Math.max(1, renderBox.height)) * 100);
+      const raw = removeCalibration(calibratedX, calibratedY, calibration);
+
+      return {
+        rawX: Number(raw.x.toFixed(2)),
+        rawY: Number(raw.y.toFixed(2)),
+        calibratedX: Number(calibratedX.toFixed(2)),
+        calibratedY: Number(calibratedY.toFixed(2)),
+      };
+    },
+    [calibration, pan.x, pan.y, renderBox.height, renderBox.left, renderBox.top, renderBox.width, zoom]
+  );
+
+  function addEntityAtCapturedPoint() {
+    if (!capturedPoint) return;
+    const nextEntity: PubgMapMarker = {
+      id: `admin-${map.slug}-${Date.now().toString(36)}`,
+      label: newEntityLabel.trim() || "New Marker",
+      type: newEntityType,
+      x: capturedPoint.rawX,
+      y: capturedPoint.rawY,
+      notes: newEntityNotes.trim() || "Added in admin editor",
+    };
+    const next = [...editableMarkers, nextEntity];
+    persistEntities(next);
+    setActiveMarkerId(nextEntity.id);
+  }
+
+  function removeActiveEntity() {
+    if (!activeMarkerId) return;
+    const next = editableMarkers.filter((m) => m.id !== activeMarkerId);
+    persistEntities(next);
+    setActiveMarkerId(null);
+  }
 
   // ── zoom via wheel ──────────────────────────────────────────────
   const onWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
@@ -265,35 +359,46 @@ export function PubgMapOverlay({ map }: Props) {
   }, [pan]);
 
   const onMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (adminMode && draggingMarkerId.current) {
+      const coords = getPointerCoords(e.clientX, e.clientY);
+      if (!coords) return;
+      movedMarkerDuringDrag.current = true;
+      setEditableMarkers((prev) =>
+        prev.map((marker) =>
+          marker.id === draggingMarkerId.current
+            ? { ...marker, x: coords.rawX, y: coords.rawY }
+            : marker
+        )
+      );
+      return;
+    }
+
     if (!dragging.current) return;
     setPan({
       x: dragStart.current.px + (e.clientX - dragStart.current.mx),
       y: dragStart.current.py + (e.clientY - dragStart.current.my),
     });
-  }, []);
+  }, [adminMode, getPointerCoords]);
 
-  const onMouseUp = useCallback(() => { dragging.current = false; }, []);
+  const onMouseUp = useCallback(() => {
+    dragging.current = false;
+    if (adminMode && draggingMarkerId.current) {
+      const moved = movedMarkerDuringDrag.current;
+      draggingMarkerId.current = null;
+      movedMarkerDuringDrag.current = false;
+      if (moved) {
+        persistEntities(markersRef.current);
+      }
+    }
+  }, [adminMode]);
 
   const onMapClick = useCallback(
     async (e: React.MouseEvent<HTMLDivElement>) => {
       if (!adminMode) return;
       if ((e.target as HTMLElement).tagName === "BUTTON") return;
 
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect || rect.width <= 0 || rect.height <= 0) return;
-
-      const localX = (e.clientX - rect.left - pan.x) / zoom;
-      const localY = (e.clientY - rect.top - pan.y) / zoom;
-      const calibratedX = clampPercent(((localX - renderBox.left) / Math.max(1, renderBox.width)) * 100);
-      const calibratedY = clampPercent(((localY - renderBox.top) / Math.max(1, renderBox.height)) * 100);
-      const raw = removeCalibration(calibratedX, calibratedY, calibration);
-
-      const captured = {
-        rawX: Number(raw.x.toFixed(2)),
-        rawY: Number(raw.y.toFixed(2)),
-        calibratedX: Number(calibratedX.toFixed(2)),
-        calibratedY: Number(calibratedY.toFixed(2)),
-      };
+      const captured = getPointerCoords(e.clientX, e.clientY);
+      if (!captured) return;
       setCapturedPoint(captured);
 
       try {
@@ -302,7 +407,7 @@ export function PubgMapOverlay({ map }: Props) {
         // ignore clipboard permission failures
       }
     },
-    [adminMode, calibration, pan.x, pan.y, renderBox.height, renderBox.left, renderBox.top, renderBox.width, zoom]
+    [adminMode, getPointerCoords]
   );
 
   const resetView = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
@@ -443,7 +548,22 @@ export function PubgMapOverlay({ map }: Props) {
               <button
                 key={marker.id}
                 type="button"
-                onClick={(e) => { e.stopPropagation(); setActiveMarkerId(isActive ? null : marker.id); }}
+                onMouseDown={(e) => {
+                  if (!adminMode) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  draggingMarkerId.current = marker.id;
+                  movedMarkerDuringDrag.current = false;
+                  setActiveMarkerId(marker.id);
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (adminMode && movedMarkerDuringDrag.current) {
+                    movedMarkerDuringDrag.current = false;
+                    return;
+                  }
+                  setActiveMarkerId(isActive ? null : marker.id);
+                }}
                 title={marker.label}
                 className="absolute rounded-full transition-transform hover:scale-125"
                 style={{
@@ -544,6 +664,47 @@ export function PubgMapOverlay({ map }: Props) {
               onClick={resetCalibration}
               className="border border-[#3a3a3a] bg-[#1a1a1a] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#9a9080] hover:border-[#666] hover:text-white"
             >Reset Map</button>
+            <button
+              type="button"
+              onClick={addEntityAtCapturedPoint}
+              disabled={!capturedPoint}
+              className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842] disabled:opacity-50"
+            >Add Entity At Click</button>
+            <button
+              type="button"
+              onClick={removeActiveEntity}
+              disabled={!activeMarkerId}
+              className="border border-[#5e2a2a] bg-[#1a1010] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e3b8b8] hover:border-[#d36a6a] disabled:opacity-50"
+            >Delete Selected</button>
+            <button
+              type="button"
+              onClick={resetEntitiesToDefaults}
+              className="border border-[#3a3a3a] bg-[#1a1a1a] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#9a9080] hover:border-[#666] hover:text-white"
+            >Reset Entities</button>
+          </div>
+
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            <input
+              value={newEntityLabel}
+              onChange={(e) => setNewEntityLabel(e.target.value)}
+              className="w-full border border-[#3a3426] bg-[#0e0c09] px-2 py-1.5 text-xs text-[#e2d2af]"
+              placeholder="Entity label"
+            />
+            <select
+              value={newEntityType}
+              onChange={(e) => setNewEntityType(e.target.value as PubgMapMarker["type"])}
+              className="w-full border border-[#3a3426] bg-[#0e0c09] px-2 py-1.5 text-xs text-[#e2d2af]"
+            >
+              {(Object.keys(MARKER_CONFIG) as PubgMapMarker["type"][]).map((type) => (
+                <option key={type} value={type}>{MARKER_CONFIG[type].label}</option>
+              ))}
+            </select>
+            <input
+              value={newEntityNotes}
+              onChange={(e) => setNewEntityNotes(e.target.value)}
+              className="w-full border border-[#3a3426] bg-[#0e0c09] px-2 py-1.5 text-xs text-[#e2d2af]"
+              placeholder="Entity notes"
+            />
           </div>
 
           {capturedPoint && (
@@ -551,6 +712,9 @@ export function PubgMapOverlay({ map }: Props) {
               Captured raw ({capturedPoint.rawX}, {capturedPoint.rawY}) · rendered ({capturedPoint.calibratedX}, {capturedPoint.calibratedY})
             </p>
           )}
+          <p className="mt-2 text-xs text-[#8f826a]">
+            Admin entity controls: click map to set capture point, Add Entity At Click, drag circles to move, select then Delete Selected.
+          </p>
         </div>
       )}
 
