@@ -16,6 +16,7 @@ type MetricsResponse = {
   summary: {
     totalCalls: number;
     successCalls: number;
+    notFoundCalls: number;
     failedCalls: number;
     successRate: number;
     avgDurationMs: number;
@@ -24,7 +25,7 @@ type MetricsResponse = {
     granularity: string;
     since: string;
   };
-  buckets: Array<{ bucket: string; total: number; success: number; failed: number }>;
+  buckets: Array<{ bucket: string; total: number; success: number; notFound: number; failed: number }>;
   callTypeBreakdown: Array<{ callType: string; count: number }>;
   triggeredByBreakdown: Array<{ triggeredBy: string; count: number }>;
 };
@@ -109,7 +110,8 @@ export default function PubgApiMetricsPage() {
             {[
               { label: "Total Calls", value: s.totalCalls.toLocaleString() },
               { label: "Successful", value: s.successCalls.toLocaleString() },
-              { label: "Failed", value: s.failedCalls.toLocaleString() },
+              { label: "Not Found (404)", value: s.notFoundCalls.toLocaleString() },
+              { label: "Failed (Errors)", value: s.failedCalls.toLocaleString() },
               { label: "Success Rate", value: `${s.successRate}%` },
               { label: "Avg Latency", value: `${s.avgDurationMs}ms` },
               { label: "Calls/min (last 60m)", value: String(s.callsPerMinuteLast60) },
@@ -153,7 +155,8 @@ export default function PubgApiMetricsPage() {
                   />
                   <Legend wrapperStyle={{ color: "#9a9080", fontSize: 11, paddingTop: 8 }} />
                   <Bar dataKey="success" name="Success" stackId="a" fill="#4a7c4e" />
-                  <Bar dataKey="failed" name="Failed" stackId="a" fill="#8b3a3a" />
+                  <Bar dataKey="notFound" name="Not Found (404)" stackId="a" fill="#8b6b3a" />
+                  <Bar dataKey="failed" name="Failed (Errors)" stackId="a" fill="#8b3a3a" />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -175,7 +178,7 @@ export default function PubgApiMetricsPage() {
                 <tbody>
                   {data!.callTypeBreakdown.map((row) => (
                     <tr key={row.callType} className="border-t border-[#1e1a10]">
-                      <td className="py-1 font-mono text-[#c8a96e]">{row.callType}</td>
+                      <td className="py-1 font-mono text-[#c8a96e]">{labelCallType(row.callType)}</td>
                       <td className="py-1 text-right text-[#f1d6aa]">{row.count.toLocaleString()}</td>
                     </tr>
                   ))}
@@ -202,7 +205,7 @@ export default function PubgApiMetricsPage() {
                 <tbody>
                   {data!.triggeredByBreakdown.map((row) => (
                     <tr key={row.triggeredBy} className="border-t border-[#1e1a10]">
-                      <td className="py-1 font-mono text-[#c8a96e]">{row.triggeredBy}</td>
+                      <td className="py-1 font-mono text-[#c8a96e]">{labelTriggeredBy(row.triggeredBy)}</td>
                       <td className="py-1 text-right text-[#f1d6aa]">{row.count.toLocaleString()}</td>
                     </tr>
                   ))}
@@ -223,4 +226,24 @@ export default function PubgApiMetricsPage() {
       )}
     </div>
   );
+}
+
+function labelCallType(value: string) {
+  if (value === "player_lookup") return "Player Lookup";
+  if (value === "match_fetch") return "Match Fetch";
+  if (value === "telemetry_fetch") return "Telemetry Fetch";
+  if (value === "samples_fetch") return "Samples Fetch";
+  if (value === "api_fetch") return "Generic API Fetch";
+  if (value === "uncategorized") return "Uncategorized";
+  return value.replace(/_/g, " ");
+}
+
+function labelTriggeredBy(value: string) {
+  if (value === "stream_online") return "Stream Online Webhook";
+  if (value === "batch_linker") return "Batch Linker";
+  if (value === "clips_encounters") return "Clips: Encounter Request";
+  if (value === "clips_streamer") return "Clips: Streamer Request";
+  if (value === "clips_pubg") return "Clips: PUBG Feed Request";
+  if (value === "system_unspecified") return "System (Unspecified)";
+  return value.replace(/_/g, " ");
 }

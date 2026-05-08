@@ -275,6 +275,27 @@ model PubgApiCallLog {
   @@index([triggeredBy])
 }
 
+model PubgIdentityValidationQueue {
+  id                      String   @id @default(cuid())
+  identityLinkId          String
+  status                  String   @default("queued") // queued | processing | completed | invalid | error
+  attempts                Int      @default(0)
+  maxAttempts             Int      @default(3)
+  lastError               String?
+  queuedAt                DateTime @default(now())
+  startedAt               DateTime?
+  completedAt             DateTime?
+  nextAttemptAt           DateTime?
+  lastValidatedPubgId     String?
+  lastValidatedPubgName   String?
+  lastValidatedShard      String?
+  updatedAt               DateTime @updatedAt
+
+  @@unique([identityLinkId])
+  @@index([status, queuedAt])
+  @@index([nextAttemptAt])
+}
+
 // Player name index built from PUBG /samples endpoint (hourly discovery worker)
 model PubgKnownPlayer {
   id              String   @id @default(cuid())
