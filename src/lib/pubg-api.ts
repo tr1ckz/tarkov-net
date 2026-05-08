@@ -291,6 +291,171 @@ export async function getMatchTelemetryUrl(shard: string, matchId: string) {
   return telemetry ?? null;
 }
 
+export async function getMatchParticipantNames(shard: string, matchId: string) {
+  const payload = await pubgGet<PubgMatchResponse>(
+    `/shards/${encodeURIComponent(shard)}/matches/${encodeURIComponent(matchId)}`
+  );
+
+  const seen = new Set<string>();
+  for (const item of payload.included ?? []) {
+    if (item.type !== "participant") continue;
+    const name = item.attributes?.stats?.name;
+    if (!name || typeof name !== "string") continue;
+    const trimmed = name.trim();
+    if (!trimmed) continue;
+    seen.add(trimmed);
+  }
+
+  return Array.from(seen);
+}
+
+export async function indexSeenPlayersFromRecentMatches(options: {
+  platform: PubgPlatform;
+  shard: string;
+  playerName: string;
+  maxMatches?: number;
+  maxPlayersPerMatch?: number;
+  discoveredBy?: {
+    twitchUserId: string;
+    twitchUserLogin: string;
+    twitchUserName: string;
+  };
+  eventSource?: string;
+}) {
+  const { platform, shard, playerName } = options;
+  const maxMatches = Math.max(1, Math.min(20, options.maxMatches ?? 5));
+  const maxPlayersPerMatch = Math.max(10, Math.min(120, options.maxPlayersPerMatch ?? 80));
+
+  const player = await getPlayerWithMatches(shard, playerName).catch(() => null);
+  if (!player) {
+    return {
+      indexed: false,
+      reason: "source_player_not_found",
+      scannedMatches: 0,
+      namesFound: 0,
+      upserted: 0,
+      discoveredNew: 0,
+      observationsLogged: 0,
+      matchFetchErrors: 0
+    };
+  }
+
+  const { prisma } = await import("@/lib/prisma");
+  const matchIds = player.matchIds.slice(0, maxMatches);
+  let namesFound = 0;
+  let upserted = 0;
+  let discoveredNew = 0;
+  let observationsLogged = 0;
+  let matchFetchErrors = 0;
+
+  const discoveredBy = options.discoveredBy ?? {
+    twitchUserId: "system",
+    twitchUserLogin: "system",
+    twitchUserName: "System"
+  };
+  const eventSource = options.eventSource?.trim() || "seen_player_discovery";
+
+  for (const matchId of matchIds) {
+    const names = await getMatchParticipantNames(shard, matchId).catch(() => {
+      matchFetchErrors += 1;
+      return [] as string[];
+    });
+
+    if (!names.length) continue;
+
+    const cappedNames = names.slice(0, maxPlayersPerMatch);
+    namesFound += cappedNames.length;
+
+    for (const seenName of cappedNames) {
+      const normalizedSeenName = normalizeName(seenName) || seenName.toLowerCase();
+      try {
+        await prisma.pubgKnownPlayer.create({
+          data: {
+            playerName: seenName,
+            playerNameLower: seenName.toLowerCase(),
+            platform,
+            shard,
+            seenCount: 1
+          }
+        });
+        discoveredNew += 1;
+        upserted += 1;
+      } catch {
+        try {
+          await prisma.pubgKnownPlayer.update({
+            where: {
+              playerName_platform_shard: {
+                playerName: seenName,
+                platform,
+                shard
+              }
+            },
+            data: {
+              playerNameLower: seenName.toLowerCase(),
+              lastSeenAt: new Date(),
+              seenCount: { increment: 1 }
+            }
+          });
+          upserted += 1;
+        } catch {
+          // Never fail caller because of one bad row.
+        }
+      }
+
+      try {
+        const dedupeKey = [
+          "seen_player_discovery",
+          platform,
+          shard,
+          matchId,
+          normalizedSeenName,
+          discoveredBy.twitchUserId
+        ].join(":");
+        await prisma.pubgLinkEvent.upsert({
+          where: { dedupeKey },
+          create: {
+            dedupeKey,
+            eventType: "seen_player_discovery",
+            pubgNameRaw: seenName,
+            pubgNameNormalized: normalizedSeenName,
+            twitchUserId: discoveredBy.twitchUserId,
+            twitchUserLogin: discoveredBy.twitchUserLogin,
+            twitchUserName: discoveredBy.twitchUserName,
+            twitchStreamId: null,
+            twitchVideoId: null,
+            shard,
+            platform,
+            encounterAt: null
+          },
+          update: {
+            pubgNameRaw: seenName,
+            pubgNameNormalized: normalizedSeenName,
+            twitchUserLogin: discoveredBy.twitchUserLogin,
+            twitchUserName: discoveredBy.twitchUserName,
+            shard,
+            platform
+          }
+        });
+        observationsLogged += 1;
+      } catch {
+        // Keep discovery resilient even if event log write fails.
+      }
+    }
+  }
+
+  return {
+    indexed: true,
+    reason: "ok",
+    scannedMatches: matchIds.length,
+    namesFound,
+    upserted,
+    discoveredNew,
+    observationsLogged,
+    eventSource,
+    matchFetchErrors
+  };
+}
+
 export async function getRecentEncounterNames(options: {
   shard: string;
   playerName: string;

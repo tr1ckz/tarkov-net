@@ -693,6 +693,12 @@ export default function AdminPage() {
           >
             View PUBG API Call Metrics →
           </a>
+          <a
+            href="/admin/pubg-discovery"
+            className="ml-2 inline-block rounded border border-[#4f6f43]/40 bg-[#11180f] px-3 py-1.5 text-xs font-medium text-[#96c089] hover:border-[#96c089]"
+          >
+            View PUBG Discovery Dashboard →
+          </a>
 
           <div className="border border-[#2d2d2d] bg-[#111] p-3">
             <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">What&apos;s Going On</h2>

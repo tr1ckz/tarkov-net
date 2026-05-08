@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyTwitchEventSubSignature } from "@/lib/twitch";
 import { autoLinkPubgStreamerIdentity } from "@/lib/pubg-streamer-linking";
-import { clearPubgCallContext, setPubgCallContext } from "@/lib/pubg-api";
+import {
+  clearPubgCallContext,
+  indexSeenPlayersFromRecentMatches,
+  setPubgCallContext,
+  type PubgPlatform
+} from "@/lib/pubg-api";
 
 export const dynamic = "force-dynamic";
 const db = prisma as any;
@@ -66,6 +71,26 @@ function isFreshTimestamp(value: string) {
   if (Number.isNaN(ms)) return false;
   const ageMs = Math.abs(Date.now() - ms);
   return ageMs <= 10 * 60 * 1000;
+}
+
+function parsePubgPlatform(value: unknown): PubgPlatform | null {
+  if (value === "steam" || value === "xbox" || value === "psn" || value === "kakao") return value;
+  return null;
+}
+
+function getResolvedIdentityForSeenIndexing(value: unknown): {
+  platform: PubgPlatform;
+  shard: string;
+  pubgPlayerName: string;
+} | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (row.verified !== true) return null;
+  const platform = parsePubgPlatform(row.platform);
+  const shard = typeof row.shard === "string" ? row.shard.trim() : "";
+  const pubgPlayerName = typeof row.pubgPlayerName === "string" ? row.pubgPlayerName.trim() : "";
+  if (!platform || !shard || !pubgPlayerName) return null;
+  return { platform, shard, pubgPlayerName };
 }
 
 async function processStreamOnlineNotification(input: {
@@ -178,6 +203,42 @@ async function processStreamOnlineNotification(input: {
       return null;
     });
 
+    let seenIndexing: {
+      indexed: boolean;
+      reason: string;
+      scannedMatches: number;
+      namesFound: number;
+      upserted: number;
+      matchFetchErrors: number;
+    } | null = null;
+
+    const resolvedIdentity = getResolvedIdentityForSeenIndexing(autoLink);
+    if (resolvedIdentity) {
+      seenIndexing = await indexSeenPlayersFromRecentMatches({
+        platform: resolvedIdentity.platform,
+        shard: resolvedIdentity.shard,
+        playerName: resolvedIdentity.pubgPlayerName,
+        maxMatches: Number(process.env.PUBG_EVENTSUB_DISCOVERY_MATCHES ?? "4"),
+        maxPlayersPerMatch: Number(process.env.PUBG_EVENTSUB_DISCOVERY_PLAYERS_PER_MATCH ?? "80"),
+        discoveredBy: {
+          twitchUserId,
+          twitchUserLogin,
+          twitchUserName
+        },
+        eventSource: "eventsub_stream_online_discovery"
+      }).catch((error) => {
+        console.warn("[twitch-eventsub] seen-player indexing failed", {
+          broadcasterId: twitchUserId,
+          broadcasterLogin: twitchUserLogin,
+          platform: resolvedIdentity.platform,
+          shard: resolvedIdentity.shard,
+          pubgPlayerName: resolvedIdentity.pubgPlayerName,
+          error: error instanceof Error ? error.message : String(error)
+        });
+        return null;
+      });
+    }
+
     console.info("[twitch-eventsub] stream.online processed", {
       messageId,
       subscriptionId,
@@ -185,7 +246,8 @@ async function processStreamOnlineNotification(input: {
       broadcasterLogin: twitchUserLogin,
       streamId,
       streamStartAt: streamStartAt.toISOString(),
-      autoLink
+      autoLink,
+      seenIndexing
     });
     await writeEventSubRunLog({
       status: "ok",
@@ -199,6 +261,7 @@ async function processStreamOnlineNotification(input: {
         streamId,
         streamStartAt: streamStartAt.toISOString(),
         autoLink,
+        seenIndexing,
         backgroundProcessed: true
       }
     });
