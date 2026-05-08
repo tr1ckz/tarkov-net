@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { verifyTwitchEventSubSignature } from "@/lib/twitch";
 
 export const dynamic = "force-dynamic";
+const db = prisma as any;
 
 type EventSubEnvelope = {
   subscription?: {
@@ -21,6 +22,29 @@ type EventSubEnvelope = {
     started_at?: string;
   };
 };
+
+async function writeEventSubRunLog(input: {
+  status: "ok" | "empty" | "error";
+  playerName?: string;
+  errorMessage?: string;
+  metadata?: Record<string, unknown>;
+}) {
+  try {
+    await db.pubgLinkRunLog.create({
+      data: {
+        source: "eventsub",
+        status: input.status,
+        playerName: input.playerName,
+        clipsReturned: 0,
+        encountersFound: 0,
+        errorMessage: input.errorMessage,
+        metadataJson: input.metadata ? JSON.stringify(input.metadata) : undefined
+      }
+    });
+  } catch (error) {
+    console.error("[twitch-eventsub] failed to write run log", error);
+  }
+}
 
 function normalizeForCompare(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -50,6 +74,11 @@ export async function POST(request: Request) {
 
   if (!secret) {
     console.error("[twitch-eventsub] webhook rejected: missing TWITCH_EVENTSUB_SECRET");
+    await writeEventSubRunLog({
+      status: "error",
+      errorMessage: "TWITCH_EVENTSUB_SECRET missing",
+      metadata: { messageType: "unknown", reason: "missing_secret" }
+    });
     return NextResponse.json({ error: "EventSub secret not configured" }, { status: 500 });
   }
 
@@ -60,11 +89,26 @@ export async function POST(request: Request) {
       hasTimestamp: Boolean(timestamp),
       hasSignature: Boolean(signature)
     });
+    await writeEventSubRunLog({
+      status: "error",
+      errorMessage: "Missing EventSub headers",
+      metadata: {
+        messageType,
+        hasMessageId: Boolean(messageId),
+        hasTimestamp: Boolean(timestamp),
+        hasSignature: Boolean(signature)
+      }
+    });
     return NextResponse.json({ error: "Missing EventSub headers" }, { status: 400 });
   }
 
   if (!isFreshTimestamp(timestamp)) {
     console.warn("[twitch-eventsub] webhook rejected: stale timestamp", { timestamp });
+    await writeEventSubRunLog({
+      status: "error",
+      errorMessage: "Stale EventSub message",
+      metadata: { messageType, messageId, timestamp, reason: "stale_timestamp" }
+    });
     return NextResponse.json({ error: "Stale EventSub message" }, { status: 403 });
   }
 
@@ -77,6 +121,11 @@ export async function POST(request: Request) {
   });
   if (!signatureValid) {
     console.warn("[twitch-eventsub] webhook rejected: invalid signature", { messageId, messageType });
+    await writeEventSubRunLog({
+      status: "error",
+      errorMessage: "Invalid EventSub signature",
+      metadata: { messageType, messageId, reason: "invalid_signature" }
+    });
     return NextResponse.json({ error: "Invalid signature" }, { status: 403 });
   }
 
@@ -84,6 +133,11 @@ export async function POST(request: Request) {
   try {
     payload = JSON.parse(rawBody) as EventSubEnvelope;
   } catch {
+    await writeEventSubRunLog({
+      status: "error",
+      errorMessage: "Invalid EventSub JSON payload",
+      metadata: { messageType, messageId }
+    });
     return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
   }
 
@@ -91,6 +145,16 @@ export async function POST(request: Request) {
     console.info("[twitch-eventsub] webhook challenge accepted", {
       subscriptionId: payload.subscription?.id ?? null,
       subscriptionType: payload.subscription?.type ?? null
+    });
+    await writeEventSubRunLog({
+      status: "ok",
+      metadata: {
+        messageType,
+        messageId,
+        subscriptionId: payload.subscription?.id ?? null,
+        subscriptionType: payload.subscription?.type ?? null,
+        verification: true
+      }
     });
     return new NextResponse(payload.challenge ?? "", {
       status: 200,
@@ -105,11 +169,25 @@ export async function POST(request: Request) {
       type: payload.subscription?.type ?? null,
       condition: payload.subscription?.condition ?? null
     });
+    await writeEventSubRunLog({
+      status: "error",
+      errorMessage: "EventSub subscription revoked",
+      metadata: {
+        messageType,
+        messageId,
+        subscriptionId: payload.subscription?.id ?? null,
+        status: payload.subscription?.status ?? null
+      }
+    });
     return NextResponse.json({ ok: true, revoked: true });
   }
 
   if (messageType !== "notification") {
     console.warn("[twitch-eventsub] unsupported message type", { messageType, messageId });
+    await writeEventSubRunLog({
+      status: "empty",
+      metadata: { messageType, messageId, ignored: true }
+    });
     return NextResponse.json({ ok: true, ignored: true });
   }
 
@@ -118,6 +196,11 @@ export async function POST(request: Request) {
     console.warn("[twitch-eventsub] notification missing broadcaster identity", {
       messageId,
       eventKeys: event ? Object.keys(event) : []
+    });
+    await writeEventSubRunLog({
+      status: "error",
+      errorMessage: "Notification missing broadcaster identity",
+      metadata: { messageType, messageId, eventKeys: event ? Object.keys(event) : [] }
     });
     return NextResponse.json({ ok: true, ignored: true });
   }
@@ -129,7 +212,7 @@ export async function POST(request: Request) {
   const streamId = event.id ?? `eventsub-${event.broadcaster_user_id}-${indexedAt.getTime()}`;
 
   try {
-    await prisma.pubgActiveStreamer.upsert({
+    await db.pubgActiveStreamer.upsert({
       where: { twitchUserId: event.broadcaster_user_id },
       create: {
         twitchUserId: event.broadcaster_user_id,
@@ -156,7 +239,7 @@ export async function POST(request: Request) {
       }
     });
 
-    await prisma.pubgStreamerProfile.upsert({
+    await db.pubgStreamerProfile.upsert({
       where: { twitchUserId: event.broadcaster_user_id },
       create: {
         twitchUserId: event.broadcaster_user_id,
@@ -190,7 +273,7 @@ export async function POST(request: Request) {
       }
     });
 
-    await prisma.cacheState.upsert({
+    await db.cacheState.upsert({
       where: { key: "pubg:twitch-index" },
       create: {
         key: "pubg:twitch-index",
@@ -213,11 +296,35 @@ export async function POST(request: Request) {
       streamId,
       streamStartAt: streamStartAt.toISOString()
     });
+    await writeEventSubRunLog({
+      status: "ok",
+      playerName: event.broadcaster_user_login,
+      metadata: {
+        messageType,
+        messageId,
+        subscriptionId: payload.subscription?.id ?? null,
+        broadcasterId: event.broadcaster_user_id,
+        broadcasterLogin: event.broadcaster_user_login,
+        streamId,
+        streamStartAt: streamStartAt.toISOString()
+      }
+    });
   } catch (error) {
     console.error("[twitch-eventsub] failed to persist stream.online", {
       messageId,
       broadcasterId: event.broadcaster_user_id,
       error: error instanceof Error ? error.message : String(error)
+    });
+    await writeEventSubRunLog({
+      status: "error",
+      playerName: event.broadcaster_user_login,
+      errorMessage: error instanceof Error ? error.message : String(error),
+      metadata: {
+        messageType,
+        messageId,
+        broadcasterId: event.broadcaster_user_id,
+        broadcasterLogin: event.broadcaster_user_login
+      }
     });
     return NextResponse.json({ error: "Failed to persist event" }, { status: 500 });
   }

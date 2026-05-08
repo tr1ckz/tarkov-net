@@ -133,6 +133,34 @@ export default function AdminPage() {
     });
   }, [isAdmin]);
 
+  useEffect(() => {
+    if (!isAdmin || tab !== "pubg") return;
+
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const stats = await fetch("/api/admin/pubg-linking", { cache: "no-store" }).then((r) => r.json());
+        if (!cancelled) {
+          setPubgStats(stats);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error("[admin] failed to auto-refresh pubg stats", error);
+        }
+      }
+    };
+
+    void refresh();
+    const interval = setInterval(() => {
+      void refresh();
+    }, 15000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isAdmin, tab]);
+
   async function refreshPubgStats() {
     setRefreshingPubg(true);
     try {
@@ -449,6 +477,7 @@ export default function AdminPage() {
           <p className="text-[11px] uppercase tracking-widest text-[#7f7768]">
             Build: {pubgStats?.build?.gitSha?.slice(0, 12) || "unknown"} | env: {pubgStats?.build?.nodeEnv || "unknown"}
           </p>
+          <p className="text-[10px] uppercase tracking-widest text-[#555]">Auto-refresh every 15s while this tab is open.</p>
 
           <div className="flex items-center justify-between">
             <p className="text-xs uppercase tracking-widest text-[#7f7768]">
