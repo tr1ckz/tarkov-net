@@ -369,9 +369,16 @@ export async function GET(request: Request) {
 
       if (linkEvents.length) {
         debug.linkEventsQueued = linkEvents.length;
+        const dedupeKeys = Array.from(new Set(linkEvents.map((event) => event.dedupeKey)));
+        const existing = await prisma.pubgLinkEvent.findMany({
+          where: { dedupeKey: { in: dedupeKeys } },
+          select: { dedupeKey: true }
+        });
+        const existingKeys = new Set(existing.map((row) => row.dedupeKey));
+        const dataToInsert = linkEvents.filter((event) => !existingKeys.has(event.dedupeKey));
+
         const createManyResult = await prisma.pubgLinkEvent.createMany({
-          data: linkEvents,
-          skipDuplicates: true
+          data: dataToInsert
         });
         debug.linkEventsPersisted = createManyResult.count;
       }

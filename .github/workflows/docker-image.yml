@@ -20,6 +20,7 @@ permissions:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: tr1ckz/tarkov-net
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build-and-push:
