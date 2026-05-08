@@ -1,7 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
-const PUBG_GAME_ID = "27971";
+const DEFAULT_PUBG_GAME_IDS = ["493057", "27971"];
 const INTERVAL_MS = 300000;
 const MAX_RETRIES = 3;
 const EVENTSUB_SYNC_INTERVAL_MS = Math.max(300000, Number(process.env.EVENTSUB_SYNC_INTERVAL_MS ?? "1800000"));
@@ -10,6 +10,19 @@ const EVENTSUB_CREATE_LIMIT_PER_SYNC = Math.max(1, Math.min(500, Number(process.
 
 let tokenState = null;
 let lastEventSubSyncMs = 0;
+
+function getPubgGameIds() {
+  const configured = process.env.PUBG_TWITCH_GAME_IDS
+    ?.split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  if (configured && configured.length > 0) {
+    return Array.from(new Set(configured));
+  }
+
+  return DEFAULT_PUBG_GAME_IDS;
+}
 
 async function writeCrawlerRunLog(input) {
   try {
@@ -116,7 +129,7 @@ function stripGamingPrefix(value) {
     .replace(/[\s._-]*(ttv|tv|yt|twitch)$/g, "");
 }
 
-async function fetchAllStreams() {
+async function fetchAllStreamsForGameId(gameId) {
   const { token, clientId } = await getToken();
   const all = [];
   let cursor = "";
@@ -126,7 +139,7 @@ async function fetchAllStreams() {
     let response = null;
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt += 1) {
       response = await fetch(
-        `https://api.twitch.tv/helix/streams?game_id=${PUBG_GAME_ID}&first=100${cursorPart}`,
+        `https://api.twitch.tv/helix/streams?game_id=${gameId}&first=100${cursorPart}`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -172,6 +185,29 @@ async function fetchAllStreams() {
   }
 
   return all;
+}
+
+async function fetchAllStreams() {
+  const gameIds = getPubgGameIds();
+  const byGame = await Promise.all(
+    gameIds.map(async (gameId) => ({
+      gameId,
+      streams: await fetchAllStreamsForGameId(gameId)
+    }))
+  );
+
+  const uniqueByUserId = new Map();
+  for (const batch of byGame) {
+    for (const stream of batch.streams) {
+      uniqueByUserId.set(String(stream.user_id), stream);
+    }
+  }
+
+  return {
+    gameIds,
+    gameCounts: byGame.map((batch) => ({ gameId: batch.gameId, count: batch.streams.length })),
+    streams: Array.from(uniqueByUserId.values())
+  };
 }
 
 async function fetchAllEventSubStreamOnlineBroadcasterIds() {
@@ -323,8 +359,9 @@ async function syncEventSubSubscriptions(streams) {
 async function indexStreams() {
   const startedAt = Date.now();
   const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const gameIds = getPubgGameIds();
 
-  log("info", "index run started", { runId, gameId: PUBG_GAME_ID, intervalMs: INTERVAL_MS });
+  log("info", "index run started", { runId, gameIds, intervalMs: INTERVAL_MS });
   await prisma.cacheState.upsert({
     where: { key: "pubg:twitch-index" },
     create: {
@@ -338,7 +375,8 @@ async function indexStreams() {
     }
   });
 
-  const streams = await fetchAllStreams();
+  const streamPayload = await fetchAllStreams();
+  const streams = streamPayload.streams;
   const indexedAt = new Date();
 
   for (const stream of streams) {
@@ -407,6 +445,8 @@ async function indexStreams() {
 
   log("info", "index run completed", {
     runId,
+    gameIds: streamPayload.gameIds,
+    gameCounts: streamPayload.gameCounts,
     indexedCount: streams.length,
     indexedAt: indexedAt.toISOString(),
     durationMs: Date.now() - startedAt
@@ -416,6 +456,8 @@ async function indexStreams() {
     status: "ok",
     metadata: {
       runId,
+      gameIds: streamPayload.gameIds,
+      gameCounts: streamPayload.gameCounts,
       indexedCount: streams.length,
       indexedAt: indexedAt.toISOString(),
       durationMs: Date.now() - startedAt,

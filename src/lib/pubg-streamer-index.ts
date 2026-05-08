@@ -1,11 +1,24 @@
 import { prisma } from "@/lib/prisma";
 import { getAllLiveStreamsByGameId } from "@/lib/twitch";
 
-const PUBG_TWITCH_GAME_ID = "27971";
+const DEFAULT_PUBG_TWITCH_GAME_IDS = ["493057", "27971"];
 const INDEX_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const LOCK_STALE_MS = 2 * 60 * 1000;
 const INDEX_LOCK_KEY = "pubg:twitch-index";
 const STREAM_OVERLAP_GRACE_SECONDS = 120;
+
+function getPubgTwitchGameIds() {
+  const configured = process.env.PUBG_TWITCH_GAME_IDS
+    ?.split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  if (configured && configured.length > 0) {
+    return Array.from(new Set(configured));
+  }
+
+  return DEFAULT_PUBG_TWITCH_GAME_IDS;
+}
 
 type ActiveStreamer = {
   twitchUserId: string;
@@ -173,11 +186,27 @@ export async function refreshPubgStreamerIndex(options?: { force?: boolean }) {
   }
 
   try {
+    const gameIds = getPubgTwitchGameIds();
     console.info("[pubg-streamer-index] refresh started", {
       force: Boolean(options?.force),
-      gameId: PUBG_TWITCH_GAME_ID
+      gameIds
     });
-    const streams = await getAllLiveStreamsByGameId(PUBG_TWITCH_GAME_ID, 12);
+
+    const streamsByGameId = await Promise.all(
+      gameIds.map(async (gameId) => ({
+        gameId,
+        streams: await getAllLiveStreamsByGameId(gameId, 12)
+      }))
+    );
+
+    const streamMap = new Map<string, (typeof streamsByGameId)[number]["streams"][number]>();
+    for (const batch of streamsByGameId) {
+      for (const stream of batch.streams) {
+        streamMap.set(stream.user_id, stream);
+      }
+    }
+
+    const streams = Array.from(streamMap.values());
     const indexedAt = now();
     const activeRows = streams.map((stream) => ({
       twitchUserId: stream.user_id,
@@ -284,6 +313,8 @@ export async function refreshPubgStreamerIndex(options?: { force?: boolean }) {
 
     console.info("[pubg-streamer-index] refresh completed", {
       refreshedAt: refreshedAt.toISOString(),
+      gameIds,
+      gameCounts: streamsByGameId.map((batch) => ({ gameId: batch.gameId, count: batch.streams.length })),
       indexedCount: activeRows.length,
       durationMs: Date.now() - refreshStartedAt
     });
