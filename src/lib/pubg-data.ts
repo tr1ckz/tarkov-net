@@ -11,7 +11,7 @@ export type PubgSecretRoom = {
 export type PubgMapMarker = {
   id: string;
   label: string;
-  type: "hot-drop" | "secret-room" | "vehicle-route";
+  type: "hot-drop" | "secret-room" | "secret-key" | "vehicle-route";
   x: number;
   y: number;
   notes: string;

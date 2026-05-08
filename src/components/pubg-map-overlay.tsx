@@ -10,8 +10,40 @@ type Props = {
 const MARKER_CONFIG: Record<PubgMapMarker["type"], { label: string; color: string }> = {
   "hot-drop":      { label: "Hot Drop",      color: "#e85555" },
   "secret-room":   { label: "Secret Room",   color: "#f5c842" },
+  "secret-key":    { label: "Key Location",  color: "#9fd46a" },
   "vehicle-route": { label: "Vehicle Route", color: "#5599ee" },
 };
+
+type MapCalibration = {
+  xOffset: number;
+  yOffset: number;
+  xScale: number;
+  yScale: number;
+};
+
+const MAP_CALIBRATION: Partial<Record<PubgMapIntel["slug"], MapCalibration>> = {
+  sanhok: { xOffset: 2.2, yOffset: 2.3, xScale: 95.4, yScale: 95.0 },
+  miramar: { xOffset: 1.4, yOffset: 1.3, xScale: 97.2, yScale: 97.1 },
+  taego: { xOffset: 1.8, yOffset: 2.0, xScale: 95.8, yScale: 95.6 },
+  deston: { xOffset: 2.6, yOffset: 2.1, xScale: 94.6, yScale: 94.9 },
+  vikendi: { xOffset: 1.6, yOffset: 1.8, xScale: 96.6, yScale: 96.4 },
+};
+
+function clampPercent(value: number) {
+  return Math.max(0.2, Math.min(99.8, value));
+}
+
+function applyCalibration(slug: PubgMapIntel["slug"], x: number, y: number) {
+  const c = MAP_CALIBRATION[slug];
+  if (!c) {
+    return { x: clampPercent(x), y: clampPercent(y) };
+  }
+
+  return {
+    x: clampPercent(c.xOffset + (x * c.xScale) / 100),
+    y: clampPercent(c.yOffset + (y * c.yScale) / 100),
+  };
+}
 
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 6;
@@ -21,6 +53,7 @@ export function PubgMapOverlay({ map }: Props) {
   const [activeTypes, setActiveTypes] = useState<Record<PubgMapMarker["type"], boolean>>({
     "hot-drop": true,
     "secret-room": true,
+    "secret-key": true,
     "vehicle-route": true,
   });
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
@@ -51,7 +84,19 @@ export function PubgMapOverlay({ map }: Props) {
         (m) =>
           !existingSecretKeys.has(`${Math.round(m.x * 10)}:${Math.round(m.y * 10)}`)
       );
-    return [...map.markers, ...derived];
+    const destonKeys: PubgMapMarker[] =
+      map.slug === "deston"
+        ? map.secretRooms.map((room, i) => ({
+            id: `deston-key-${map.slug}-${i}`,
+            label: `${room.name.replace("Security Room", "Keycard Spot")}`,
+            type: "secret-key" as const,
+            x: Math.min(99.5, room.x + 0.35),
+            y: Math.min(99.5, room.y + 0.35),
+            notes: `Key location marker linked to ${room.name}. ${room.howToOpen}`,
+          }))
+        : [];
+
+    return [...map.markers, ...derived, ...destonKeys];
   }, [map.markers, map.secretRooms, map.slug]);
 
   const visibleMarkers = useMemo(
@@ -214,6 +259,7 @@ export function PubgMapOverlay({ map }: Props) {
           {visibleMarkers.map((marker) => {
             const cfg = MARKER_CONFIG[marker.type];
             const isActive = activeMarkerId === marker.id;
+            const calibrated = applyCalibration(map.slug, marker.x, marker.y);
             return (
               <button
                 key={marker.id}
@@ -222,8 +268,8 @@ export function PubgMapOverlay({ map }: Props) {
                 title={marker.label}
                 className="absolute rounded-full transition-transform hover:scale-125"
                 style={{
-                  left: `${marker.x}%`,
-                  top: `${marker.y}%`,
+                  left: `${calibrated.x}%`,
+                  top: `${calibrated.y}%`,
                   width: markerSize,
                   height: markerSize,
                   transform: `translate(-50%, -50%) ${isActive ? "scale(1.4)" : ""}`,
