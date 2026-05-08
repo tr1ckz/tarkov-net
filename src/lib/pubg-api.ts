@@ -137,18 +137,51 @@ export async function getRecentEncounterNames(options: {
   playerName: string;
   maxMatches?: number;
   maxOpponents?: number;
+  restrictToKnownNormalizedNames?: Set<string>;
 }) {
   const { shard, playerName } = options;
   const maxMatches = Math.max(1, Math.min(options.maxMatches ?? 6, 15));
   const maxOpponents = Math.max(1, Math.min(options.maxOpponents ?? 40, 80));
+  const knownNormalized = options.restrictToKnownNormalizedNames;
+  const hasKnownFilter = Boolean(knownNormalized && knownNormalized.size > 0);
+
+  const normalizeName = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const knownGate = (name: string) => {
+    if (!hasKnownFilter || !knownNormalized) return true;
+    const normalized = normalizeName(name);
+    if (!normalized) return false;
+
+    if (knownNormalized.has(normalized)) return true;
+
+    for (const known of knownNormalized) {
+      if (!known) continue;
+      if (normalized.includes(known) || known.includes(normalized)) {
+        return true;
+      }
+    }
+
+    return false;
+  };
 
   const player = await getPlayerWithMatches(shard, playerName);
   if (!player) {
+    console.warn("[pubg-api] player not found for encounter extraction", { shard, playerName });
     return [];
   }
 
+  console.info("[pubg-api] encounter extraction started", {
+    shard,
+    playerName,
+    matchCount: player.matchIds.length,
+    maxMatches,
+    maxOpponents,
+    knownFilterSize: knownNormalized?.size ?? 0
+  });
+
   const encounterStats = new Map<string, { count: number; lastSeenAt: string | null }>();
   const matchIds = player.matchIds.slice(0, maxMatches);
+  let participantsVisited = 0;
+  let participantsSkippedByKnownFilter = 0;
 
   for (const matchId of matchIds) {
     const matchPayload = await pubgGet<PubgMatchResponse>(
@@ -167,6 +200,12 @@ export async function getRecentEncounterNames(options: {
 
     for (const participantName of participantNames) {
       if (participantName === playerName) continue;
+      participantsVisited += 1;
+
+      if (!knownGate(participantName)) {
+        participantsSkippedByKnownFilter += 1;
+        continue;
+      }
 
       const current = encounterStats.get(participantName) ?? { count: 0, lastSeenAt: null };
       const previousLastSeenMs = current.lastSeenAt ? Date.parse(current.lastSeenAt) : Number.NaN;
@@ -182,6 +221,15 @@ export async function getRecentEncounterNames(options: {
       });
     }
   }
+
+  console.info("[pubg-api] encounter extraction completed", {
+    shard,
+    playerName,
+    uniqueOpponents: encounterStats.size,
+    participantsVisited,
+    participantsSkippedByKnownFilter,
+    hasKnownFilter
+  });
 
   return Array.from(encounterStats.entries())
     .sort((a, b) => b[1].count - a[1].count)

@@ -5,6 +5,7 @@ const PUBG_TWITCH_GAME_ID = "27971";
 const INDEX_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const LOCK_STALE_MS = 2 * 60 * 1000;
 const INDEX_LOCK_KEY = "pubg:twitch-index";
+const STREAM_OVERLAP_GRACE_SECONDS = 120;
 
 type ActiveStreamer = {
   twitchUserId: string;
@@ -17,6 +18,12 @@ type ActiveStreamer = {
   normalizedName: string;
 };
 
+export type StreamerNameMatch = {
+  streamer: ActiveStreamer;
+  score: number;
+  reasons: string[];
+};
+
 function now() {
   return new Date();
 }
@@ -26,11 +33,10 @@ function normalizeForCompare(value: string) {
 }
 
 function stripGamingPrefix(value: string) {
-  const stripped = value
+  return value
     .toLowerCase()
-    .replace(/^(ttv|tv|yt|twitch)[\s._-]*/g, "")
-    .replace(/[\s._-]*(ttv|tv|yt|twitch)$/g, "");
-  return stripped;
+    .replace(/^(ttv|tv|yt|twitch|tt|live)[\s._-]*/g, "")
+    .replace(/[\s._-]*(ttv|tv|yt|twitch|tt|live)$/g, "");
 }
 
 export function normalizePubgNameForStreamerMatch(pubgName: string) {
@@ -41,24 +47,62 @@ function hasUsableToken(value: string) {
   return value.length >= 4;
 }
 
-function isLikelyMatch(pubgName: string, streamer: ActiveStreamer) {
+function buildComparableTokens(value: string) {
+  const lower = value.toLowerCase().trim();
+  if (!lower) return [];
+
+  const stripped = stripGamingPrefix(lower);
+  const compact = normalizeForCompare(stripped);
+  const plain = normalizeForCompare(lower);
+
+  return Array.from(new Set([compact, plain])).filter(Boolean);
+}
+
+export function scorePubgNameAgainstStreamer(pubgName: string, streamer: ActiveStreamer): StreamerNameMatch | null {
   const pubg = normalizePubgNameForStreamerMatch(pubgName);
-  if (!pubg) return false;
+  if (!pubg) return null;
 
   const login = streamer.normalizedLogin;
   const display = streamer.normalizedName;
+  const reasons: string[] = [];
+  let score = 0;
 
-  if (pubg === login || pubg === display) return true;
+  if (pubg === login) {
+    score += 120;
+    reasons.push("exact_login");
+  }
+
+  if (pubg === display) {
+    score += 100;
+    reasons.push("exact_display");
+  }
 
   if (hasUsableToken(pubg) && (login.includes(pubg) || pubg.includes(login))) {
-    return true;
+    score += 40;
+    reasons.push("login_substring");
   }
 
   if (hasUsableToken(pubg) && (display.includes(pubg) || pubg.includes(display))) {
-    return true;
+    score += 30;
+    reasons.push("display_substring");
   }
 
-  return false;
+  const pubgTokens = buildComparableTokens(pubgName);
+  const loginTokens = buildComparableTokens(streamer.userLogin);
+  const displayTokens = buildComparableTokens(streamer.userName);
+  const tokenOverlap = pubgTokens.some(
+    (token) => loginTokens.includes(token) || displayTokens.includes(token)
+  );
+  if (tokenOverlap) {
+    score += 20;
+    reasons.push("token_overlap");
+  }
+
+  if (score <= 0) {
+    return null;
+  }
+
+  return { streamer, score, reasons };
 }
 
 async function getState() {
@@ -101,6 +145,7 @@ async function releaseLock(lastRefreshAt?: Date) {
 }
 
 export async function refreshPubgStreamerIndex(options?: { force?: boolean }) {
+  const refreshStartedAt = Date.now();
   await getState();
   const state = await getState();
 
@@ -110,15 +155,28 @@ export async function refreshPubgStreamerIndex(options?: { force?: boolean }) {
     Date.now() - state.lastRefreshAt.getTime() >= INDEX_REFRESH_INTERVAL_MS;
 
   if (!shouldRefresh) {
+    console.info("[pubg-streamer-index] skip refresh", {
+      reason: "interval_not_elapsed",
+      lastRefreshAt: state.lastRefreshAt?.toISOString() ?? null,
+      force: Boolean(options?.force)
+    });
     return { refreshed: false, count: await prisma.pubgActiveStreamer.count() };
   }
 
   const hasLock = await acquireLock();
   if (!hasLock) {
+    console.warn("[pubg-streamer-index] lock unavailable", {
+      reason: "refresh_in_progress",
+      force: Boolean(options?.force)
+    });
     return { refreshed: false, count: await prisma.pubgActiveStreamer.count() };
   }
 
   try {
+    console.info("[pubg-streamer-index] refresh started", {
+      force: Boolean(options?.force),
+      gameId: PUBG_TWITCH_GAME_ID
+    });
     const streams = await getAllLiveStreamsByGameId(PUBG_TWITCH_GAME_ID, 12);
     const indexedAt = now();
     const activeRows = streams.map((stream) => ({
@@ -224,12 +282,22 @@ export async function refreshPubgStreamerIndex(options?: { force?: boolean }) {
     const refreshedAt = now();
     await releaseLock(refreshedAt);
 
+    console.info("[pubg-streamer-index] refresh completed", {
+      refreshedAt: refreshedAt.toISOString(),
+      indexedCount: activeRows.length,
+      durationMs: Date.now() - refreshStartedAt
+    });
+
     return {
       refreshed: true,
       count: activeRows.length,
       refreshedAt: refreshedAt.toISOString()
     };
   } catch (error) {
+    console.error("[pubg-streamer-index] refresh failed", {
+      durationMs: Date.now() - refreshStartedAt,
+      error: error instanceof Error ? error.message : String(error)
+    });
     await releaseLock();
     throw error;
   }
@@ -258,7 +326,30 @@ export async function getActivePubgStreamers() {
 
 export async function findMatchedActiveStreamers(pubgName: string) {
   const streamers = await getActivePubgStreamers();
-  return streamers.filter((streamer) => isLikelyMatch(pubgName, streamer));
+  return streamers
+    .map((streamer) => scorePubgNameAgainstStreamer(pubgName, streamer))
+    .filter((match): match is StreamerNameMatch => Boolean(match))
+    .sort((a, b) => b.score - a.score)
+    .map((match) => match.streamer);
+}
+
+export async function findMatchedActiveStreamersWithReason(pubgName: string) {
+  const streamers = await getActivePubgStreamers();
+  return streamers
+    .map((streamer) => scorePubgNameAgainstStreamer(pubgName, streamer))
+    .filter((match): match is StreamerNameMatch => Boolean(match))
+    .sort((a, b) => b.score - a.score);
+}
+
+export function doesEncounterOverlapLiveStream(encounterIso: string, streamStartIso: string, graceSeconds = STREAM_OVERLAP_GRACE_SECONDS) {
+  const encounterMs = Date.parse(encounterIso);
+  const streamStartMs = Date.parse(streamStartIso);
+  if (Number.isNaN(encounterMs) || Number.isNaN(streamStartMs)) {
+    return false;
+  }
+
+  const upperBoundMs = Date.now() + graceSeconds * 1000;
+  return encounterMs >= streamStartMs && encounterMs <= upperBoundMs;
 }
 
 export function computeVodOffsetSeconds(eventTimeIso: string, streamStartIso: string, contextLeadSeconds = 20) {

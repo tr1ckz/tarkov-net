@@ -1,3 +1,5 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
+
 type TwitchTokenState = {
   value: string;
   expiresAt: number;
@@ -95,6 +97,37 @@ type TwitchStreamsResponse = {
   pagination?: { cursor?: string };
 };
 
+type TwitchEventSubCreateRequest = {
+  type: string;
+  version: string;
+  condition: Record<string, string>;
+  transport: {
+    method: "webhook";
+    callback: string;
+    secret: string;
+  };
+};
+
+type TwitchEventSubSubscription = {
+  id: string;
+  status: string;
+  type: string;
+  version: string;
+  condition: Record<string, string>;
+  created_at: string;
+  transport: {
+    method: string;
+    callback: string;
+  };
+};
+
+type TwitchEventSubCreateResponse = {
+  data: TwitchEventSubSubscription[];
+  total: number;
+  total_cost: number;
+  max_total_cost: number;
+};
+
 let tokenState: TwitchTokenState | null = null;
 
 function getCredentials() {
@@ -146,6 +179,27 @@ async function twitchGet<T>(path: string): Promise<T> {
 
   if (!response.ok) {
     throw new Error(`Twitch API error (${response.status})`);
+  }
+
+  return (await response.json()) as T;
+}
+
+async function twitchPost<T>(path: string, body: unknown): Promise<T> {
+  const { token, clientId } = await getTwitchAppToken();
+  const response = await fetch(`https://api.twitch.tv/helix${path}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Client-Id": clientId,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(body),
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Twitch API error (${response.status}) ${text}`);
   }
 
   return (await response.json()) as T;
@@ -238,4 +292,47 @@ export async function getAllLiveStreamsByGameId(gameId: string, maxPages = 10): 
   }
 
   return all;
+}
+
+export async function createStreamOnlineEventSubSubscription(options: {
+  broadcasterUserId: string;
+  callbackUrl: string;
+  secret: string;
+}) {
+  const payload: TwitchEventSubCreateRequest = {
+    type: "stream.online",
+    version: "1",
+    condition: {
+      broadcaster_user_id: options.broadcasterUserId
+    },
+    transport: {
+      method: "webhook",
+      callback: options.callbackUrl,
+      secret: options.secret
+    }
+  };
+
+  const response = await twitchPost<TwitchEventSubCreateResponse>("/eventsub/subscriptions", payload);
+  return response.data[0] ?? null;
+}
+
+export function verifyTwitchEventSubSignature(options: {
+  messageId: string;
+  timestamp: string;
+  body: string;
+  signatureHeader: string;
+  secret: string;
+}) {
+  const expectedHex = createHmac("sha256", options.secret)
+    .update(options.messageId + options.timestamp + options.body)
+    .digest("hex");
+  const expected = `sha256=${expectedHex}`;
+
+  const left = Buffer.from(expected);
+  const right = Buffer.from(options.signatureHeader);
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return timingSafeEqual(left, right);
 }

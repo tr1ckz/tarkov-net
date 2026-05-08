@@ -16,8 +16,10 @@ import {
 } from "@/lib/pubg-api";
 import {
   computeVodOffsetSeconds,
+  doesEncounterOverlapLiveStream,
   ensurePubgStreamerIndexFresh,
-  findMatchedActiveStreamers
+  findMatchedActiveStreamersWithReason,
+  normalizePubgNameForStreamerMatch
 } from "@/lib/pubg-streamer-index";
 import { prisma } from "@/lib/prisma";
 
@@ -40,6 +42,35 @@ function getLoginCandidates(pubgName: string) {
 function parsePlatform(value: string): PubgPlatform {
   if (value === "xbox" || value === "psn" || value === "kakao") return value;
   return "steam";
+}
+
+async function getKnownStreamerNormalizedNames() {
+  const dayWindow = Number(process.env.PUBG_KNOWN_STREAMER_WINDOW_DAYS ?? "30");
+  const safeDays = Number.isFinite(dayWindow) ? Math.max(1, Math.min(dayWindow, 365)) : 30;
+  const cutoff = new Date(Date.now() - safeDays * 24 * 60 * 60 * 1000);
+
+  const [activeRows, linkedRows] = await Promise.all([
+    prisma.pubgActiveStreamer.findMany({
+      select: { normalizedLogin: true, normalizedName: true }
+    }),
+    prisma.pubgLinkEvent.findMany({
+      where: { createdAt: { gte: cutoff } },
+      select: { pubgNameNormalized: true },
+      take: 3000,
+      orderBy: { createdAt: "desc" }
+    })
+  ]);
+
+  const known = new Set<string>();
+  for (const row of activeRows) {
+    if (row.normalizedLogin) known.add(row.normalizedLogin);
+    if (row.normalizedName) known.add(row.normalizedName);
+  }
+  for (const row of linkedRows) {
+    if (row.pubgNameNormalized) known.add(row.pubgNameNormalized);
+  }
+
+  return known;
 }
 
 function buildLinkDedupeKey(params: {
@@ -225,6 +256,7 @@ export async function GET(request: Request) {
 
       const debug = {
         encountersFound: encounters.length,
+        encountersAfterKnownFilter: 0,
         directLoginMatches: 0,
         searchChannelMatches: 0,
         channelsWithClips: 0,
@@ -254,6 +286,33 @@ export async function GET(request: Request) {
       await ensurePubgStreamerIndexFresh();
       pushVerbose("active streamer index ensured fresh");
 
+      const restrictToKnown =
+        (process.env.PUBG_ONLY_KNOWN_STREAMERS ?? "1").trim().toLowerCase() !== "0";
+      const knownNormalized = await getKnownStreamerNormalizedNames();
+      pushVerbose(
+        `known streamer filter enabled=${restrictToKnown ? "1" : "0"} knownSize=${knownNormalized.size}`
+      );
+
+      const filteredEncounters = restrictToKnown
+        ? encounters.filter((encounter) => {
+            const normalized = normalizePubgNameForStreamerMatch(encounter.name);
+            if (!normalized) return false;
+            if (knownNormalized.has(normalized)) return true;
+            for (const knownName of knownNormalized) {
+              if (normalized.includes(knownName) || knownName.includes(normalized)) {
+                return true;
+              }
+            }
+            return false;
+          })
+        : encounters;
+      debug.encountersAfterKnownFilter = filteredEncounters.length;
+      pushVerbose(`encounters after known streamer filter=${filteredEncounters.length}`);
+
+      if (restrictToKnown && !filteredEncounters.length) {
+        pushVerbose("known streamer filter removed all encounters; skipping twitch/VOD expansion");
+      }
+
       const clips = [] as Array<{
         id: string;
         url: string;
@@ -274,67 +333,82 @@ export async function GET(request: Request) {
         sourceType: "vod" | "clip";
       }>;
 
-      for (const encounter of encounters) {
+      for (const encounter of filteredEncounters) {
         pushVerbose(`encounter scan name=${encounter.name} lastSeenAt=${encounter.lastSeenAt ?? "-"}`);
         const candidates = new Set<string>(getLoginCandidates(encounter.name));
         const encounterNormalized = normalizeName(encounter.name);
 
-        const matchedLiveStreamers = await findMatchedActiveStreamers(encounter.name);
+        const matchedLiveStreamers = await findMatchedActiveStreamersWithReason(encounter.name);
         if (matchedLiveStreamers.length) {
           pushVerbose(`active index matches for ${encounter.name}: ${matchedLiveStreamers.length}`);
           debug.activeIndexMatches += matchedLiveStreamers.length;
-          for (const streamerMatch of matchedLiveStreamers) {
+          for (const match of matchedLiveStreamers) {
+            const streamerMatch = match.streamer;
             candidates.add(streamerMatch.userLogin.toLowerCase());
 
-            const encounterMs = encounter.lastSeenAt ? Date.parse(encounter.lastSeenAt) : Number.NaN;
-            const streamStartMs = streamerMatch.streamStartedAt.getTime();
-            if (!Number.isNaN(encounterMs) && encounterMs >= streamStartMs) {
-              pushVerbose(`active overlap match encounter=${encounter.name} twitch=${streamerMatch.userLogin}`);
-              debug.activeOverlapMatches += 1;
-              const offset = computeVodOffsetSeconds(encounter.lastSeenAt!, streamerMatch.streamStartedAt.toISOString());
-              const liveUrl = `https://www.twitch.tv/${streamerMatch.userLogin}?t=${offset}s`;
+            if (encounter.lastSeenAt) {
+              const overlaps = doesEncounterOverlapLiveStream(
+                encounter.lastSeenAt,
+                streamerMatch.streamStartedAt.toISOString()
+              );
+              if (overlaps) {
+                pushVerbose(
+                  `active overlap confirmed encounter=${encounter.name} twitch=${streamerMatch.userLogin} score=${match.score} reasons=${match.reasons.join(",")}`
+                );
+                debug.activeOverlapMatches += 1;
+                const offset = computeVodOffsetSeconds(encounter.lastSeenAt, streamerMatch.streamStartedAt.toISOString());
+                const liveUrl = `https://www.twitch.tv/${streamerMatch.userLogin}?t=${offset}s`;
 
-              const dedupeKey = buildLinkDedupeKey({
-                eventType: "active_live",
-                pubgNameNormalized: encounterNormalized,
-                twitchUserId: streamerMatch.twitchUserId,
-                twitchStreamId: streamerMatch.streamId,
-                encounterAt: encounter.lastSeenAt
-              });
-              linkEvents.push({
-                dedupeKey,
-                eventType: "active_live",
-                pubgNameRaw: encounter.name,
-                pubgNameNormalized: encounterNormalized,
-                twitchUserId: streamerMatch.twitchUserId,
-                twitchUserLogin: streamerMatch.userLogin,
-                twitchUserName: streamerMatch.userName,
-                twitchStreamId: streamerMatch.streamId,
-                shard: resolvedPlayer.shard,
-                platform,
-                encounterAt: encounter.lastSeenAt ? new Date(encounter.lastSeenAt) : undefined
-              });
+                const dedupeKey = buildLinkDedupeKey({
+                  eventType: "active_live",
+                  pubgNameNormalized: encounterNormalized,
+                  twitchUserId: streamerMatch.twitchUserId,
+                  twitchStreamId: streamerMatch.streamId,
+                  encounterAt: encounter.lastSeenAt
+                });
+                linkEvents.push({
+                  dedupeKey,
+                  eventType: "active_live",
+                  pubgNameRaw: encounter.name,
+                  pubgNameNormalized: encounterNormalized,
+                  twitchUserId: streamerMatch.twitchUserId,
+                  twitchUserLogin: streamerMatch.userLogin,
+                  twitchUserName: streamerMatch.userName,
+                  twitchStreamId: streamerMatch.streamId,
+                  shard: resolvedPlayer.shard,
+                  platform,
+                  encounterAt: encounter.lastSeenAt ? new Date(encounter.lastSeenAt) : undefined
+                });
 
-              clips.push({
-                id: `live-${streamerMatch.streamId}-${encounter.name}`,
-                url: liveUrl,
-                embed_url: liveUrl,
-                broadcaster_id: streamerMatch.twitchUserId,
-                broadcaster_name: streamerMatch.userName,
-                creator_id: streamerMatch.twitchUserId,
-                creator_name: streamerMatch.userName,
-                video_id: "",
-                game_id: "27971",
-                language: "",
-                title: `[Live POV] ${streamerMatch.title}`,
-                view_count: 0,
-                created_at: streamerMatch.streamStartedAt.toISOString(),
-                thumbnail_url: `https://static-cdn.jtvnw.net/previews-ttv/live_user_${streamerMatch.userLogin}-640x360.jpg`,
-                duration: 0,
-                encounterWith: encounter.name,
-                sourceType: "vod"
-              });
-              if (clips.length >= limit) break;
+                clips.push({
+                  id: `live-${streamerMatch.streamId}-${encounter.name}`,
+                  url: liveUrl,
+                  embed_url: liveUrl,
+                  broadcaster_id: streamerMatch.twitchUserId,
+                  broadcaster_name: streamerMatch.userName,
+                  creator_id: streamerMatch.twitchUserId,
+                  creator_name: streamerMatch.userName,
+                  video_id: "",
+                  game_id: "27971",
+                  language: "",
+                  title: `[Live POV] ${streamerMatch.title}`,
+                  view_count: 0,
+                  created_at: streamerMatch.streamStartedAt.toISOString(),
+                  thumbnail_url: `https://static-cdn.jtvnw.net/previews-ttv/live_user_${streamerMatch.userLogin}-640x360.jpg`,
+                  duration: 0,
+                  encounterWith: encounter.name,
+                  sourceType: "vod"
+                });
+                if (clips.length >= limit) break;
+              } else {
+                pushVerbose(
+                  `active overlap rejected encounter=${encounter.name} twitch=${streamerMatch.userLogin} score=${match.score} reasons=${match.reasons.join(",")} reason=time_window`
+                );
+              }
+            } else {
+              pushVerbose(
+                `active overlap skipped encounter=${encounter.name} twitch=${streamerMatch.userLogin} score=${match.score} reasons=${match.reasons.join(",")} reason=missing_encounter_time`
+              );
             }
           }
         }
@@ -499,8 +573,10 @@ export async function GET(request: Request) {
         linkEventsPersisted: debug.linkEventsPersisted,
         metadata: {
           resolvedShard: debug.resolvedShard,
-          encountersScanned: encounters.length,
+          encountersScanned: filteredEncounters.length,
           probeMode,
+          restrictToKnown,
+          knownNormalizedSize: knownNormalized.size,
           verboseMessages
         }
       });
@@ -509,7 +585,7 @@ export async function GET(request: Request) {
         clips,
         source: "encounters",
         profile: { playerName: resolvedPlayer.playerName, shard: resolvedPlayer.shard, platform },
-        encountersScanned: encounters.length,
+        encountersScanned: filteredEncounters.length,
         debug
       });
     }
