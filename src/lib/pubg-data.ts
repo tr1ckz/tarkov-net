@@ -819,6 +819,86 @@ export const pubgMaps: PubgMapIntel[] = [
     ]
   },
   {
+    slug: "rondo",
+    name: "Rondo",
+    mapImage: "/pubg.avif",
+    sizeKm: "8x8",
+    terrain: "Bamboo groves, river valleys, and traditional East Asian urban zones",
+    bestFor: "Macro-focused squads that favor long rotates and compound control",
+    hotDrops: ["Jadena City", "Stadium", "Yu Lin", "Mey Ran"],
+    vehicleRoutes: ["Central river road chain", "Eastern ridge highway", "South village rotation lane"],
+    priorityCompounds: ["Jadena high blocks", "Yu Lin hard-cover compounds", "Stadium perimeter holds"],
+    midgameFocus: "Secure a two-vehicle setup and lock high-ground compounds before phase 4 shifts.",
+    endgameNotes: "Use split angles around bamboo cover and avoid late open-water crossings.",
+    secretRooms: [],
+    markers: [
+      {
+        id: "rondo-jadena",
+        label: "Jadena City",
+        type: "hot-drop",
+        x: 52,
+        y: 43,
+        notes: "High-density loot and heavy third-party pressure in early circles."
+      },
+      {
+        id: "rondo-stadium",
+        label: "Stadium",
+        type: "hot-drop",
+        x: 34,
+        y: 38,
+        notes: "Fast armor spike with exposed exits; rotate early if uncontested."
+      },
+      {
+        id: "rondo-ridge-route",
+        label: "Eastern Ridge Route",
+        type: "vehicle-route",
+        x: 71,
+        y: 47,
+        notes: "Reliable hard-shift route with strong scouting sight-lines."
+      }
+    ]
+  },
+  {
+    slug: "paramo",
+    name: "Paramo",
+    mapImage: "/pubg.avif",
+    sizeKm: "3x3",
+    terrain: "Active volcano highlands with shifting landmarks and lava-adjacent cover",
+    bestFor: "Aggressive teams with strong timing and close-range fighting",
+    hotDrops: ["Lab", "Helipad", "Capaco", "Atahul"],
+    vehicleRoutes: ["Central ridge traverse", "North crater lane", "South terrace loop"],
+    priorityCompounds: ["Lab rooftops", "Capaco stone compounds", "Crater edge hard cover"],
+    midgameFocus: "Take central elevation quickly and punish teams rotating through exposed terraces.",
+    endgameNotes: "Zone collapses are fast; save utility for last 2 shifts and deny ridge climbs.",
+    secretRooms: [],
+    markers: [
+      {
+        id: "paramo-lab",
+        label: "Lab",
+        type: "hot-drop",
+        x: 51,
+        y: 47,
+        notes: "Top-tier opening loot with immediate multi-team pressure."
+      },
+      {
+        id: "paramo-helipad",
+        label: "Helipad",
+        type: "hot-drop",
+        x: 42,
+        y: 39,
+        notes: "Fast armor and utility, but limited retreat paths."
+      },
+      {
+        id: "paramo-central-route",
+        label: "Central Ridge Route",
+        type: "vehicle-route",
+        x: 49,
+        y: 52,
+        notes: "Best lane for quick macro transitions between terraces."
+      }
+    ]
+  },
+  {
     slug: "karakin",
     name: "Karakin",
     mapImage: "/pubg/maps/Karakin_Main_No_Text_Low_Res.jpg",
@@ -855,6 +935,46 @@ export const pubgMaps: PubgMapIntel[] = [
         x: 50,
         y: 45,
         notes: "Main vehicle rotation path cutting through the map center."
+      }
+    ]
+  },
+  {
+    slug: "haven",
+    name: "Haven",
+    mapImage: "/pubg.avif",
+    sizeKm: "1x1",
+    terrain: "Industrial urban night environment with vertical lanes and tight corridors",
+    bestFor: "Duo-heavy tactical squads that excel at close-quarters clearing",
+    hotDrops: ["Industrial Zone", "Overpass", "Coal Yard", "Residential Blocks"],
+    vehicleRoutes: ["Peripheral street loop", "Canal-side lane", "Overpass transition"],
+    priorityCompounds: ["Warehouse rooftops", "Overpass hard cover", "Canal-side buildings"],
+    midgameFocus: "Own one vertical power position and clear block-by-block with utility before peeking.",
+    endgameNotes: "Haven endings are unforgiving; force trades with flashes and never overextend solo.",
+    secretRooms: [],
+    markers: [
+      {
+        id: "haven-industrial",
+        label: "Industrial Zone",
+        type: "hot-drop",
+        x: 48,
+        y: 50,
+        notes: "High conflict opener with abundant close-range weapon density."
+      },
+      {
+        id: "haven-overpass",
+        label: "Overpass",
+        type: "hot-drop",
+        x: 60,
+        y: 40,
+        notes: "Strong vertical control, but vulnerable to coordinated flanks."
+      },
+      {
+        id: "haven-street-route",
+        label: "Street Rotation Route",
+        type: "vehicle-route",
+        x: 43,
+        y: 58,
+        notes: "Fast micro-rotation lane between industrial and residential sectors."
       }
     ]
   }
