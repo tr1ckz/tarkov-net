@@ -7,35 +7,13 @@ type Props = {
   map: PubgMapIntel;
 };
 
-const MARKER_CONFIG: Record<
-  PubgMapMarker["type"],
-  { label: string; letter: string; ring: string; bg: string; text: string; dot: string }
-> = {
-  "hot-drop": {
-    label: "Hot Drop",
-    letter: "H",
-    ring: "#c44",
-    bg: "#2b1717",
-    text: "#efb2b2",
-    dot: "#e05555",
-  },
-  "secret-room": {
-    label: "Secret Room",
-    letter: "S",
-    ring: "#c9a655",
-    bg: "#2b2216",
-    text: "#f1d39d",
-    dot: "#d7b67a",
-  },
-  "vehicle-route": {
-    label: "Vehicle Route",
-    letter: "V",
-    ring: "#5588cc",
-    bg: "#161f2d",
-    text: "#b7ccf1",
-    dot: "#7ea0d7",
-  },
+const MARKER_CONFIG: Record<PubgMapMarker["type"], { label: string }> = {
+  "hot-drop":      { label: "Hot Drop" },
+  "secret-room":   { label: "Secret Room" },
+  "vehicle-route": { label: "Vehicle Route" },
 };
+
+const CIRCLE_COLOR = "#f5c842";
 
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 6;
@@ -143,8 +121,7 @@ export function PubgMapOverlay({ map }: Props) {
   }, []);
 
   // marker size inversely scales with zoom so they don't get huge
-  const markerSize = Math.max(18, 26 - zoom * 2.2);
-  const fontSize = Math.max(9, 13 - zoom * 0.9);
+  const markerSize = Math.max(14, 22 - zoom * 2);
 
   return (
     <div className="space-y-4">
@@ -160,19 +137,18 @@ export function PubgMapOverlay({ map }: Props) {
               onClick={() => toggleType(type)}
               className="flex items-center gap-1.5 border px-3 py-1.5 text-xs uppercase tracking-[0.12em] transition-opacity"
               style={{
-                borderColor: active ? cfg.ring : "#2d2d2d",
-                color: active ? cfg.text : "#7f7768",
-                opacity: active ? 1 : 0.55,
+                borderColor: active ? CIRCLE_COLOR : "#2d2d2d",
+                color: active ? "#e2d2af" : "#7f7768",
+                opacity: active ? 1 : 0.45,
               }}
             >
-              {/* mini circle swatch */}
               <span
-                className="inline-block rounded-full border-2"
+                className="inline-block rounded-full"
                 style={{
-                  width: 12,
-                  height: 12,
-                  background: active ? cfg.dot : "#2d2d2d",
-                  borderColor: active ? cfg.ring : "#444",
+                  width: 10,
+                  height: 10,
+                  border: `2px solid ${active ? CIRCLE_COLOR : "#444"}`,
+                  background: "transparent",
                 }}
               />
               {cfg.label}
@@ -208,7 +184,7 @@ export function PubgMapOverlay({ map }: Props) {
       <div
         ref={containerRef}
         className="relative overflow-hidden border border-[#2d2d2d] bg-[#0a0a0a]"
-        style={{ height: "70vh", minHeight: 500, cursor: dragging.current ? "grabbing" : "grab" }}
+        style={{ height: "85vh", minHeight: 600, cursor: dragging.current ? "grabbing" : "grab" }}
         onWheel={onWheel}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
@@ -238,7 +214,6 @@ export function PubgMapOverlay({ map }: Props) {
           />
 
           {visibleMarkers.map((marker) => {
-            const cfg = MARKER_CONFIG[marker.type];
             const isActive = activeMarkerId === marker.id;
             return (
               <button
@@ -246,26 +221,21 @@ export function PubgMapOverlay({ map }: Props) {
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setActiveMarkerId(isActive ? null : marker.id); }}
                 title={marker.label}
-                className="absolute flex items-center justify-center rounded-full font-bold shadow-lg transition-transform hover:scale-125"
+                className="absolute rounded-full transition-transform hover:scale-125"
                 style={{
                   left: `${marker.x}%`,
                   top: `${marker.y}%`,
                   width: markerSize,
                   height: markerSize,
-                  fontSize: fontSize,
-                  transform: `translate(-50%, -50%) ${isActive ? "scale(1.35)" : ""}`,
-                  background: cfg.bg,
-                  color: cfg.text,
-                  border: `2px solid ${isActive ? "#fff" : cfg.ring}`,
+                  transform: `translate(-50%, -50%) ${isActive ? "scale(1.4)" : ""}`,
+                  background: "transparent",
+                  border: `2px solid ${CIRCLE_COLOR}`,
                   boxShadow: isActive
-                    ? `0 0 0 3px ${cfg.ring}, 0 2px 8px rgba(0,0,0,0.7)`
-                    : `0 0 0 1px rgba(0,0,0,0.5), 0 2px 6px rgba(0,0,0,0.6)`,
+                    ? `0 0 0 2px #fff, 0 0 8px 2px ${CIRCLE_COLOR}`
+                    : `0 0 4px 1px rgba(245,200,66,0.35)`,
                   zIndex: isActive ? 30 : 10,
-                  lineHeight: 1,
                 }}
-              >
-                {cfg.letter}
-              </button>
+              />
             );
           })}
         </div>
@@ -280,45 +250,28 @@ export function PubgMapOverlay({ map }: Props) {
       {/* ── legend ── */}
       <div className="border border-[#2d2d2d] bg-[#0e0e0e] px-4 py-3">
         <p className="mb-2.5 text-[10px] uppercase tracking-[0.16em] text-[#5a5450]">Legend</p>
-        <div className="flex flex-wrap gap-5">
-          {(Object.keys(MARKER_CONFIG) as PubgMapMarker["type"][]).map((type) => {
-            const cfg = MARKER_CONFIG[type];
-            return (
-              <div key={type} className="flex items-center gap-2">
-                <span
-                  className="flex shrink-0 items-center justify-center rounded-full font-bold"
-                  style={{
-                    width: 22,
-                    height: 22,
-                    fontSize: 10,
-                    background: cfg.bg,
-                    color: cfg.text,
-                    border: `2px solid ${cfg.ring}`,
-                    boxShadow: `0 0 0 1px rgba(0,0,0,0.4)`,
-                  }}
-                >
-                  {cfg.letter}
-                </span>
-                <span className="text-xs text-[#9a9080]">{cfg.label}</span>
-              </div>
-            );
-          })}
+        <div className="flex flex-wrap gap-6">
+          {(Object.keys(MARKER_CONFIG) as PubgMapMarker["type"][]).map((type) => (
+            <div key={type} className="flex items-center gap-2">
+              <span
+                className="shrink-0 rounded-full"
+                style={{ width: 16, height: 16, border: `2px solid ${CIRCLE_COLOR}`, background: "transparent" }}
+              />
+              <span className="text-xs text-[#9a9080]">{MARKER_CONFIG[type].label}</span>
+            </div>
+          ))}
           <div className="flex items-center gap-2">
             <span
-              className="flex shrink-0 items-center justify-center rounded-full font-bold"
+              className="shrink-0 rounded-full"
               style={{
-                width: 22,
-                height: 22,
-                fontSize: 10,
-                background: "#1a1a1a",
-                color: "#fff",
-                border: "2px solid #fff",
-                boxShadow: "0 0 0 3px #d7b67a",
+                width: 16,
+                height: 16,
+                border: `2px solid ${CIRCLE_COLOR}`,
+                background: "transparent",
+                boxShadow: `0 0 0 2px #fff, 0 0 6px 2px ${CIRCLE_COLOR}`,
               }}
-            >
-              S
-            </span>
-            <span className="text-xs text-[#9a9080]">Selected (white ring)</span>
+            />
+            <span className="text-xs text-[#9a9080]">Selected</span>
           </div>
         </div>
       </div>
@@ -330,18 +283,14 @@ export function PubgMapOverlay({ map }: Props) {
           <div className="mt-2">
             <div className="flex items-center gap-2">
               <span
-                className="flex shrink-0 items-center justify-center rounded-full font-bold"
+                className="shrink-0 rounded-full"
                 style={{
-                  width: 24,
-                  height: 24,
-                  fontSize: 11,
-                  background: MARKER_CONFIG[activeMarker.type].bg,
-                  color: MARKER_CONFIG[activeMarker.type].text,
-                  border: `2px solid ${MARKER_CONFIG[activeMarker.type].ring}`,
+                  width: 16,
+                  height: 16,
+                  border: `2px solid ${CIRCLE_COLOR}`,
+                  background: "transparent",
                 }}
-              >
-                {MARKER_CONFIG[activeMarker.type].letter}
-              </span>
+              />
               <p className="text-sm font-semibold uppercase tracking-[0.08em] text-[#e2d2af]">
                 {activeMarker.label}
               </p>
