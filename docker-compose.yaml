@@ -38,4 +38,4 @@ services:
       EVENTSUB_CREATE_LIMIT_PER_SYNC: "80"
     volumes:
       - ./data:/app/data
-    command: ["sh", "-c", "./node_modules/.bin/prisma migrate deploy --schema /opt/prisma/schema.prisma && node scripts/pubg-twitch-crawler.mjs"]
+    command: ["node", "scripts/pubg-twitch-crawler.mjs"]
