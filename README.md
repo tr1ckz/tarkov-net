@@ -83,3 +83,27 @@ curl -X POST http://localhost:3000/api/cache/refresh -H "x-cache-secret: $CACHE_
 ```
 
 If `CACHE_REFRESH_SECRET` is unset, the endpoint accepts unauthenticated local calls.
+
+## PUBG Streamer Linking (Hands-Off)
+
+Production deployment runs a dedicated `pubg-crawler` service from `docker-compose.yaml`.
+
+What it does automatically:
+
+- Polls Twitch streams for PUBG (`game_id=27971`) every 5 minutes.
+- Updates `PubgActiveStreamer` and `PubgStreamerProfile` tables.
+- Auto-syncs Twitch EventSub `stream.online` subscriptions for discovered streamer profiles.
+
+Required envs for crawler automation:
+
+- `TWITCH_CLIENT_ID`
+- `TWITCH_CLIENT_SECRET`
+- `TWITCH_EVENTSUB_SECRET`
+- `TWITCH_EVENTSUB_CALLBACK_URL`
+
+Optional tuning envs:
+
+- `AUTO_EVENTSUB_SYNC` (default `1`)
+- `EVENTSUB_SYNC_INTERVAL_MS` (default `1800000`)
+- `EVENTSUB_SYNC_LIMIT` (default `400`)
+- `EVENTSUB_CREATE_LIMIT_PER_SYNC` (default `80`)

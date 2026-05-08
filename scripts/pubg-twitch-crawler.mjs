@@ -4,8 +4,12 @@ const prisma = new PrismaClient();
 const PUBG_GAME_ID = "27971";
 const INTERVAL_MS = 300000;
 const MAX_RETRIES = 3;
+const EVENTSUB_SYNC_INTERVAL_MS = Math.max(300000, Number(process.env.EVENTSUB_SYNC_INTERVAL_MS ?? "1800000"));
+const EVENTSUB_SYNC_LIMIT = Math.max(1, Math.min(2000, Number(process.env.EVENTSUB_SYNC_LIMIT ?? "400")));
+const EVENTSUB_CREATE_LIMIT_PER_SYNC = Math.max(1, Math.min(500, Number(process.env.EVENTSUB_CREATE_LIMIT_PER_SYNC ?? "80")));
 
 let tokenState = null;
+let lastEventSubSyncMs = 0;
 
 function log(level, message, data = {}) {
   const payload = {
@@ -38,6 +42,21 @@ function getCredentials() {
   }
 
   return { clientId, clientSecret };
+}
+
+function inferEventSubCallbackUrl() {
+  const explicit = process.env.TWITCH_EVENTSUB_CALLBACK_URL?.trim();
+  if (explicit) return explicit;
+
+  const base = process.env.NEXTAUTH_URL?.trim();
+  if (!base) return null;
+
+  return `${base.replace(/\/+$/, "")}/api/twitch/eventsub/stream-online`;
+}
+
+function shouldAutoSyncEventSub() {
+  const toggle = (process.env.AUTO_EVENTSUB_SYNC ?? "1").trim().toLowerCase();
+  return toggle !== "0" && toggle !== "false";
 }
 
 async function getToken() {
@@ -136,6 +155,152 @@ async function fetchAllStreams() {
   return all;
 }
 
+async function fetchAllEventSubStreamOnlineBroadcasterIds() {
+  const { token, clientId } = await getToken();
+  const ids = new Set();
+  let cursor = "";
+
+  for (let page = 0; page < 40; page += 1) {
+    const cursorPart = cursor ? `&after=${encodeURIComponent(cursor)}` : "";
+    const response = await fetch(
+      `https://api.twitch.tv/helix/eventsub/subscriptions?type=stream.online&first=100${cursorPart}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Client-Id": clientId
+        }
+      }
+    );
+
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(`Failed to list EventSub subscriptions (${response.status}) ${detail}`);
+    }
+
+    const payload = await response.json();
+    const data = payload.data ?? [];
+    for (const sub of data) {
+      const broadcasterId = sub?.condition?.broadcaster_user_id;
+      if (broadcasterId) {
+        ids.add(String(broadcasterId));
+      }
+    }
+
+    cursor = payload.pagination?.cursor ?? "";
+    if (!cursor) break;
+  }
+
+  return ids;
+}
+
+async function createEventSubStreamOnlineSubscription(broadcasterUserId, callbackUrl, secret) {
+  const { token, clientId } = await getToken();
+  const response = await fetch("https://api.twitch.tv/helix/eventsub/subscriptions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Client-Id": clientId,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      type: "stream.online",
+      version: "1",
+      condition: {
+        broadcaster_user_id: broadcasterUserId
+      },
+      transport: {
+        method: "webhook",
+        callback: callbackUrl,
+        secret
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Failed to create EventSub subscription (${response.status}) ${detail}`);
+  }
+
+  const payload = await response.json();
+  return payload.data?.[0] ?? null;
+}
+
+async function syncEventSubSubscriptions(streams) {
+  if (!shouldAutoSyncEventSub()) {
+    return;
+  }
+
+  const now = Date.now();
+  if (now - lastEventSubSyncMs < EVENTSUB_SYNC_INTERVAL_MS) {
+    return;
+  }
+
+  const callbackUrl = inferEventSubCallbackUrl();
+  const eventSubSecret = process.env.TWITCH_EVENTSUB_SECRET?.trim();
+  if (!callbackUrl || !eventSubSecret) {
+    log("warn", "eventsub sync skipped", {
+      reason: "missing_callback_or_secret",
+      hasCallbackUrl: Boolean(callbackUrl),
+      hasEventSubSecret: Boolean(eventSubSecret)
+    });
+    lastEventSubSyncMs = now;
+    return;
+  }
+
+  const knownProfiles = await prisma.pubgStreamerProfile.findMany({
+    where: { twitchUserId: { not: "" } },
+    select: { twitchUserId: true },
+    orderBy: { lastSeenAt: "desc" },
+    take: EVENTSUB_SYNC_LIMIT
+  });
+
+  const candidateIds = new Set(knownProfiles.map((row) => row.twitchUserId));
+  for (const stream of streams) {
+    if (stream?.user_id) {
+      candidateIds.add(String(stream.user_id));
+    }
+  }
+
+  if (!candidateIds.size) {
+    log("info", "eventsub sync skipped", { reason: "no_candidate_ids" });
+    lastEventSubSyncMs = now;
+    return;
+  }
+
+  const existingIds = await fetchAllEventSubStreamOnlineBroadcasterIds();
+  const missingIds = Array.from(candidateIds).filter((id) => !existingIds.has(id));
+  const plannedCreates = missingIds.slice(0, EVENTSUB_CREATE_LIMIT_PER_SYNC);
+
+  let created = 0;
+  let failed = 0;
+  for (const broadcasterId of plannedCreates) {
+    try {
+      await createEventSubStreamOnlineSubscription(broadcasterId, callbackUrl, eventSubSecret);
+      created += 1;
+    } catch (error) {
+      failed += 1;
+      log("warn", "eventsub create failed", {
+        broadcasterId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  lastEventSubSyncMs = now;
+  log("info", "eventsub sync completed", {
+    callbackUrl,
+    knownProfiles: knownProfiles.length,
+    activeStreams: streams.length,
+    candidateCount: candidateIds.size,
+    existingCount: existingIds.size,
+    missingCount: missingIds.length,
+    plannedCreates: plannedCreates.length,
+    created,
+    failed,
+    syncIntervalMs: EVENTSUB_SYNC_INTERVAL_MS
+  });
+}
+
 async function indexStreams() {
   const startedAt = Date.now();
   const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -212,6 +377,14 @@ async function indexStreams() {
       refreshStartedAt: null
     }
   });
+
+  try {
+    await syncEventSubSubscriptions(streams);
+  } catch (error) {
+    log("error", "eventsub sync failed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
 
   log("info", "index run completed", {
     runId,
