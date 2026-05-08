@@ -103,6 +103,7 @@ export default function AdminPage() {
   const [refreshingPubg, setRefreshingPubg] = useState(false);
   const [probingPubg, setProbingPubg] = useState(false);
   const [probeMessage, setProbeMessage] = useState<string | null>(null);
+  const [encounterProbePlayer, setEncounterProbePlayer] = useState("");
 
   const isAdmin = (session?.user as { role?: string })?.role === "ADMIN";
 
@@ -179,6 +180,41 @@ export default function AdminPage() {
       await refreshPubgStats();
     } catch (error) {
       setProbeMessage(error instanceof Error ? error.message : "Clips probe failed");
+    } finally {
+      setProbingPubg(false);
+    }
+  }
+
+  async function runEncounterProbe() {
+    const player = encounterProbePlayer.trim();
+    if (!player) {
+      setProbeMessage("Enter a PUBG player name to run encounter probe.");
+      return;
+    }
+
+    setProbingPubg(true);
+    setProbeMessage(null);
+    try {
+      const params = new URLSearchParams({
+        playerName: player,
+        platform: "steam",
+        limit: "5",
+        probe: "1"
+      });
+
+      const response = await fetch(`/api/pubg/clips?${params.toString()}`, { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok) {
+        setProbeMessage(payload?.error ?? "Encounter probe failed");
+        await refreshPubgStats();
+        return;
+      }
+
+      const count = Array.isArray(payload?.clips) ? payload.clips.length : 0;
+      setProbeMessage(`Encounter probe completed for ${player}. Returned ${count} clip(s).`);
+      await refreshPubgStats();
+    } catch (error) {
+      setProbeMessage(error instanceof Error ? error.message : "Encounter probe failed");
     } finally {
       setProbingPubg(false);
     }
@@ -417,6 +453,12 @@ export default function AdminPage() {
               Last 24h runs: {pubgStats?.totals.runs24h ?? 0} | ok {pubgStats?.totals.runs24hOk ?? 0} | empty {pubgStats?.totals.runs24hEmpty ?? 0} | errors {pubgStats?.totals.runs24hError ?? 0}
             </p>
             <div className="flex gap-2">
+              <input
+                value={encounterProbePlayer}
+                onChange={(event) => setEncounterProbePlayer(event.target.value)}
+                placeholder="PUBG name for encounter probe"
+                className="w-56 border border-[#2d2d2d] bg-[#0d0d0d] px-2 py-1.5 text-[11px] text-[#c8bda0] placeholder:text-[#666] focus:border-[#666] focus:outline-none"
+              />
               <button
                 onClick={refreshPubgStats}
                 disabled={refreshingPubg}
@@ -437,6 +479,13 @@ export default function AdminPage() {
                 className="border border-[#2d2d2d] bg-[#111] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-[#c8bda0] hover:border-[#666] hover:text-[#e2d2af] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Run Clips Probe
+              </button>
+              <button
+                onClick={runEncounterProbe}
+                disabled={probingPubg}
+                className="border border-[#3a4430] bg-[#12160e] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-[#8fa070] hover:border-[#8fa070] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Run Encounter Probe
               </button>
             </div>
           </div>
