@@ -52,7 +52,8 @@ npm run dev
 ## Unraid Deployment
 
 1. Configure `NEXTAUTH_URL` and `NEXTAUTH_SECRET` in `docker-compose.yaml`
-2. Build and start:
+2. Keep SQLite data on a dedicated mounted path (`./data` -> `/app/data`) and use `DATABASE_URL=file:/app/data/dev.db`
+3. Build and start:
 
 ```bash
 docker compose up -d --build

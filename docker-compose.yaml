@@ -12,6 +12,6 @@ services:
       NODE_ENV: production
       NEXTAUTH_URL: http://YOUR_UNRAID_IP:3000
       NEXTAUTH_SECRET: change-me
-      DATABASE_URL: file:/app/prisma/dev.db
+      DATABASE_URL: file:/app/data/dev.db
     volumes:
-      - ./prisma:/app/prisma
+      - ./data:/app/data
