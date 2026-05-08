@@ -92,6 +92,36 @@ type PubgLinkingStats = {
   }>;
 };
 
+type LiveTailRun = {
+  id: string;
+  createdAt: string;
+  source: string;
+  status: "ok" | "empty" | "error";
+  playerName: string | null;
+  platform: string | null;
+  requestedShard: string | null;
+  resolvedShard: string | null;
+  encountersFound: number;
+  clipsReturned: number;
+  activeIndexMatches: number;
+  activeOverlapMatches: number;
+  directLoginMatches: number;
+  searchChannelMatches: number;
+  vodMoments: number;
+  channelsWithClips: number;
+  linkEventsQueued: number;
+  linkEventsPersisted: number;
+  errorMessage: string | null;
+  verboseMessages: string[];
+  metadata?: Record<string, unknown> | null;
+};
+
+type LiveTailResponse = {
+  generatedAt: string;
+  count: number;
+  runs: LiveTailRun[];
+};
+
 export default function AdminPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -106,6 +136,14 @@ export default function AdminPage() {
   const [probingPubg, setProbingPubg] = useState(false);
   const [probeMessage, setProbeMessage] = useState<string | null>(null);
   const [encounterProbePlayer, setEncounterProbePlayer] = useState("");
+  const [liveTailRuns, setLiveTailRuns] = useState<LiveTailRun[]>([]);
+  const [liveTailLoading, setLiveTailLoading] = useState(false);
+  const [liveTailError, setLiveTailError] = useState<string | null>(null);
+  const [liveTailSource, setLiveTailSource] = useState("all");
+  const [liveTailStatus, setLiveTailStatus] = useState("all");
+  const [liveTailMinutes, setLiveTailMinutes] = useState("30");
+  const [liveTailLimit, setLiveTailLimit] = useState("120");
+  const [liveTailPlayer, setLiveTailPlayer] = useState("");
 
   const isAdmin = (session?.user as { role?: string })?.role === "ADMIN";
 
@@ -160,6 +198,61 @@ export default function AdminPage() {
       clearInterval(interval);
     };
   }, [isAdmin, tab]);
+
+  useEffect(() => {
+    if (!isAdmin || tab !== "pubg") return;
+
+    let cancelled = false;
+    const loadLiveTail = async (showSpinner: boolean) => {
+      if (showSpinner) {
+        setLiveTailLoading(true);
+      }
+
+      try {
+        const params = new URLSearchParams({
+          source: liveTailSource,
+          status: liveTailStatus,
+          minutes: liveTailMinutes,
+          limit: liveTailLimit,
+          player: liveTailPlayer
+        });
+        const payload = await fetch(`/api/admin/pubg-linking/live-tail?${params.toString()}`, {
+          cache: "no-store"
+        }).then((response) => response.json() as Promise<LiveTailResponse>);
+
+        if (!cancelled) {
+          setLiveTailRuns(payload.runs ?? []);
+          setLiveTailError(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setLiveTailError(error instanceof Error ? error.message : "Failed to load live tail");
+        }
+      } finally {
+        if (!cancelled && showSpinner) {
+          setLiveTailLoading(false);
+        }
+      }
+    };
+
+    void loadLiveTail(true);
+    const interval = setInterval(() => {
+      void loadLiveTail(false);
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [
+    isAdmin,
+    tab,
+    liveTailSource,
+    liveTailStatus,
+    liveTailMinutes,
+    liveTailLimit,
+    liveTailPlayer
+  ]);
 
   async function refreshPubgStats() {
     setRefreshingPubg(true);
@@ -527,6 +620,111 @@ export default function AdminPage() {
               No runs recorded yet. Use "Run Clips Probe" to force one and verify logging wiring.
             </p>
           )}
+
+          <div className="border border-[#2d2d2d] bg-[#111] p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">Live Log Tail</h2>
+              <p className="text-[10px] uppercase tracking-widest text-[#666]">Polling every 5s</p>
+            </div>
+
+            <div className="mt-3 grid gap-2 md:grid-cols-6">
+              <select
+                value={liveTailSource}
+                onChange={(event) => setLiveTailSource(event.target.value)}
+                className="border border-[#2d2d2d] bg-[#0d0d0d] px-2 py-1.5 text-[11px] uppercase tracking-widest text-[#c8bda0] focus:border-[#666] focus:outline-none"
+              >
+                <option value="all">All Sources</option>
+                <option value="encounters">Encounters</option>
+                <option value="eventsub">EventSub</option>
+                <option value="twitch-index-refresh">Index Refresh</option>
+                <option value="pubg">PUBG</option>
+                <option value="streamer">Streamer</option>
+                <option value="admin_probe">Admin Probe</option>
+              </select>
+              <select
+                value={liveTailStatus}
+                onChange={(event) => setLiveTailStatus(event.target.value)}
+                className="border border-[#2d2d2d] bg-[#0d0d0d] px-2 py-1.5 text-[11px] uppercase tracking-widest text-[#c8bda0] focus:border-[#666] focus:outline-none"
+              >
+                <option value="all">All Status</option>
+                <option value="ok">OK</option>
+                <option value="empty">Empty</option>
+                <option value="error">Error</option>
+              </select>
+              <input
+                value={liveTailPlayer}
+                onChange={(event) => setLiveTailPlayer(event.target.value)}
+                placeholder="Player contains"
+                className="border border-[#2d2d2d] bg-[#0d0d0d] px-2 py-1.5 text-[11px] text-[#c8bda0] placeholder:text-[#666] focus:border-[#666] focus:outline-none"
+              />
+              <input
+                value={liveTailMinutes}
+                onChange={(event) => setLiveTailMinutes(event.target.value.replace(/[^0-9]/g, ""))}
+                placeholder="Minutes"
+                className="border border-[#2d2d2d] bg-[#0d0d0d] px-2 py-1.5 text-[11px] text-[#c8bda0] placeholder:text-[#666] focus:border-[#666] focus:outline-none"
+              />
+              <input
+                value={liveTailLimit}
+                onChange={(event) => setLiveTailLimit(event.target.value.replace(/[^0-9]/g, ""))}
+                placeholder="Limit"
+                className="border border-[#2d2d2d] bg-[#0d0d0d] px-2 py-1.5 text-[11px] text-[#c8bda0] placeholder:text-[#666] focus:border-[#666] focus:outline-none"
+              />
+              <button
+                onClick={() => {
+                  setLiveTailLoading(true);
+                  fetch(`/api/admin/pubg-linking/live-tail?${new URLSearchParams({
+                    source: liveTailSource,
+                    status: liveTailStatus,
+                    player: liveTailPlayer,
+                    minutes: liveTailMinutes,
+                    limit: liveTailLimit
+                  }).toString()}`, { cache: "no-store" })
+                    .then((response) => response.json() as Promise<LiveTailResponse>)
+                    .then((payload) => {
+                      setLiveTailRuns(payload.runs ?? []);
+                      setLiveTailError(null);
+                    })
+                    .catch((error) => {
+                      setLiveTailError(error instanceof Error ? error.message : "Failed to load live tail");
+                    })
+                    .finally(() => {
+                      setLiveTailLoading(false);
+                    });
+                }}
+                className="border border-[#49533a] bg-[#1a1f14] px-2 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-[#e2d2af] hover:bg-[#222a1a]"
+              >
+                Refresh Tail
+              </button>
+            </div>
+
+            {liveTailError && <p className="mt-2 text-xs text-[#e07070]">{liveTailError}</p>}
+            {liveTailLoading && <p className="mt-2 text-xs text-[#7f7768]">Loading live tail...</p>}
+
+            <div className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
+              {liveTailRuns.map((run) => (
+                <div key={run.id} className="border border-[#1f1f1f] bg-[#0d0d0d] px-3 py-2 text-xs text-[#b9af95]">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[#e2d2af]">{run.source}</span>
+                    <span className={`px-1.5 py-0.5 uppercase tracking-widest ${run.status === "ok" ? "text-[#8fa070]" : run.status === "empty" ? "text-[#d8b46b]" : "text-[#e07070]"}`}>{run.status}</span>
+                    <span className="text-[#666]">{new Date(run.createdAt).toLocaleString()}</span>
+                    {run.playerName && <span className="text-[#c8bda0]">player: {run.playerName}</span>}
+                    <span className="text-[#666]">enc: {run.encountersFound}</span>
+                    <span className="text-[#666]">clips: {run.clipsReturned}</span>
+                    <span className="text-[#666]">persisted: {run.linkEventsPersisted}</span>
+                  </div>
+                  {run.errorMessage && <div className="mt-1 text-[#e07070]">{run.errorMessage}</div>}
+                  {run.verboseMessages?.length > 0 && (
+                    <div className="mt-2 border border-[#1a1a1a] bg-[#090909] px-2 py-1 text-[11px] text-[#8e8e8e]">
+                      {run.verboseMessages.slice(-3).map((line, lineIdx) => (
+                        <div key={`${run.id}-verbose-${lineIdx}`}>{line}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+              {!liveTailRuns.length && !liveTailLoading && <p className="text-xs text-[#555]">No runs for current live tail filters.</p>}
+            </div>
+          </div>
 
           <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
             <div className="border border-[#2d2d2d] bg-[#111] p-3">
