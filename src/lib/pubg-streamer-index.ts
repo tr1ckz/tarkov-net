@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { getAllLiveStreamsByGameId } from "@/lib/twitch";
+import { getAllLiveStreamsByGameId, getVodCapabilityByUserId } from "@/lib/twitch";
 import stringSimilarity from "string-similarity";
 
 const DEFAULT_PUBG_TWITCH_GAME_IDS = ["493057", "27971"];
@@ -7,6 +7,7 @@ const INDEX_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const LOCK_STALE_MS = 2 * 60 * 1000;
 const INDEX_LOCK_KEY = "pubg:twitch-index";
 const STREAM_OVERLAP_GRACE_SECONDS = 120;
+const VOD_STATUS_RECHECK_MS = 6 * 60 * 60 * 1000;
 
 function getPubgTwitchGameIds() {
   const configured = process.env.PUBG_TWITCH_GAME_IDS
@@ -225,7 +226,56 @@ export async function refreshPubgStreamerIndex(options?: { force?: boolean }) {
 
     const streams = Array.from(streamMap.values());
     const indexedAt = now();
+    const existingProfiles = await prisma.pubgStreamerProfile.findMany({
+      where: {
+        twitchUserId: {
+          in: streams.map((stream) => stream.user_id)
+        }
+      },
+      select: {
+        twitchUserId: true,
+        vodsEnabled: true,
+        vodsCheckedAt: true,
+        lastVodAt: true
+      }
+    });
+    const existingProfileMap = new Map(existingProfiles.map((profile) => [profile.twitchUserId, profile]));
+
+    const vodStatusMap = new Map<string, { vodsEnabled: boolean; lastVodAt: Date | null; vodsCheckedAt: Date }>();
+    await Promise.all(
+      streams.map(async (stream) => {
+        const existing = existingProfileMap.get(stream.user_id);
+        const checkedAtMs = existing?.vodsCheckedAt?.getTime() ?? 0;
+        const shouldRefreshVodStatus = !checkedAtMs || indexedAt.getTime() - checkedAtMs >= VOD_STATUS_RECHECK_MS;
+
+        if (!shouldRefreshVodStatus) {
+          vodStatusMap.set(stream.user_id, {
+            vodsEnabled: existing?.vodsEnabled ?? false,
+            lastVodAt: existing?.lastVodAt ?? null,
+            vodsCheckedAt: existing?.vodsCheckedAt ?? indexedAt
+          });
+          return;
+        }
+
+        try {
+          const vodCapability = await getVodCapabilityByUserId(stream.user_id);
+          vodStatusMap.set(stream.user_id, {
+            vodsEnabled: vodCapability.vodsEnabled,
+            lastVodAt: vodCapability.lastVodAt ? new Date(vodCapability.lastVodAt) : null,
+            vodsCheckedAt: indexedAt
+          });
+        } catch {
+          vodStatusMap.set(stream.user_id, {
+            vodsEnabled: existing?.vodsEnabled ?? false,
+            lastVodAt: existing?.lastVodAt ?? null,
+            vodsCheckedAt: existing?.vodsCheckedAt ?? indexedAt
+          });
+        }
+      })
+    );
+
     const activeRows = streams.map((stream) => ({
+      vodStatus: vodStatusMap.get(stream.user_id) ?? { vodsEnabled: false, lastVodAt: null, vodsCheckedAt: indexedAt },
       twitchUserId: stream.user_id,
       streamId: stream.id,
       userLogin: stream.user_login,
@@ -268,6 +318,9 @@ export async function refreshPubgStreamerIndex(options?: { force?: boolean }) {
           lastSeenAt: indexedAt,
           lastSeenLiveAt: indexedAt,
           isLive: true,
+          vodsEnabled: row.vodStatus.vodsEnabled,
+          vodsCheckedAt: row.vodStatus.vodsCheckedAt,
+          lastVodAt: row.vodStatus.lastVodAt,
           lastStreamId: row.streamId,
           lastTitle: row.title,
           lastGameId: row.gameId,
@@ -282,6 +335,9 @@ export async function refreshPubgStreamerIndex(options?: { force?: boolean }) {
           lastSeenAt: indexedAt,
           lastSeenLiveAt: indexedAt,
           isLive: true,
+          vodsEnabled: row.vodStatus.vodsEnabled,
+          vodsCheckedAt: row.vodStatus.vodsCheckedAt,
+          lastVodAt: row.vodStatus.lastVodAt,
           lastStreamId: row.streamId,
           lastTitle: row.title,
           lastGameId: row.gameId,

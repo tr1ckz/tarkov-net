@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { refreshPubgStreamerIndex } from "@/lib/pubg-streamer-index";
+import { autoLinkPubgStreamerProfiles } from "@/lib/pubg-streamer-linking";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -35,16 +36,20 @@ export async function POST(request: Request) {
 
   try {
     const result = await refreshPubgStreamerIndex({ force: true });
+    const linking = await autoLinkPubgStreamerProfiles({ liveOnly: true, prioritizeVods: true, limit: 80 });
     await writeIndexerRunLog({
       status: result.refreshed ? "ok" : "empty",
       metadata: {
         refreshed: result.refreshed,
         count: result.count,
         refreshedAt: result.refreshedAt ?? null,
+        linkAttempted: linking.attempted,
+        linkSucceeded: linking.linked,
+        vodPriorityAttempted: linking.vodPriorityAttempted,
         force: true
       }
     });
-    return NextResponse.json({ ok: true, ...result });
+    return NextResponse.json({ ok: true, ...result, linking });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await writeIndexerRunLog({

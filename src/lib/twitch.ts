@@ -265,6 +265,16 @@ export async function getVideosByUserId(userId: string, first = 8): Promise<Twit
   return payload.data;
 }
 
+export async function getVodCapabilityByUserId(userId: string) {
+  const videos = await getVideosByUserId(userId, 1);
+  const latestVideo = videos[0] ?? null;
+
+  return {
+    vodsEnabled: Boolean(latestVideo),
+    lastVodAt: latestVideo?.published_at ?? latestVideo?.created_at ?? null
+  };
+}
+
 export async function getStreamsByGameId(gameId: string, first = 100, after?: string): Promise<TwitchStreamsResponse> {
   const capped = Math.max(1, Math.min(first, 100));
   const cursorPart = after ? `&after=${encodeURIComponent(after)}` : "";

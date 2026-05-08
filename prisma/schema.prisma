@@ -167,6 +167,9 @@ model PubgStreamerProfile {
   lastSeenAt       DateTime @default(now())
   lastSeenLiveAt   DateTime?
   isLive           Boolean  @default(false)
+  vodsEnabled      Boolean  @default(false)
+  vodsCheckedAt    DateTime?
+  lastVodAt        DateTime?
   lastStreamId     String?
   lastTitle        String?
   lastGameId       String?
@@ -175,6 +178,7 @@ model PubgStreamerProfile {
   updatedAt        DateTime @updatedAt
 
   @@index([isLive])
+  @@index([vodsEnabled])
   @@index([lastSeenAt])
   @@index([normalizedLogin])
   @@index([normalizedName])

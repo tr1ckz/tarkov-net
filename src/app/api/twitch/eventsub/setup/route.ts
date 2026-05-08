@@ -55,7 +55,7 @@ export async function POST(request: Request) {
     where: { twitchUserId: { not: "" } },
     select: { twitchUserId: true },
     take: 5000,
-    orderBy: { lastSeenAt: "desc" }
+    orderBy: [{ vodsEnabled: "desc" }, { lastSeenAt: "desc" }]
   });
 
   const dbIds = knownFromDb.map((row) => row.twitchUserId);
