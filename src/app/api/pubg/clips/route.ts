@@ -19,6 +19,7 @@ import {
   ensurePubgStreamerIndexFresh,
   findMatchedActiveStreamers
 } from "@/lib/pubg-streamer-index";
+import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +40,24 @@ function getLoginCandidates(pubgName: string) {
 function parsePlatform(value: string): PubgPlatform {
   if (value === "xbox" || value === "psn" || value === "kakao") return value;
   return "steam";
+}
+
+function buildLinkDedupeKey(params: {
+  eventType: string;
+  pubgNameNormalized: string;
+  twitchUserId: string;
+  twitchStreamId?: string;
+  twitchVideoId?: string;
+  encounterAt?: string | null;
+}) {
+  return [
+    params.eventType,
+    params.pubgNameNormalized,
+    params.twitchUserId,
+    params.twitchStreamId ?? "na",
+    params.twitchVideoId ?? "na",
+    params.encounterAt ?? "na"
+  ].join(":");
 }
 
 function pickClosestVodMoment(
@@ -131,8 +150,25 @@ export async function GET(request: Request) {
         vodMoments: 0,
         activeIndexMatches: 0,
         activeOverlapMatches: 0,
+        linkEventsQueued: 0,
+        linkEventsPersisted: 0,
         resolvedShard: resolvedPlayer.shard
       };
+
+      const linkEvents: Array<{
+        dedupeKey: string;
+        eventType: string;
+        pubgNameRaw: string;
+        pubgNameNormalized: string;
+        twitchUserId: string;
+        twitchUserLogin: string;
+        twitchUserName: string;
+        twitchStreamId?: string;
+        twitchVideoId?: string;
+        shard: string;
+        platform: string;
+        encounterAt?: Date;
+      }> = [];
 
       await ensurePubgStreamerIndexFresh();
 
@@ -172,6 +208,28 @@ export async function GET(request: Request) {
               debug.activeOverlapMatches += 1;
               const offset = computeVodOffsetSeconds(encounter.lastSeenAt!, streamerMatch.streamStartedAt.toISOString());
               const liveUrl = `https://www.twitch.tv/${streamerMatch.userLogin}?t=${offset}s`;
+
+              const dedupeKey = buildLinkDedupeKey({
+                eventType: "active_live",
+                pubgNameNormalized: encounterNormalized,
+                twitchUserId: streamerMatch.twitchUserId,
+                twitchStreamId: streamerMatch.streamId,
+                encounterAt: encounter.lastSeenAt
+              });
+              linkEvents.push({
+                dedupeKey,
+                eventType: "active_live",
+                pubgNameRaw: encounter.name,
+                pubgNameNormalized: encounterNormalized,
+                twitchUserId: streamerMatch.twitchUserId,
+                twitchUserLogin: streamerMatch.userLogin,
+                twitchUserName: streamerMatch.userName,
+                twitchStreamId: streamerMatch.streamId,
+                shard: resolvedPlayer.shard,
+                platform,
+                encounterAt: encounter.lastSeenAt ? new Date(encounter.lastSeenAt) : undefined
+              });
+
               clips.push({
                 id: `live-${streamerMatch.streamId}-${encounter.name}`,
                 url: liveUrl,
@@ -223,6 +281,28 @@ export async function GET(request: Request) {
           if (bestVod) {
             debug.vodMoments += 1;
             const vodUrl = `${bestVod.video.url}?t=${bestVod.offsetSeconds}s`;
+
+            const dedupeKey = buildLinkDedupeKey({
+              eventType: "vod_moment",
+              pubgNameNormalized: encounterNormalized,
+              twitchUserId: bestVod.video.user_id,
+              twitchVideoId: bestVod.video.id,
+              encounterAt: encounter.lastSeenAt
+            });
+            linkEvents.push({
+              dedupeKey,
+              eventType: "vod_moment",
+              pubgNameRaw: encounter.name,
+              pubgNameNormalized: encounterNormalized,
+              twitchUserId: bestVod.video.user_id,
+              twitchUserLogin: bestVod.video.user_login,
+              twitchUserName: bestVod.video.user_name,
+              twitchVideoId: bestVod.video.id,
+              shard: resolvedPlayer.shard,
+              platform,
+              encounterAt: encounter.lastSeenAt ? new Date(encounter.lastSeenAt) : undefined
+            });
+
             clips.push({
               id: `vod-${bestVod.video.id}-${encounter.name}`,
               url: vodUrl,
@@ -252,6 +332,27 @@ export async function GET(request: Request) {
           if (found.length) debug.channelsWithClips += 1;
 
           for (const clip of found) {
+            const dedupeKey = buildLinkDedupeKey({
+              eventType: "clip_match",
+              pubgNameNormalized: encounterNormalized,
+              twitchUserId: clip.broadcaster_id,
+              twitchVideoId: clip.id,
+              encounterAt: encounter.lastSeenAt
+            });
+            linkEvents.push({
+              dedupeKey,
+              eventType: "clip_match",
+              pubgNameRaw: encounter.name,
+              pubgNameNormalized: encounterNormalized,
+              twitchUserId: clip.broadcaster_id,
+              twitchUserLogin: login,
+              twitchUserName: clip.broadcaster_name,
+              twitchVideoId: clip.id,
+              shard: resolvedPlayer.shard,
+              platform,
+              encounterAt: encounter.lastSeenAt ? new Date(encounter.lastSeenAt) : undefined
+            });
+
             clips.push({
               ...clip,
               encounterWith: encounter.name,
@@ -265,6 +366,20 @@ export async function GET(request: Request) {
 
         if (clips.length >= limit) break;
       }
+
+      if (linkEvents.length) {
+        debug.linkEventsQueued = linkEvents.length;
+        const createManyResult = await prisma.pubgLinkEvent.createMany({
+          data: linkEvents,
+          skipDuplicates: true
+        });
+        debug.linkEventsPersisted = createManyResult.count;
+      }
+
+      console.info("[pubg-clips] link metrics", {
+        profile: { playerName: resolvedPlayer.playerName, shard: resolvedPlayer.shard, platform },
+        debug
+      });
 
       return NextResponse.json({
         clips,

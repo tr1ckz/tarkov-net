@@ -23,13 +23,50 @@ type InviteRow = {
   usedBy: { id: string; displayName: string; email: string } | null;
 };
 
+type PubgLinkingStats = {
+  totals: {
+    totalEvents: number;
+    uniquePubgAccounts: number;
+    uniqueTwitchAccounts: number;
+    uniquePairs: number;
+    last24hEvents: number;
+    last7dEvents: number;
+    activeIndexerCount: number;
+  };
+  sourceBreakdown: Array<{ eventType: string; count: number }>;
+  topPubg: Array<{
+    pubgName: string;
+    normalized: string;
+    linkEvents: number;
+    uniqueTwitchAccounts: number;
+  }>;
+  topTwitch: Array<{
+    twitchUserId: string;
+    twitchUserLogin: string;
+    twitchUserName: string;
+    linkEvents: number;
+    uniquePubgAccounts: number;
+  }>;
+  recent: Array<{
+    createdAt: string;
+    eventType: string;
+    pubgNameRaw: string;
+    twitchUserLogin: string;
+    twitchUserName: string;
+    shard: string | null;
+    platform: string | null;
+    encounterAt: string | null;
+  }>;
+};
+
 export default function AdminPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
 
   const [users, setUsers] = useState<UserRow[]>([]);
   const [invites, setInvites] = useState<InviteRow[]>([]);
-  const [tab, setTab] = useState<"users" | "invites">("invites");
+  const [pubgStats, setPubgStats] = useState<PubgLinkingStats | null>(null);
+  const [tab, setTab] = useState<"users" | "invites" | "pubg">("invites");
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -49,10 +86,12 @@ export default function AdminPage() {
     if (!isAdmin) return;
     Promise.all([
       fetch("/api/admin/users").then((r) => r.json()),
-      fetch("/api/admin/invite").then((r) => r.json())
-    ]).then(([u, inv]) => {
+      fetch("/api/admin/invite").then((r) => r.json()),
+      fetch("/api/admin/pubg-linking").then((r) => r.json())
+    ]).then(([u, inv, stats]) => {
       setUsers(u);
       setInvites(inv);
+      setPubgStats(stats);
       setLoading(false);
     });
   }, [isAdmin]);
@@ -121,7 +160,7 @@ export default function AdminPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-[#2d2d2d]">
-        {(["invites", "users"] as const).map((t) => (
+        {(["invites", "users", "pubg"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -275,6 +314,99 @@ export default function AdminPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* PUBG Linking Tab */}
+      {tab === "pubg" && (
+        <div className="space-y-5">
+          <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
+            <div className="border border-[#2d2d2d] bg-[#111] p-3">
+              <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Link Events</div>
+              <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.totalEvents ?? 0}</div>
+            </div>
+            <div className="border border-[#2d2d2d] bg-[#111] p-3">
+              <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Unique PUBG</div>
+              <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.uniquePubgAccounts ?? 0}</div>
+            </div>
+            <div className="border border-[#2d2d2d] bg-[#111] p-3">
+              <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Unique Twitch</div>
+              <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.uniqueTwitchAccounts ?? 0}</div>
+            </div>
+            <div className="border border-[#2d2d2d] bg-[#111] p-3">
+              <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Unique Pairs</div>
+              <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.uniquePairs ?? 0}</div>
+            </div>
+            <div className="border border-[#2d2d2d] bg-[#111] p-3">
+              <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Last 24h</div>
+              <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.last24hEvents ?? 0}</div>
+            </div>
+            <div className="border border-[#2d2d2d] bg-[#111] p-3">
+              <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Indexed Streamers</div>
+              <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.activeIndexerCount ?? 0}</div>
+            </div>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="border border-[#2d2d2d] bg-[#111] p-3">
+              <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">Top PUBG Accounts Linked</h2>
+              <div className="mt-3 space-y-2">
+                {(pubgStats?.topPubg ?? []).map((row) => (
+                  <div key={row.normalized} className="flex items-center justify-between border border-[#1f1f1f] bg-[#0d0d0d] px-3 py-2 text-xs">
+                    <div>
+                      <div className="text-[#e2d2af]">{row.pubgName}</div>
+                      <div className="text-[#666]">{row.uniqueTwitchAccounts} unique Twitch accounts</div>
+                    </div>
+                    <div className="text-[#8fa070]">{row.linkEvents} events</div>
+                  </div>
+                ))}
+                {(pubgStats?.topPubg.length ?? 0) === 0 && <p className="text-xs text-[#555]">No linked accounts yet.</p>}
+              </div>
+            </div>
+
+            <div className="border border-[#2d2d2d] bg-[#111] p-3">
+              <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">Top Twitch Accounts Matched</h2>
+              <div className="mt-3 space-y-2">
+                {(pubgStats?.topTwitch ?? []).map((row) => (
+                  <div key={row.twitchUserId} className="flex items-center justify-between border border-[#1f1f1f] bg-[#0d0d0d] px-3 py-2 text-xs">
+                    <div>
+                      <div className="text-[#e2d2af]">{row.twitchUserName}</div>
+                      <div className="text-[#666]">@{row.twitchUserLogin || "unknown"} • {row.uniquePubgAccounts} PUBG accounts</div>
+                    </div>
+                    <div className="text-[#8fa070]">{row.linkEvents} events</div>
+                  </div>
+                ))}
+                {(pubgStats?.topTwitch.length ?? 0) === 0 && <p className="text-xs text-[#555]">No Twitch links yet.</p>}
+              </div>
+            </div>
+          </div>
+
+          <div className="border border-[#2d2d2d] bg-[#111] p-3">
+            <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">Recent Link Events</h2>
+            <div className="mt-3 space-y-2">
+              {(pubgStats?.recent ?? []).map((event, idx) => (
+                <div key={`${event.createdAt}-${event.eventType}-${idx}`} className="border border-[#1f1f1f] bg-[#0d0d0d] px-3 py-2 text-xs text-[#b9af95]">
+                  <span className="text-[#e2d2af]">{event.pubgNameRaw}</span>
+                  <span className="text-[#666]"> linked to </span>
+                  <span className="text-[#8fa070]">{event.twitchUserName || event.twitchUserLogin || "Unknown Twitch"}</span>
+                  <span className="text-[#666]"> via {event.eventType} • {new Date(event.createdAt).toLocaleString()}</span>
+                </div>
+              ))}
+              {(pubgStats?.recent.length ?? 0) === 0 && <p className="text-xs text-[#555]">No link events captured yet.</p>}
+            </div>
+          </div>
+
+          <div className="border border-[#2d2d2d] bg-[#111] p-3">
+            <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">Event Type Breakdown</h2>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {(pubgStats?.sourceBreakdown ?? []).map((row) => (
+                <span key={row.eventType} className="border border-[#3a4430] bg-[#12160e] px-2 py-1 text-[11px] uppercase tracking-widest text-[#8fa070]">
+                  {row.eventType}: {row.count}
+                </span>
+              ))}
+              {(pubgStats?.sourceBreakdown.length ?? 0) === 0 && <span className="text-xs text-[#555]">No event data yet.</span>}
+            </div>
+          </div>
         </div>
       )}
     </div>

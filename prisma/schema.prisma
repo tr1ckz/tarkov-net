@@ -156,3 +156,26 @@ model PubgActiveStreamer {
   @@index([normalizedLogin])
   @@index([normalizedName])
 }
+
+model PubgLinkEvent {
+  id                 String   @id @default(cuid())
+  dedupeKey          String   @unique
+  eventType          String
+  pubgNameRaw        String
+  pubgNameNormalized String
+  twitchUserId       String
+  twitchUserLogin    String
+  twitchUserName     String
+  twitchStreamId     String?
+  twitchVideoId      String?
+  shard              String?
+  platform           String?
+  encounterAt        DateTime?
+  createdAt          DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([eventType])
+  @@index([pubgNameNormalized])
+  @@index([twitchUserId])
+  @@index([pubgNameNormalized, twitchUserId])
+}
