@@ -287,8 +287,8 @@ export async function GET(request: Request) {
       pushVerbose("active streamer index ensured fresh");
 
       const restrictToKnown =
-        (process.env.PUBG_ONLY_KNOWN_STREAMERS ?? "1").trim().toLowerCase() !== "0";
-      const knownNormalized = await getKnownStreamerNormalizedNames();
+        (process.env.PUBG_ONLY_KNOWN_STREAMERS ?? "0").trim().toLowerCase() !== "0";
+      const knownNormalized = restrictToKnown ? await getKnownStreamerNormalizedNames() : new Set<string>();
       pushVerbose(
         `known streamer filter enabled=${restrictToKnown ? "1" : "0"} knownSize=${knownNormalized.size}`
       );
