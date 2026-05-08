@@ -212,6 +212,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
   const [newEntityType, setNewEntityType] = useState<string>("hot-drop");
   const [newEntityNotes, setNewEntityNotes] = useState("Added in admin editor");
   const [categoryLabels, setCategoryLabels] = useState<Record<string, string>>(DEFAULT_CATEGORY_LABELS);
+  const [hiddenCategories, setHiddenCategories] = useState<string[]>([]);
   const [newCategoryKey, setNewCategoryKey] = useState("");
   const [newCategoryLabel, setNewCategoryLabel] = useState("");
   const [categoriesDirty, setCategoriesDirty] = useState(false);
@@ -288,8 +289,10 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
       ...Object.keys(palette),
       ...editableMarkers.map((m) => m.type),
     ]);
-    return Array.from(keys).filter(Boolean).sort((a, b) => a.localeCompare(b));
-  }, [categoryLabels, editableMarkers, palette]);
+    return Array.from(keys)
+      .filter((key) => Boolean(key) && !hiddenCategories.includes(key))
+      .sort((a, b) => a.localeCompare(b));
+  }, [categoryLabels, editableMarkers, hiddenCategories, palette]);
 
   useEffect(() => {
     setActiveTypes((prev) => {
@@ -350,6 +353,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
     setCategoriesDirty(false);
     setPalette({});
     setCategoryLabels({});
+    setHiddenCategories([]);
     setActiveTypes({});
     const storedTheme = localStorage.getItem(`pubg-map-theme-${map.slug}`);
     if (storedTheme === "dark" || storedTheme === "light") {
@@ -371,6 +375,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
           entities?: PubgMapMarker[] | null;
           legendColors?: MarkerPalette | null;
           categoryLabels?: Record<string, string> | null;
+          hiddenCategories?: string[] | null;
           mapTheme?: MapTheme | null;
           mapImageUrl?: string | null;
         };
@@ -391,6 +396,10 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
 
         if (payload.categoryLabels) {
           setCategoryLabels((prev) => ({ ...prev, ...payload.categoryLabels }));
+        }
+
+        if (Array.isArray(payload.hiddenCategories)) {
+          setHiddenCategories(payload.hiddenCategories.filter(Boolean));
         }
 
         if (payload.mapTheme === "dark" || payload.mapTheme === "light") {
@@ -430,6 +439,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
     entities?: PubgMapMarker[] | null;
     legendColors?: MarkerPalette | null;
     categoryLabels?: Record<string, string> | null;
+    hiddenCategories?: string[] | null;
     mapTheme?: MapTheme | null;
     mapImageUrl?: string | null;
   }) {
@@ -447,8 +457,10 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
 
       setSaveStatus("saved");
       window.setTimeout(() => setSaveStatus("idle"), 1400);
+      return true;
     } catch {
       setSaveStatus("error");
+      return false;
     }
   }
 
@@ -479,8 +491,9 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
   }
 
   function saveCategoryConfiguration() {
-    setCategoriesDirty(false);
-    void saveServerConfig({ categoryLabels, legendColors: palette });
+    void saveServerConfig({ categoryLabels, legendColors: palette, hiddenCategories }).then((ok) => {
+      if (ok) setCategoriesDirty(false);
+    });
   }
 
   function resetPaletteToDefaults() {
@@ -1066,6 +1079,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
                   setNewCategoryLabel("");
                   setCategoryLabels(nextLabels);
                   setPalette(nextPalette);
+                  setHiddenCategories((prev) => prev.filter((entry) => entry !== key));
                   setCategoriesDirty(true);
                 }}
                 className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
@@ -1086,16 +1100,13 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
                   <button
                     type="button"
                     onClick={() => {
-                      const replacement = "hot-drop";
-                      const moved = editableMarkers.map((m) => (m.type === type ? { ...m, type: replacement } : m));
-                      persistEntities(moved);
-
                       const nextLabels = { ...categoryLabels };
                       delete nextLabels[type];
                       const nextPalette = { ...palette };
                       delete nextPalette[type];
                       setCategoryLabels(nextLabels);
                       setPalette(nextPalette);
+                      setHiddenCategories((prev) => (prev.includes(type) ? prev : [...prev, type]));
                       setCategoriesDirty(true);
 
                       setActiveTypes((prev) => {
@@ -1103,7 +1114,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
                         delete next[type];
                         return next;
                       });
-                      if (newEntityType === type) setNewEntityType(replacement);
+                      if (newEntityType === type) setNewEntityType("hot-drop");
                     }}
                     className="border border-[#5e2a2a] bg-[#1a1010] px-2 py-1.5 text-[11px] uppercase tracking-[0.12em] text-[#e3b8b8] hover:border-[#d36a6a]"
                   >Remove</button>
