@@ -743,6 +743,48 @@ export default function AdminPage() {
           )}
 
           <div className="border border-[#2d2d2d] bg-[#111] p-3">
+            <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">Stats</h2>
+            <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
+              <div className="border border-[#2d2d2d] bg-[#111] p-3">
+                <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Linker Runs</div>
+                <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.totalRuns ?? 0}</div>
+              </div>
+              <div className="border border-[#2d2d2d] bg-[#111] p-3">
+                <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Link Events</div>
+                <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.totalEvents ?? 0}</div>
+              </div>
+              <div className="border border-[#2d2d2d] bg-[#111] p-3">
+                <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Unique PUBG</div>
+                <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.uniquePubgAccounts ?? 0}</div>
+              </div>
+              <div className="border border-[#2d2d2d] bg-[#111] p-3">
+                <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Unique Twitch</div>
+                <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.uniqueTwitchAccounts ?? 0}</div>
+              </div>
+              <div className="border border-[#2d2d2d] bg-[#111] p-3">
+                <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Unique Pairs</div>
+                <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.uniquePairs ?? 0}</div>
+              </div>
+              <div className="border border-[#2d2d2d] bg-[#111] p-3">
+                <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Last 24h</div>
+                <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.last24hEvents ?? 0}</div>
+              </div>
+              <div className="border border-[#2d2d2d] bg-[#111] p-3">
+                <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Indexed Streamers</div>
+                <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.activeIndexerCount ?? 0}</div>
+              </div>
+              <div className="border border-[#2d2d2d] bg-[#111] p-3">
+                <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Profile DB Total</div>
+                <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.streamerProfileCount ?? 0}</div>
+              </div>
+              <div className="border border-[#2d2d2d] bg-[#111] p-3">
+                <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Profile DB Live</div>
+                <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.streamerProfileLiveCount ?? 0}</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="border border-[#2d2d2d] bg-[#111] p-3">
             <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">Active Crawlers / Jobs</h2>
             {indexStatusError && <p className="mt-2 text-xs text-[#e07070]">{indexStatusError}</p>}
             <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -893,77 +935,6 @@ export default function AdminPage() {
                 </div>
               ))}
               {!liveTailRuns.length && !liveTailLoading && <p className="text-xs text-[#555]">No runs for current live tail filters.</p>}
-            </div>
-          </div>
-
-          <div className="border border-[#2d2d2d] bg-[#111] p-3">
-            <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">Stats</h2>
-          <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
-            <div className="border border-[#2d2d2d] bg-[#111] p-3">
-              <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Linker Runs</div>
-              <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.totalRuns ?? 0}</div>
-            </div>
-            <div className="border border-[#2d2d2d] bg-[#111] p-3">
-              <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Link Events</div>
-              <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.totalEvents ?? 0}</div>
-            </div>
-            <div className="border border-[#2d2d2d] bg-[#111] p-3">
-              <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Unique PUBG</div>
-              <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.uniquePubgAccounts ?? 0}</div>
-            </div>
-            <div className="border border-[#2d2d2d] bg-[#111] p-3">
-              <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Unique Twitch</div>
-              <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.uniqueTwitchAccounts ?? 0}</div>
-            </div>
-            <div className="border border-[#2d2d2d] bg-[#111] p-3">
-              <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Unique Pairs</div>
-              <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.uniquePairs ?? 0}</div>
-            </div>
-            <div className="border border-[#2d2d2d] bg-[#111] p-3">
-              <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Last 24h</div>
-              <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.last24hEvents ?? 0}</div>
-            </div>
-            <div className="border border-[#2d2d2d] bg-[#111] p-3">
-              <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Indexed Streamers</div>
-              <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.activeIndexerCount ?? 0}</div>
-            </div>
-            <div className="border border-[#2d2d2d] bg-[#111] p-3">
-              <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Profile DB Total</div>
-              <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.streamerProfileCount ?? 0}</div>
-            </div>
-            <div className="border border-[#2d2d2d] bg-[#111] p-3">
-              <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Profile DB Live</div>
-              <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.streamerProfileLiveCount ?? 0}</div>
-            </div>
-          </div>
-          </div>
-
-          <div className="border border-[#2d2d2d] bg-[#111] p-3">
-            <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">Recent Linker Runs (Diagnostics)</h2>
-            <div className="mt-3 space-y-2">
-              {(pubgStats?.recentRuns ?? []).map((run, idx) => (
-                <div key={`${run.createdAt}-${run.source}-${idx}`} className="border border-[#1f1f1f] bg-[#0d0d0d] px-3 py-2 text-xs text-[#b9af95]">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[#e2d2af]">{run.source}</span>
-                    <span className={`px-1.5 py-0.5 uppercase tracking-widest ${run.status === "ok" ? "text-[#8fa070]" : run.status === "empty" ? "text-[#d8b46b]" : "text-[#e07070]"}`}>{run.status}</span>
-                    <span className="text-[#666]">{new Date(run.createdAt).toLocaleString()}</span>
-                    {run.playerName && <span className="text-[#c8bda0]">player: {run.playerName}</span>}
-                    <span className="text-[#666]">clips: {run.clipsReturned}</span>
-                    <span className="text-[#666]">encounters: {run.encountersFound}</span>
-                    <span className="text-[#666]">index matches: {run.activeIndexMatches}</span>
-                    <span className="text-[#666]">persisted: {run.linkEventsPersisted}</span>
-                  </div>
-                  {run.errorMessage && <div className="mt-1 text-[#e07070]">{run.errorMessage}</div>}
-                  {run.verboseMessages?.length > 0 && (
-                    <div className="mt-2 border border-[#1a1a1a] bg-[#090909] px-2 py-1 text-[11px] text-[#8e8e8e]">
-                      {run.verboseMessages.slice(-4).map((line, lineIdx) => (
-                        <div key={`${run.createdAt}-${idx}-line-${lineIdx}`}>{line}</div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-              {(pubgStats?.recentRuns.length ?? 0) === 0 && <p className="text-xs text-[#555]">No linker runs captured yet. Trigger a PUBG clip lookup to generate logs.</p>}
             </div>
           </div>
 
