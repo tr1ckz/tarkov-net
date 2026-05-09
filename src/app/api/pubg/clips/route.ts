@@ -10,22 +10,11 @@ import {
 } from "@/lib/twitch";
 import {
   clearPubgCallContext,
-  getCandidateShards,
-  getPlayerWithMatches,
-  getRecentEncounterNames,
-  lookupPlayerAcrossShards,
   resolveCachedPubgPlayer,
   setPubgCallContext,
-  type PubgEncounterEvent,
   type PubgPlatform
 } from "@/lib/pubg-api";
-import {
-  computeVodOffsetSeconds,
-  doesEncounterOverlapLiveStream,
-  ensurePubgStreamerIndexFresh,
-  findMatchedActiveStreamersWithReason,
-  normalizePubgNameForStreamerMatch
-} from "@/lib/pubg-streamer-index";
+import { computeVodOffsetSeconds } from "@/lib/pubg-streamer-index";
 import { prisma } from "@/lib/prisma";
 
 const db = prisma as any;
@@ -237,72 +226,38 @@ async function getCachedEncounterClips(options: {
   return out;
 }
 
-function describeEncounterAction(encounter: PubgEncounterEvent) {
-  switch (encounter.actionType) {
-    case "knocking_out_streamer":
-      return `YOU knocked down ${encounter.name}`;
-    case "getting_knocked_out_by_streamer": {
-      const weaponPart = encounter.weapon ? ` with ${encounter.weapon}` : "";
-      const distancePart = typeof encounter.distanceMeters === "number" ? ` from ${encounter.distanceMeters}m` : "";
-      return `YOU were knocked by ${encounter.name}${weaponPart}${distancePart}`;
-    }
-    case "killing_streamer":
-      return `YOU killed ${encounter.name}`;
-    case "getting_killed_by_streamer": {
-      const weaponPart = encounter.weapon ? ` with ${encounter.weapon}` : "";
-      const distancePart = typeof encounter.distanceMeters === "number" ? ` from ${encounter.distanceMeters}m` : "";
-      return `YOU were killed by ${encounter.name}${weaponPart}${distancePart}`;
-    }
-    default:
-      return `YOU encountered ${encounter.name}`;
-  }
-}
-
-async function getKnownStreamerNormalizedNames() {
-  const dayWindow = Number(process.env.PUBG_KNOWN_STREAMER_WINDOW_DAYS ?? "30");
-  const safeDays = Number.isFinite(dayWindow) ? Math.max(1, Math.min(dayWindow, 365)) : 30;
-  const cutoff = new Date(Date.now() - safeDays * 24 * 60 * 60 * 1000);
-
-  const [activeRows, linkedRows] = await Promise.all([
-    prisma.pubgActiveStreamer.findMany({
-      select: { normalizedLogin: true, normalizedName: true }
-    }),
-    prisma.pubgLinkEvent.findMany({
-      where: { createdAt: { gte: cutoff } },
-      select: { pubgNameNormalized: true },
-      take: 3000,
-      orderBy: { createdAt: "desc" }
-    })
-  ]);
-
-  const known = new Set<string>();
-  for (const row of activeRows) {
-    if (row.normalizedLogin) known.add(row.normalizedLogin);
-    if (row.normalizedName) known.add(row.normalizedName);
-  }
-  for (const row of linkedRows) {
-    if (row.pubgNameNormalized) known.add(row.pubgNameNormalized);
-  }
-
-  return known;
-}
-
-function buildLinkDedupeKey(params: {
-  eventType: string;
-  pubgNameNormalized: string;
-  twitchUserId: string;
-  twitchStreamId?: string;
-  twitchVideoId?: string;
-  encounterAt?: string | null;
-}) {
-  return [
-    params.eventType,
-    params.pubgNameNormalized,
-    params.twitchUserId,
-    params.twitchStreamId ?? "na",
-    params.twitchVideoId ?? "na",
-    params.encounterAt ?? "na"
-  ].join(":");
+function mapVodRowsToClipShape(
+  vodRows: Array<{
+    videoId: string;
+    twitchUserId: string;
+    twitchUserLogin: string;
+    twitchUserName: string;
+    title: string;
+    url: string;
+    thumbnailUrl: string | null;
+    createdAtTwitch: Date | null;
+    durationSeconds: number;
+  }>
+) {
+  return vodRows.map((row) => ({
+    id: `db-vod-${row.videoId}`,
+    url: row.url,
+    embed_url: row.url,
+    broadcaster_id: row.twitchUserId,
+    broadcaster_name: row.twitchUserName,
+    creator_id: row.twitchUserId,
+    creator_name: row.twitchUserName,
+    video_id: row.videoId,
+    game_id: "27971",
+    language: "",
+    title: `[DB VOD] ${row.title}`,
+    view_count: 0,
+    created_at: row.createdAtTwitch?.toISOString() ?? new Date().toISOString(),
+    thumbnail_url: (row.thumbnailUrl ?? "")
+      .replace("%{width}", "640")
+      .replace("%{height}", "360"),
+    duration: row.durationSeconds,
+  }));
 }
 
 type PubgLinkRunLogInput = {
@@ -353,63 +308,6 @@ async function writePubgLinkRunLog(input: PubgLinkRunLogInput) {
   } catch (error) {
     console.error("[pubg-clips] failed to write run log", error);
   }
-}
-
-function isHighConfidenceIdentityMatch(match: { score: number; reasons: string[] }) {
-  if (match.score < 100) return false;
-  if (match.reasons.includes("exact_login") || match.reasons.includes("exact_display")) return true;
-  // Accept fuzzy matches at >=90% similarity as high confidence
-  return match.reasons.some((r) => /^fuzzy_9\d|fuzzy_100/.test(r));
-}
-
-async function upsertStreamerIdentityLink(input: {
-  twitchUserId: string;
-  twitchUserLogin: string;
-  twitchUserName: string;
-  platform: string;
-  shard: string;
-  pubgPlayerId: string;
-  pubgPlayerName: string;
-  pubgNameNormalized: string;
-  confidenceScore: number;
-  confidenceReasons: string[];
-  source?: string;
-}) {
-  await db.pubgStreamerIdentityLink.upsert({
-    where: {
-      twitchUserId_platform: {
-        twitchUserId: input.twitchUserId,
-        platform: input.platform
-      }
-    },
-    create: {
-      twitchUserId: input.twitchUserId,
-      twitchUserLogin: input.twitchUserLogin,
-      twitchUserName: input.twitchUserName,
-      platform: input.platform,
-      shard: input.shard,
-      pubgPlayerId: input.pubgPlayerId,
-      pubgPlayerName: input.pubgPlayerName,
-      pubgNameNormalized: input.pubgNameNormalized,
-      confidenceScore: input.confidenceScore,
-      confidenceReasonsJson: JSON.stringify(input.confidenceReasons),
-      source: input.source ?? "encounter_match",
-      firstLinkedAt: new Date(),
-      lastLinkedAt: new Date()
-    },
-    update: {
-      twitchUserLogin: input.twitchUserLogin,
-      twitchUserName: input.twitchUserName,
-      shard: input.shard,
-      pubgPlayerId: input.pubgPlayerId,
-      pubgPlayerName: input.pubgPlayerName,
-      pubgNameNormalized: input.pubgNameNormalized,
-      confidenceScore: input.confidenceScore,
-      confidenceReasonsJson: JSON.stringify(input.confidenceReasons),
-      source: input.source ?? "encounter_match",
-      lastLinkedAt: new Date()
-    }
-  });
 }
 
 function pickClosestVodMoment(
@@ -494,18 +392,7 @@ export async function GET(request: Request) {
         );
       }
 
-      const resolvedPlayer = cachedPlayer
-        ? {
-            playerName: cachedPlayer.playerName,
-            shard: cachedPlayer.shard,
-            matchCount: cachedPlayer.matchCount,
-          }
-        : await lookupPlayerAcrossShards({
-            playerName,
-            platform,
-            preferredShard: requestedShard || undefined
-          });
-      if (!resolvedPlayer) {
+      if (!cachedPlayer) {
         pushVerbose("encounters lookup result=not_found");
         await writePubgLinkRunLog({
           source: "encounters",
@@ -515,21 +402,26 @@ export async function GET(request: Request) {
           requestedShard,
           encountersFound: 0,
           clipsReturned: 0,
-          errorMessage: "Player not found across candidate shards",
-          metadata: { searchedShards: getCandidateShards(platform), verboseMessages }
+          errorMessage: "Player not found in local DB cache",
+          metadata: { dbOnly: true, verboseMessages }
         });
 
         return NextResponse.json(
           {
             clips: [],
             source: "encounters",
-            error: "Player not found. Use Lookup Player to resolve platform/shard.",
-            lookupNeeded: true,
-            searchedShards: getCandidateShards(platform)
+            error: "Player not found in local DB cache.",
+            lookupNeeded: true
           },
           { status: 404 }
         );
       }
+
+      const resolvedPlayer = {
+        playerName: cachedPlayer.playerName,
+        shard: cachedPlayer.shard,
+        matchCount: cachedPlayer.matchCount,
+      };
 
       pushVerbose(`encounters lookup resolved player=${resolvedPlayer.playerName} shard=${resolvedPlayer.shard}`);
 
@@ -581,498 +473,101 @@ export async function GET(request: Request) {
         });
       }
 
-      const encounterMaxMatches = parseBoundedInt(
-        process.env.PUBG_CLIPS_ENCOUNTER_MAX_MATCHES,
-        3,
-        1,
-        12
-      );
-      const encounterMaxOpponents = parseBoundedInt(
-        process.env.PUBG_CLIPS_ENCOUNTER_MAX_OPPONENTS,
-        12,
-        1,
-        50
-      );
-
-      const encounters = await getRecentEncounterNames({
-        shard: resolvedPlayer.shard,
-        playerName: resolvedPlayer.playerName,
-        maxMatches: encounterMaxMatches,
-        maxOpponents: encounterMaxOpponents
-      });
-      pushVerbose(
-        `encounters fetched count=${encounters.length} maxMatches=${encounterMaxMatches} maxOpponents=${encounterMaxOpponents}`
-      );
-      if (encounters.length === 0) {
-        pushVerbose("no opponents extracted from recent matches; downstream twitch mapping skipped");
-      }
-
-      const debug = {
-        encountersFound: encounters.length,
-        encountersAfterKnownFilter: 0,
-        directLoginMatches: 0,
-        searchChannelMatches: 0,
-        channelsWithClips: 0,
-        vodMoments: 0,
-        activeIndexMatches: 0,
-        activeOverlapMatches: 0,
-        linkEventsQueued: 0,
-        linkEventsPersisted: 0,
-        resolvedShard: resolvedPlayer.shard
-      };
-
-      const linkEvents: Array<{
-        dedupeKey: string;
-        eventType: string;
-        pubgNameRaw: string;
-        pubgNameNormalized: string;
-        twitchUserId: string;
-        twitchUserLogin: string;
-        twitchUserName: string;
-        twitchStreamId?: string;
-        twitchVideoId?: string;
-        shard: string;
-        platform: string;
-        encounterAt?: Date;
-      }> = [];
-      const playerIdentityCache = new Map<string, Awaited<ReturnType<typeof getPlayerWithMatches>> | null>();
-      let identityLinksUpserted = 0;
-
-      await ensurePubgStreamerIndexFresh();
-      pushVerbose("active streamer index ensured fresh");
-
-      const restrictToKnown =
-        (process.env.PUBG_ONLY_KNOWN_STREAMERS ?? "0").trim().toLowerCase() !== "0";
-      const knownNormalized = restrictToKnown ? await getKnownStreamerNormalizedNames() : new Set<string>();
-      pushVerbose(
-        `known streamer filter enabled=${restrictToKnown ? "1" : "0"} knownSize=${knownNormalized.size}`
-      );
-
-      const filteredEncounters = restrictToKnown
-        ? encounters.filter((encounter) => {
-            const normalized = normalizePubgNameForStreamerMatch(encounter.name);
-            if (!normalized) return false;
-            if (knownNormalized.has(normalized)) return true;
-            for (const knownName of knownNormalized) {
-              if (normalized.includes(knownName) || knownName.includes(normalized)) {
-                return true;
-              }
-            }
-            return false;
-          })
-        : encounters;
-      debug.encountersAfterKnownFilter = filteredEncounters.length;
-      pushVerbose(`encounters after known streamer filter=${filteredEncounters.length}`);
-
-      if (restrictToKnown && !filteredEncounters.length) {
-        pushVerbose("known streamer filter removed all encounters; skipping twitch/VOD expansion");
-      }
-
-      const clips = [] as Array<{
-        id: string;
-        url: string;
-        embed_url: string;
-        broadcaster_id: string;
-        broadcaster_name: string;
-        creator_id: string;
-        creator_name: string;
-        video_id: string;
-        game_id: string;
-        language: string;
-        title: string;
-        view_count: number;
-        created_at: string;
-        thumbnail_url: string;
-        duration: number;
-        encounterWith: string;
-        encounterActionText: string;
-        encounterActionType: string;
-        encounterWeapon?: string | null;
-        encounterDistanceMeters?: number | null;
-        mapTag?: string | null;
-        gameModeTag?: string | null;
-        teamSizeModeTag?: string | null;
-        povTag?: string | null;
-        sourceType: "vod" | "clip";
-      }>;
-
-      for (const encounter of filteredEncounters) {
-        pushVerbose(`encounter scan name=${encounter.name} lastSeenAt=${encounter.lastSeenAt ?? "-"}`);
-        const encounterActionText = describeEncounterAction(encounter);
-        const candidates = new Set<string>(getLoginCandidates(encounter.name));
-        const encounterNormalized = normalizeName(encounter.name);
-
-        const matchedLiveStreamers = await findMatchedActiveStreamersWithReason(encounter.name);
-        if (matchedLiveStreamers.length) {
-          pushVerbose(`active index matches for ${encounter.name}: ${matchedLiveStreamers.length}`);
-          debug.activeIndexMatches += matchedLiveStreamers.length;
-
-          const topMatch = matchedLiveStreamers[0];
-          const secondMatch = matchedLiveStreamers[1];
-          const distinctTop = !secondMatch || topMatch.score - secondMatch.score >= 20;
-          if (isHighConfidenceIdentityMatch(topMatch) && distinctTop) {
-            if (!playerIdentityCache.has(encounter.name)) {
-              try {
-                const resolvedEncounterPlayer = await getPlayerWithMatches(resolvedPlayer.shard, encounter.name);
-                playerIdentityCache.set(encounter.name, resolvedEncounterPlayer);
-              } catch (error) {
-                console.warn(`[clips] Failed to resolve encounter player ${encounter.name} on shard ${resolvedPlayer.shard}:`, error instanceof Error ? error.message : String(error));
-                playerIdentityCache.set(encounter.name, null);
-              }
-            }
-
-            const resolvedEncounterPlayer = playerIdentityCache.get(encounter.name);
-            if (resolvedEncounterPlayer) {
-              try {
-                await upsertStreamerIdentityLink({
-                  twitchUserId: topMatch.streamer.twitchUserId,
-                  twitchUserLogin: topMatch.streamer.userLogin,
-                  twitchUserName: topMatch.streamer.userName,
-                  platform,
-                  shard: resolvedPlayer.shard,
-                  pubgPlayerId: resolvedEncounterPlayer.playerId,
-                  pubgPlayerName: resolvedEncounterPlayer.playerName,
-                  pubgNameNormalized: encounterNormalized,
-                  confidenceScore: topMatch.score,
-                  confidenceReasons: topMatch.reasons
-                });
-                identityLinksUpserted += 1;
-                pushVerbose(
-                  `identity link upserted twitch=${topMatch.streamer.userLogin} pubg=${resolvedEncounterPlayer.playerName} playerId=${resolvedEncounterPlayer.playerId} score=${topMatch.score}`
-                );
-              } catch (error) {
-                pushVerbose(
-                  `identity link upsert failed twitch=${topMatch.streamer.userLogin} pubg=${encounter.name} error=${error instanceof Error ? error.message : String(error)}`
-                );
-              }
-            } else {
-              pushVerbose(`identity link skipped pubg lookup not found name=${encounter.name} shard=${resolvedPlayer.shard}`);
-            }
-          }
-
-          for (const match of matchedLiveStreamers) {
-            const streamerMatch = match.streamer;
-            candidates.add(streamerMatch.userLogin.toLowerCase());
-
-            if (encounter.lastSeenAt) {
-              const overlaps = doesEncounterOverlapLiveStream(
-                encounter.lastSeenAt,
-                streamerMatch.streamStartedAt.toISOString()
-              );
-              if (overlaps) {
-                pushVerbose(
-                  `active overlap confirmed encounter=${encounter.name} twitch=${streamerMatch.userLogin} score=${match.score} reasons=${match.reasons.join(",")}`
-                );
-                debug.activeOverlapMatches += 1;
-                const offset = computeVodOffsetSeconds(encounter.lastSeenAt, streamerMatch.streamStartedAt.toISOString());
-                const liveUrl = `https://www.twitch.tv/${streamerMatch.userLogin}?t=${offset}s`;
-
-                const dedupeKey = buildLinkDedupeKey({
-                  eventType: "active_live",
-                  pubgNameNormalized: encounterNormalized,
-                  twitchUserId: streamerMatch.twitchUserId,
-                  twitchStreamId: streamerMatch.streamId,
-                  encounterAt: encounter.lastSeenAt
-                });
-                linkEvents.push({
-                  dedupeKey,
-                  eventType: "active_live",
-                  pubgNameRaw: encounter.name,
-                  pubgNameNormalized: encounterNormalized,
-                  twitchUserId: streamerMatch.twitchUserId,
-                  twitchUserLogin: streamerMatch.userLogin,
-                  twitchUserName: streamerMatch.userName,
-                  twitchStreamId: streamerMatch.streamId,
-                  shard: resolvedPlayer.shard,
-                  platform,
-                  encounterAt: encounter.lastSeenAt ? new Date(encounter.lastSeenAt) : undefined
-                });
-
-                clips.push({
-                  id: `live-${streamerMatch.streamId}-${encounter.name}`,
-                  url: liveUrl,
-                  embed_url: liveUrl,
-                  broadcaster_id: streamerMatch.twitchUserId,
-                  broadcaster_name: streamerMatch.userName,
-                  creator_id: streamerMatch.twitchUserId,
-                  creator_name: streamerMatch.userName,
-                  video_id: "",
-                  game_id: "27971",
-                  language: "",
-                  title: `[Live POV] ${streamerMatch.title}`,
-                  view_count: 0,
-                  created_at: streamerMatch.streamStartedAt.toISOString(),
-                  thumbnail_url: `https://static-cdn.jtvnw.net/previews-ttv/live_user_${streamerMatch.userLogin}-640x360.jpg`,
-                  duration: 0,
-                  encounterWith: encounter.name,
-                  encounterActionText,
-                  encounterActionType: encounter.actionType,
-                  encounterWeapon: encounter.weapon,
-                  encounterDistanceMeters: encounter.distanceMeters,
-                  mapTag: encounter.mapTag,
-                  gameModeTag: encounter.gameModeTag,
-                  teamSizeModeTag: encounter.teamSizeModeTag,
-                  povTag: encounter.povTag,
-                  sourceType: "vod"
-                });
-                if (clips.length >= limit) break;
-              } else {
-                pushVerbose(
-                  `active overlap rejected encounter=${encounter.name} twitch=${streamerMatch.userLogin} score=${match.score} reasons=${match.reasons.join(",")} reason=time_window`
-                );
-              }
-            } else {
-              pushVerbose(
-                `active overlap skipped encounter=${encounter.name} twitch=${streamerMatch.userLogin} score=${match.score} reasons=${match.reasons.join(",")} reason=missing_encounter_time`
-              );
-            }
-          }
-        }
-
-        if (clips.length >= limit) break;
-
-        const searched = await searchChannelsByName(encounter.name, 8);
-        pushVerbose(`channel search results for ${encounter.name}: ${searched.length}`);
-        for (const channel of searched) {
-          const loginNormalized = normalizeName(channel.broadcaster_login);
-          const displayNormalized = normalizeName(channel.display_name);
-          if (
-            loginNormalized.includes(encounterNormalized) ||
-            encounterNormalized.includes(loginNormalized) ||
-            displayNormalized.includes(encounterNormalized) ||
-            encounterNormalized.includes(displayNormalized)
-          ) {
-            candidates.add(channel.broadcaster_login.toLowerCase());
-            debug.searchChannelMatches += 1;
-          }
-        }
-
-        for (const login of candidates) {
-          const broadcasterId = await findBroadcasterIdByLogin(login);
-          if (!broadcasterId) continue;
-          pushVerbose(`candidate resolved login=${login} broadcasterId=${broadcasterId}`);
-          debug.directLoginMatches += 1;
-
-          const videos = await getVideosByUserId(broadcasterId, 8);
-          const bestVod = pickClosestVodMoment(videos, encounter.lastSeenAt ?? null);
-          if (bestVod) {
-            pushVerbose(`vod moment matched encounter=${encounter.name} twitch=${bestVod.video.user_login} video=${bestVod.video.id}`);
-            debug.vodMoments += 1;
-            const vodUrl = `${bestVod.video.url}?t=${bestVod.offsetSeconds}s`;
-
-            const dedupeKey = buildLinkDedupeKey({
-              eventType: "vod_moment",
-              pubgNameNormalized: encounterNormalized,
-              twitchUserId: bestVod.video.user_id,
-              twitchVideoId: bestVod.video.id,
-              encounterAt: encounter.lastSeenAt
-            });
-            linkEvents.push({
-              dedupeKey,
-              eventType: "vod_moment",
-              pubgNameRaw: encounter.name,
-              pubgNameNormalized: encounterNormalized,
-              twitchUserId: bestVod.video.user_id,
-              twitchUserLogin: bestVod.video.user_login,
-              twitchUserName: bestVod.video.user_name,
-              twitchVideoId: bestVod.video.id,
-              shard: resolvedPlayer.shard,
-              platform,
-              encounterAt: encounter.lastSeenAt ? new Date(encounter.lastSeenAt) : undefined
-            });
-
-            clips.push({
-              id: `vod-${bestVod.video.id}-${encounter.name}`,
-              url: vodUrl,
-              embed_url: vodUrl,
-              broadcaster_id: bestVod.video.user_id,
-              broadcaster_name: bestVod.video.user_name,
-              creator_id: bestVod.video.user_id,
-              creator_name: bestVod.video.user_name,
-              video_id: bestVod.video.id,
-              game_id: "",
-              language: "",
-              title: `[VOD Moment] ${bestVod.video.title}`,
-              view_count: 0,
-              created_at: bestVod.video.created_at,
-              thumbnail_url: bestVod.video.thumbnail_url
-                .replace("%{width}", "640")
-                .replace("%{height}", "360"),
-              duration: 0,
-              encounterWith: encounter.name,
-              encounterActionText,
-              encounterActionType: encounter.actionType,
-              encounterWeapon: encounter.weapon,
-              encounterDistanceMeters: encounter.distanceMeters,
-              mapTag: encounter.mapTag,
-              gameModeTag: encounter.gameModeTag,
-              teamSizeModeTag: encounter.teamSizeModeTag,
-              povTag: encounter.povTag,
-              sourceType: "vod"
-            });
-            if (clips.length >= limit) break;
-            continue;
-          }
-
-          const found = await getClipsByBroadcasterId(broadcasterId, 2);
-          pushVerbose(`clip fetch login=${login} clips=${found.length}`);
-          if (found.length) debug.channelsWithClips += 1;
-
-          for (const clip of found) {
-            const dedupeKey = buildLinkDedupeKey({
-              eventType: "clip_match",
-              pubgNameNormalized: encounterNormalized,
-              twitchUserId: clip.broadcaster_id,
-              twitchVideoId: clip.id,
-              encounterAt: encounter.lastSeenAt
-            });
-            linkEvents.push({
-              dedupeKey,
-              eventType: "clip_match",
-              pubgNameRaw: encounter.name,
-              pubgNameNormalized: encounterNormalized,
-              twitchUserId: clip.broadcaster_id,
-              twitchUserLogin: login,
-              twitchUserName: clip.broadcaster_name,
-              twitchVideoId: clip.id,
-              shard: resolvedPlayer.shard,
-              platform,
-              encounterAt: encounter.lastSeenAt ? new Date(encounter.lastSeenAt) : undefined
-            });
-
-            clips.push({
-              ...clip,
-              encounterWith: encounter.name,
-              encounterActionText,
-              encounterActionType: encounter.actionType,
-              encounterWeapon: encounter.weapon,
-              encounterDistanceMeters: encounter.distanceMeters,
-              mapTag: encounter.mapTag,
-              gameModeTag: encounter.gameModeTag,
-              teamSizeModeTag: encounter.teamSizeModeTag,
-              povTag: encounter.povTag,
-              sourceType: "clip"
-            });
-            if (clips.length >= limit) break;
-          }
-
-          if (clips.length >= limit) break;
-        }
-
-        if (clips.length >= limit) break;
-      }
-
-      if (linkEvents.length) {
-        debug.linkEventsQueued = linkEvents.length;
-        pushVerbose(`link events queued=${linkEvents.length}`);
-        const dedupeKeys = Array.from(new Set(linkEvents.map((event) => event.dedupeKey)));
-        const existing = await prisma.pubgLinkEvent.findMany({
-          where: { dedupeKey: { in: dedupeKeys } },
-          select: { dedupeKey: true }
-        });
-        const existingKeys = new Set(existing.map((row) => row.dedupeKey));
-        const dataToInsert = linkEvents.filter((event) => !existingKeys.has(event.dedupeKey));
-        pushVerbose(`link events dedupe existing=${existingKeys.size} toInsert=${dataToInsert.length}`);
-
-        const createManyResult = await prisma.pubgLinkEvent.createMany({
-          data: dataToInsert
-        });
-        debug.linkEventsPersisted = createManyResult.count;
-        pushVerbose(`link events persisted=${createManyResult.count}`);
-      }
-
-      console.info("[pubg-clips] link metrics", {
-        profile: { playerName: resolvedPlayer.playerName, shard: resolvedPlayer.shard, platform },
-        debug
-      });
-
+      pushVerbose("cache miss in DB-only mode; returning empty without external lookups");
       await writePubgLinkRunLog({
         source: "encounters",
-        status: clips.length ? "ok" : "empty",
+        status: "empty",
         playerName: resolvedPlayer.playerName,
         platform,
         requestedShard,
         resolvedShard: resolvedPlayer.shard,
-        encountersFound: debug.encountersFound,
-        clipsReturned: clips.length,
-        activeIndexMatches: debug.activeIndexMatches,
-        activeOverlapMatches: debug.activeOverlapMatches,
-        directLoginMatches: debug.directLoginMatches,
-        searchChannelMatches: debug.searchChannelMatches,
-        vodMoments: debug.vodMoments,
-        channelsWithClips: debug.channelsWithClips,
-        linkEventsQueued: debug.linkEventsQueued,
-        linkEventsPersisted: debug.linkEventsPersisted,
+        encountersFound: 0,
+        clipsReturned: 0,
         metadata: {
-          resolvedShard: debug.resolvedShard,
-          encountersScanned: filteredEncounters.length,
-          identityLinksUpserted,
+          dbOnly: true,
+          cacheHit: false,
           probeMode,
-          restrictToKnown,
-          knownNormalizedSize: knownNormalized.size,
           verboseMessages
         }
       });
 
       return NextResponse.json({
-        clips,
+        clips: [],
         source: "encounters",
         profile: { playerName: resolvedPlayer.playerName, shard: resolvedPlayer.shard, platform },
-        encountersScanned: filteredEncounters.length,
-        debug
+        encountersScanned: 0,
+        debug: {
+          encountersFound: 0,
+          encountersAfterKnownFilter: 0,
+          directLoginMatches: 0,
+          searchChannelMatches: 0,
+          channelsWithClips: 0,
+          vodMoments: 0,
+          activeIndexMatches: 0,
+          activeOverlapMatches: 0,
+          linkEventsQueued: 0,
+          linkEventsPersisted: 0,
+          resolvedShard: resolvedPlayer.shard,
+          dbOnly: true,
+          cacheHit: false
+        }
       });
     }
 
     if (streamer) {
       pushVerbose(`streamer mode start streamer=${streamer}`);
-      const broadcasterId = await findBroadcasterIdByLogin(streamer);
-      if (!broadcasterId) {
-        pushVerbose("streamer lookup result=not_found");
-        await writePubgLinkRunLog({
-          source: "streamer",
-          status: "empty",
-          playerName: streamer,
-          clipsReturned: 0,
-          errorMessage: "Streamer login not found",
-          metadata: { verboseMessages }
-        });
-        return NextResponse.json({ clips: [], source: "streamer", streamer });
-      }
+      const vodRows = await prisma.pubgStreamerVod.findMany({
+        where: { twitchUserLogin: streamer },
+        orderBy: [{ createdAtTwitch: "desc" }, { indexedAt: "desc" }],
+        take: Math.max(1, Math.min(limit, 60)),
+        select: {
+          videoId: true,
+          twitchUserId: true,
+          twitchUserLogin: true,
+          twitchUserName: true,
+          title: true,
+          url: true,
+          thumbnailUrl: true,
+          createdAtTwitch: true,
+          durationSeconds: true
+        }
+      });
 
-      const clips = await getClipsByBroadcasterId(broadcasterId, limit);
-      pushVerbose(`streamer mode clips fetched broadcasterId=${broadcasterId} clips=${clips.length}`);
+      const clips = mapVodRowsToClipShape(vodRows);
+      pushVerbose(`streamer mode db rows=${vodRows.length}`);
       await writePubgLinkRunLog({
         source: "streamer",
         status: clips.length ? "ok" : "empty",
         playerName: streamer,
         clipsReturned: clips.length,
-        metadata: { limit, probeMode, verboseMessages }
+        metadata: { limit, probeMode, dbOnly: true, verboseMessages }
       });
       return NextResponse.json({ clips, source: "streamer", streamer });
     }
 
-    // Twitch canonical PUBG name is currently PUBG: BATTLEGROUNDS.
     pushVerbose("pubg mode start");
-    const pubgGameId = await findGameIdByName("PUBG: BATTLEGROUNDS");
-    if (!pubgGameId) {
-      pushVerbose("pubg game id lookup result=not_found");
-      await writePubgLinkRunLog({
-        source: "pubg",
-        status: "error",
-        errorMessage: "PUBG game id not found in Twitch",
-        metadata: { verboseMessages }
-      });
-      return NextResponse.json({ clips: [], source: "pubg" });
-    }
-
-    pushVerbose(`pubg game id resolved gameId=${pubgGameId}`);
-    const clips = await getClipsByGameId(pubgGameId, limit);
-    pushVerbose(`pubg clips fetched count=${clips.length}`);
+    const vodRows = await prisma.pubgStreamerVod.findMany({
+      orderBy: [{ createdAtTwitch: "desc" }, { indexedAt: "desc" }],
+      take: Math.max(1, Math.min(limit, 60)),
+      select: {
+        videoId: true,
+        twitchUserId: true,
+        twitchUserLogin: true,
+        twitchUserName: true,
+        title: true,
+        url: true,
+        thumbnailUrl: true,
+        createdAtTwitch: true,
+        durationSeconds: true
+      }
+    });
+    const clips = mapVodRowsToClipShape(vodRows);
+    pushVerbose(`pubg mode db rows=${vodRows.length}`);
     await writePubgLinkRunLog({
       source: "pubg",
       status: clips.length ? "ok" : "empty",
       clipsReturned: clips.length,
-      metadata: { limit, gameId: pubgGameId, probeMode, verboseMessages }
+      metadata: { limit, probeMode, dbOnly: true, verboseMessages }
     });
     return NextResponse.json({ clips, source: "pubg" });
   } catch (error) {

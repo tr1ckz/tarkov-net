@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import {
-  lookupPlayerAcrossShards,
   resolveCachedPubgPlayer,
   type PubgPlatform,
 } from "@/lib/pubg-api";
@@ -41,35 +40,11 @@ export async function GET(request: Request) {
     });
   }
 
-  try {
-    const found = await lookupPlayerAcrossShards({
-      playerName,
-      preferredShard: preferredShard || undefined,
-      platform
-    });
-
-    if (!found) {
-      return NextResponse.json(
-        { found: false, error: `Player '${playerName}' not found for platform '${platform}'` },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json({ found: true, profile: found, cacheHit: false, source: "pubg_api" });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Lookup failed";
-
-    if (message.toLowerCase().includes("missing pubg api key")) {
-      return NextResponse.json(
-        {
-          found: false,
-          error: "PUBG API key is not configured",
-          setup: "Set PUBG_DEV_API (or PUBG_API_KEY) in your .env"
-        },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ found: false, error: message }, { status: 500 });
-  }
+  return NextResponse.json(
+    {
+      found: false,
+      error: `Player '${playerName}' not found in local cache for platform '${platform}'`
+    },
+    { status: 404 }
+  );
 }
