@@ -1370,6 +1370,7 @@ async function indexStreams() {
 
   try {
     interactionBackfillSummary = await runInteractionBackfill();
+    log("info", "interaction backfill completed", interactionBackfillSummary);
   } catch (error) {
     log("error", "interaction backfill failed", {
       error: error instanceof Error ? error.message : String(error)
