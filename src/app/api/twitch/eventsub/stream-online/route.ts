@@ -119,12 +119,6 @@ const WEAK_IDENTITY_LINK_SOURCES = new Set<string>([
   "eventsub_login_heuristic_unverified",
 ]);
 
-const PROBE_DENY_LINK_SOURCES = new Set<string>([
-  "eventsub_login_heuristic",
-  "eventsub_login_heuristic_unverified",
-  "eventsub_profile_claim",
-]);
-
 function isSyntheticPubgPlayerId(value: string) {
   return (
     value.startsWith("unverified:") ||
@@ -154,7 +148,6 @@ function shouldAllowSparseProbeForWeakIdentity(input: {
   if (input.identitySource === "autolink_identity") return false;
   if (isSyntheticPubgPlayerId(input.pubgPlayerId)) return false;
   if (!input.linkSource) return false;
-  if (PROBE_DENY_LINK_SOURCES.has(input.linkSource)) return false;
   return true;
 }
 
