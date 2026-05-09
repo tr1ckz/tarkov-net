@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import {
   getMatchSummary,
   getPlayerWithMatches,
+  lookupPlayerAcrossShards,
   type PubgPlatform,
 } from "@/lib/pubg-api";
 import { getVideosByUserId, parseTwitchDurationToSeconds } from "@/lib/twitch";
@@ -101,8 +102,10 @@ export async function indexStreamerMatchesAndVods(options: {
   const maxMatches = Math.max(1, Math.min(20, options.maxMatches ?? 8));
   const maxVods = Math.max(1, Math.min(20, options.maxVods ?? 12));
   const identity = options.identity;
+  let activeShard = identity.shard;
+  let activePlayerName = identity.pubgPlayerName;
 
-  const player = await getPlayerWithMatches(identity.shard, identity.pubgPlayerName).catch((err) => {
+  let player = await getPlayerWithMatches(identity.shard, identity.pubgPlayerName).catch((err) => {
     console.error("[pubg-match-vod-indexer] getPlayerWithMatches failed", {
       shard: identity.shard,
       pubgPlayerName: identity.pubgPlayerName,
@@ -111,6 +114,38 @@ export async function indexStreamerMatchesAndVods(options: {
     });
     return null;
   });
+
+  if (!player) {
+    const crossShard = await lookupPlayerAcrossShards({
+      playerName: identity.pubgPlayerName,
+      platform: identity.platform,
+      preferredShard: identity.shard,
+    }).catch((err) => {
+      console.warn("[pubg-match-vod-indexer] lookupPlayerAcrossShards retry failed", {
+        preferredShard: identity.shard,
+        platform: identity.platform,
+        pubgPlayerName: identity.pubgPlayerName,
+        twitchUserId: identity.twitchUserId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    });
+
+    if (crossShard) {
+      activeShard = crossShard.shard;
+      activePlayerName = crossShard.playerName;
+      player = await getPlayerWithMatches(activeShard, activePlayerName).catch((err) => {
+        console.warn("[pubg-match-vod-indexer] cross-shard getPlayerWithMatches failed", {
+          shard: activeShard,
+          pubgPlayerName: activePlayerName,
+          twitchUserId: identity.twitchUserId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return null;
+      });
+    }
+  }
+
   if (!player) {
     console.warn("[pubg-match-vod-indexer] player not found or lookup failed, aborting indexer", {
       shard: identity.shard,
@@ -131,8 +166,8 @@ export async function indexStreamerMatchesAndVods(options: {
   const matchIds = player.matchIds.slice(0, maxMatches);
   console.info("[pubg-match-vod-indexer] fetching match summaries", {
     twitchUserId: identity.twitchUserId,
-    pubgPlayerName: identity.pubgPlayerName,
-    shard: identity.shard,
+    pubgPlayerName: activePlayerName,
+    shard: activeShard,
     matchCount: matchIds.length,
     maxMatches,
   });
@@ -140,10 +175,10 @@ export async function indexStreamerMatchesAndVods(options: {
   let matchErrors = 0;
 
   for (const matchId of matchIds) {
-    const summary = await getMatchSummary(identity.shard, matchId).catch((err) => {
+    const summary = await getMatchSummary(activeShard, matchId).catch((err) => {
       console.warn("[pubg-match-vod-indexer] getMatchSummary failed", {
         matchId,
-        shard: identity.shard,
+        shard: activeShard,
         twitchUserId: identity.twitchUserId,
         error: err instanceof Error ? err.message : String(err),
       });
@@ -174,9 +209,9 @@ export async function indexStreamerMatchesAndVods(options: {
         twitchUserLogin: identity.twitchUserLogin,
         twitchUserName: identity.twitchUserName,
         platform: identity.platform,
-        shard: identity.shard,
+        shard: activeShard,
         pubgPlayerId: identity.pubgPlayerId,
-        pubgPlayerName: identity.pubgPlayerName,
+        pubgPlayerName: activePlayerName,
         matchId: summary.matchId,
         matchCreatedAt: parseIso(summary.createdAt),
         mapName: summary.mapName,
@@ -188,9 +223,9 @@ export async function indexStreamerMatchesAndVods(options: {
         twitchUserLogin: identity.twitchUserLogin,
         twitchUserName: identity.twitchUserName,
         platform: identity.platform,
-        shard: identity.shard,
+        shard: activeShard,
         pubgPlayerId: identity.pubgPlayerId,
-        pubgPlayerName: identity.pubgPlayerName,
+        pubgPlayerName: activePlayerName,
         matchCreatedAt: parseIso(summary.createdAt),
         mapName: summary.mapName,
         gameMode: summary.gameMode,
@@ -296,7 +331,8 @@ export async function indexStreamerMatchesAndVods(options: {
 
   console.info("[pubg-match-vod-indexer] indexing complete", {
     twitchUserId: identity.twitchUserId,
-    pubgPlayerName: identity.pubgPlayerName,
+    pubgPlayerName: activePlayerName,
+    shard: activeShard,
     matchesScanned: matchIds.length,
     matchesIndexed: matchRows.length,
     vodsIndexed: vodRows.length,
