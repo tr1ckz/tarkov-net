@@ -119,6 +119,12 @@ const WEAK_IDENTITY_LINK_SOURCES = new Set<string>([
   "eventsub_login_heuristic_unverified",
 ]);
 
+const PROBE_DENY_LINK_SOURCES = new Set<string>([
+  "eventsub_login_heuristic",
+  "eventsub_login_heuristic_unverified",
+  "eventsub_profile_claim",
+]);
+
 function isSyntheticPubgPlayerId(value: string) {
   return (
     value.startsWith("unverified:") ||
@@ -137,6 +143,19 @@ function shouldTreatIdentityAsWeakForValidation(input: {
   if (isSyntheticPubgPlayerId(input.pubgPlayerId)) return true;
   if (!input.linkSource) return true;
   return WEAK_IDENTITY_LINK_SOURCES.has(input.linkSource);
+}
+
+function shouldAllowSparseProbeForWeakIdentity(input: {
+  identitySource: "real_identity_link" | "fallback_identity_link" | "autolink_identity";
+  linkSource: string | null;
+  pubgPlayerId: string;
+}) {
+  // Auto-linked and synthetic identities are too noisy for direct indexing probes.
+  if (input.identitySource === "autolink_identity") return false;
+  if (isSyntheticPubgPlayerId(input.pubgPlayerId)) return false;
+  if (!input.linkSource) return false;
+  if (PROBE_DENY_LINK_SOURCES.has(input.linkSource)) return false;
+  return true;
 }
 
 async function isIdentityPresentInKnownPlayerCache(input: {
@@ -599,6 +618,43 @@ async function processStreamOnlineNotification(input: {
         }).catch(() => false);
 
         if (!cachedIdentityConfirmed) {
+          const allowSparseProbe = shouldAllowSparseProbeForWeakIdentity({
+            identitySource: selectedIdentity.source,
+            linkSource: selectedIdentity.linkSource,
+            pubgPlayerId: selectedIdentity.pubgPlayerId,
+          });
+
+          if (!allowSparseProbe) {
+            matchVodIndexing = {
+              indexed: false,
+              reason: `identity_unverified_requires_validation:${selectedIdentity.source}`,
+              matchesScanned: 0,
+              matchesIndexed: 0,
+              vodsIndexed: 0,
+              identityValidated: false,
+              linksMapped: 0,
+              matchErrors: 0,
+            };
+            let validationQueue = "not_applicable";
+            if (selectedIdentity.identityLinkId && weakIdentity) {
+              validationQueue = await enqueueIdentityValidationJob(
+                selectedIdentity.identityLinkId,
+                `eventsub_unverified_block:${selectedIdentity.source}`
+              );
+            }
+            console.info("[twitch-eventsub] skipping match-vod index attempt for weak unverified identity", {
+              broadcasterId: twitchUserId,
+              broadcasterLogin: twitchUserLogin,
+              identitySource: selectedIdentity.source,
+              linkSource: selectedIdentity.linkSource,
+              platform: selectedIdentity.platform,
+              shard: selectedIdentity.shard,
+              pubgPlayerName: selectedIdentity.pubgPlayerName,
+              validationQueue,
+            });
+          }
+
+          if (!matchVodIndexing) {
           const probeKey = [
             twitchUserId,
             selectedIdentity.platform,
@@ -644,6 +700,7 @@ async function processStreamOnlineNotification(input: {
               pubgPlayerName: selectedIdentity.pubgPlayerName,
               probeCooldownMin: probe.cooldownMin,
             });
+          }
           }
         }
       }
