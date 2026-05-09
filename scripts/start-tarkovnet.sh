@@ -14,6 +14,12 @@ until ./node_modules/.bin/prisma migrate deploy --schema /opt/prisma/schema.pris
   sleep 3
 done
 
+if [ -z "${NEXTAUTH_SECRET:-}" ]; then
+  echo "[startup] warning: NEXTAUTH_SECRET is missing; auth sessions will fail"
+elif [ "${NEXTAUTH_SECRET}" = "NEXTAUTH_SECRET" ] || [ "${NEXTAUTH_SECRET}" = "change-me" ]; then
+  echo "[startup] warning: NEXTAUTH_SECRET is still using a placeholder value; auth sessions will fail"
+fi
+
 crawler_pid=""
 if [ "${ENABLE_PUBG_CRAWLER:-1}" = "1" ]; then
   echo "[startup] starting PUBG crawler in background"

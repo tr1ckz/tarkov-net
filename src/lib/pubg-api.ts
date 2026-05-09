@@ -93,6 +93,7 @@ const PUBG_API_MAX_CALLS_PER_MINUTE = (() => {
 const PUBG_API_RATE_WINDOW_MS = 60_000;
 const pubgApiCallTimestamps: number[] = [];
 let pubgRateLimitMutex: Promise<void> = Promise.resolve();
+let pubgUnauthorizedError: string | null = null;
 
 // Async context key for propagating triggeredBy through the call stack
 const triggeredByStorage = new Map<string, string>();
@@ -202,6 +203,10 @@ function callTypeFromPath(path: string): string {
 }
 
 async function pubgGet<T>(path: string): Promise<T> {
+  if (pubgUnauthorizedError) {
+    throw new Error(pubgUnauthorizedError);
+  }
+
   const apiKey = getPubgApiKey();
   const start = Date.now();
   let statusCode: number | undefined;
@@ -219,6 +224,12 @@ async function pubgGet<T>(path: string): Promise<T> {
     if (!response.ok) {
       const bodyText = await response.text().catch(() => "");
       errorMessage = cleanErrorMessage(`PUBG API error (${response.status}) ${bodyText || ""}`);
+      if (response.status === 401) {
+        pubgUnauthorizedError = cleanErrorMessage(
+          "PUBG API unauthorized (401). Verify PUBG_DEV_API/PUBG_API_KEY in the runtime environment."
+        );
+        errorMessage = pubgUnauthorizedError;
+      }
       void logPubgApiCall({
         callType: callTypeFromPath(path),
         endpoint: path,

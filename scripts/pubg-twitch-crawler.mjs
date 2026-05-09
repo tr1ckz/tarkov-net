@@ -19,6 +19,7 @@ const INTERACTION_BACKFILL_VODS = Math.max(1, Math.min(20, Number(process.env.PU
 
 let tokenState = null;
 let lastEventSubSyncMs = 0;
+let pubgUnauthorizedError = null;
 
 function getPubgGameIds() {
   const configured = process.env.PUBG_TWITCH_GAME_IDS
@@ -155,6 +156,10 @@ function getPubgApiKey() {
 }
 
 async function pubgGet(path) {
+  if (pubgUnauthorizedError) {
+    throw new Error(pubgUnauthorizedError);
+  }
+
   const response = await fetch(`https://api.pubg.com${path}`, {
     headers: {
       Authorization: `Bearer ${getPubgApiKey()}`,
@@ -164,6 +169,11 @@ async function pubgGet(path) {
   });
 
   if (!response.ok) {
+    if (response.status === 401) {
+      pubgUnauthorizedError = "PUBG API unauthorized (401). Verify PUBG_DEV_API/PUBG_API_KEY in the runtime environment.";
+      throw new Error(pubgUnauthorizedError);
+    }
+
     throw new Error(`PUBG API error (${response.status})`);
   }
 
