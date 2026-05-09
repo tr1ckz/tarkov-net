@@ -383,8 +383,39 @@ export async function indexStreamerMatchesAndVods(options: {
         // Process streamer's kills
         for (const kill of streamerData.kills) {
           const eventVodOffset = computeEventVodOffset(kill.timestamp, mapped.vodStartedAt);
-          if (eventVodOffset !== null) {
-            console.info("[pubg-match-vod-indexer] streamer encounter: killed", {
+          if (eventVodOffset !== null && kill.target) {
+            const targetNormalized = kill.target.toLowerCase().replace(/[^a-z0-9]/g, "");
+            const dedupeKey = `${identity.twitchUserId}|${match.matchId}|kill|${kill.target}|${kill.timestamp}`;
+            
+            await prisma.pubgLinkEvent.upsert({
+              where: { dedupeKey },
+              create: {
+                dedupeKey,
+                eventType: "vod_moment",
+                pubgNameRaw: kill.target,
+                pubgNameNormalized: targetNormalized,
+                twitchUserId: identity.twitchUserId,
+                twitchUserLogin: identity.twitchUserLogin,
+                twitchUserName: identity.twitchUserName,
+                twitchVideoId: mapped.videoId,
+                shard: activeShard,
+                platform: identity.platform,
+                encounterAt: parseIso(kill.timestamp),
+              },
+              update: {
+                twitchUserLogin: identity.twitchUserLogin,
+                twitchUserName: identity.twitchUserName,
+                encounterAt: parseIso(kill.timestamp),
+              }
+            }).catch((err) => {
+              console.warn("[pubg-match-vod-indexer] failed to store kill event", {
+                matchId: match.matchId,
+                target: kill.target,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            });
+            
+            console.info("[pubg-match-vod-indexer] streamer encounter stored: killed", {
               twitchUserId: identity.twitchUserId,
               matchId: match.matchId,
               victim: kill.target,
@@ -400,8 +431,39 @@ export async function indexStreamerMatchesAndVods(options: {
         // Process streamer's deaths
         for (const death of streamerData.deaths) {
           const eventVodOffset = computeEventVodOffset(death.timestamp, mapped.vodStartedAt);
-          if (eventVodOffset !== null) {
-            console.info("[pubg-match-vod-indexer] streamer encounter: was killed by", {
+          if (eventVodOffset !== null && death.killer) {
+            const killerNormalized = death.killer.toLowerCase().replace(/[^a-z0-9]/g, "");
+            const dedupeKey = `${identity.twitchUserId}|${match.matchId}|death|${death.killer}|${death.timestamp}`;
+            
+            await prisma.pubgLinkEvent.upsert({
+              where: { dedupeKey },
+              create: {
+                dedupeKey,
+                eventType: "vod_moment",
+                pubgNameRaw: death.killer,
+                pubgNameNormalized: killerNormalized,
+                twitchUserId: identity.twitchUserId,
+                twitchUserLogin: identity.twitchUserLogin,
+                twitchUserName: identity.twitchUserName,
+                twitchVideoId: mapped.videoId,
+                shard: activeShard,
+                platform: identity.platform,
+                encounterAt: parseIso(death.timestamp),
+              },
+              update: {
+                twitchUserLogin: identity.twitchUserLogin,
+                twitchUserName: identity.twitchUserName,
+                encounterAt: parseIso(death.timestamp),
+              }
+            }).catch((err) => {
+              console.warn("[pubg-match-vod-indexer] failed to store death event", {
+                matchId: match.matchId,
+                killer: death.killer,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            });
+            
+            console.info("[pubg-match-vod-indexer] streamer encounter stored: was killed by", {
               twitchUserId: identity.twitchUserId,
               matchId: match.matchId,
               killer: death.killer,
