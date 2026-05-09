@@ -55,6 +55,23 @@ type PlayerLookupResponse = {
 
 type Mode = "pubg" | "streamer" | "encounters";
 
+async function parseJsonResponse<T>(response: Response): Promise<T> {
+  const raw = await response.text();
+  const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
+
+  if (!raw) {
+    throw new Error(`Empty response from server (${response.status}).`);
+  }
+
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    const preview = raw.slice(0, 120).replace(/\s+/g, " ").trim();
+    const typeHint = contentType ? `content-type: ${contentType}` : "content-type: unknown";
+    throw new Error(`Server returned non-JSON response (${response.status}, ${typeHint}). Preview: ${preview}`);
+  }
+}
+
 async function fetchJsonWithTimeout<T>(url: string, timeoutMs = 20000): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -64,7 +81,7 @@ async function fetchJsonWithTimeout<T>(url: string, timeoutMs = 20000): Promise<
       cache: "no-store",
       signal: controller.signal
     });
-    const payload = (await response.json()) as T;
+    const payload = await parseJsonResponse<T>(response);
 
     if (!response.ok) {
       const err = payload as { error?: string };
@@ -239,7 +256,7 @@ export function PubgClipsPanel() {
     searchDebounceRef.current = setTimeout(() => {
       const params = new URLSearchParams({ q: candidate, platform: pendingPlatform, limit: "8" });
       fetch(`/api/pubg/player-search?${params.toString()}`, { cache: "no-store" })
-        .then((r) => r.json())
+        .then((response) => parseJsonResponse<{ results?: Array<{ playerName: string; shard: string }> }>(response))
         .then((payload: { results?: Array<{ playerName: string; shard: string }> }) => {
           setSearchSuggestions(payload.results ?? []);
           setShowSuggestions((payload.results?.length ?? 0) > 0);
@@ -264,7 +281,7 @@ export function PubgClipsPanel() {
         signal: controller.signal
       })
         .then(async (response) => {
-          const payload = (await response.json()) as PlayerLookupResponse;
+          const payload = await parseJsonResponse<PlayerLookupResponse>(response);
           if (!response.ok || !payload?.found || !payload.profile) {
             throw new Error(payload?.error ?? "Player lookup failed");
           }
