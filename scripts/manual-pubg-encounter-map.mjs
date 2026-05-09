@@ -13,6 +13,8 @@ function parseArgs(argv) {
     eventLimit: 40,
     dryRun: false,
     maxCandidates: 120,
+    sampleFallback: true,
+    sampleShard: "pc-na",
   };
 
   for (let i = 2; i < argv.length; i += 1) {
@@ -46,6 +48,15 @@ function parseArgs(argv) {
     if (key === "--max-candidates" && next) {
       args.maxCandidates = Math.max(1, Math.min(500, Number(next)));
       i += 1;
+      continue;
+    }
+    if (key === "--sample-shard" && next) {
+      args.sampleShard = next;
+      i += 1;
+      continue;
+    }
+    if (key === "--no-sample-fallback") {
+      args.sampleFallback = false;
       continue;
     }
     if (key === "--dry-run") {
@@ -260,9 +271,186 @@ async function buildCandidateStreamers(args, token, clientId) {
   ];
 }
 
+async function mapFromSampleTelemetryForStreamer(streamer, vodRows, args, sampleMatchIds) {
+  if (!sampleMatchIds.length) return null;
+
+  for (const matchId of sampleMatchIds) {
+    const matchPayload = await pubgGet(`/shards/${encodeURIComponent(args.sampleShard)}/matches/${encodeURIComponent(matchId)}`);
+    if (!matchPayload?.data) continue;
+
+    const matchCreatedAt = matchPayload.data.attributes?.createdAt ?? null;
+    const mapName = matchPayload.data.attributes?.mapName ?? null;
+    const gameMode = matchPayload.data.attributes?.gameMode ?? null;
+    const telemetryUrl = (matchPayload.included ?? []).find((entry) => entry.type === "asset")?.attributes?.URL ?? null;
+    const participants = (matchPayload.included ?? [])
+      .filter((entry) => entry.type === "participant")
+      .map((entry) => entry?.attributes?.stats?.name)
+      .filter(Boolean);
+
+    if (!telemetryUrl || participants.length < 2) continue;
+
+    const anchorPlayer = participants[0];
+    const telemetryResponse = await fetch(telemetryUrl, { cache: "no-store" }).catch(() => null);
+    if (!telemetryResponse?.ok) continue;
+    const telemetryEvents = await telemetryResponse.json().catch(() => null);
+    if (!Array.isArray(telemetryEvents)) continue;
+
+    const encounters = extractEncounterEvents(telemetryEvents, anchorPlayer, args.eventLimit);
+    if (!encounters.length) continue;
+
+    const bestVod = chooseBestVodForMatch(matchCreatedAt, vodRows) || {
+      videoId: vodRows[0].videoId,
+      vodStartedAt: vodRows[0].createdAtTwitch,
+      vodOffsetSeconds: 0,
+      deltaSeconds: 999999,
+      confidenceTag: "manual_sample_fallback_first_vod",
+    };
+
+    if (!args.dryRun) {
+      await prisma.pubgStreamerMatch.upsert({
+        where: {
+          twitchUserId_matchId: {
+            twitchUserId: streamer.twitchUserId,
+            matchId,
+          },
+        },
+        create: {
+          twitchUserId: streamer.twitchUserId,
+          twitchUserLogin: streamer.userLogin,
+          twitchUserName: streamer.userName,
+          platform: "steam",
+          shard: args.sampleShard,
+          pubgPlayerId: `manual-sample:${args.sampleShard}:${matchId}:${normalizeName(anchorPlayer)}`,
+          pubgPlayerName: anchorPlayer,
+          matchId,
+          matchCreatedAt: parseIso(matchCreatedAt),
+          mapName,
+          gameMode,
+          telemetryUrl,
+          source: "manual_sample_fallback",
+        },
+        update: {
+          twitchUserLogin: streamer.userLogin,
+          twitchUserName: streamer.userName,
+          platform: "steam",
+          shard: args.sampleShard,
+          pubgPlayerName: anchorPlayer,
+          matchCreatedAt: parseIso(matchCreatedAt),
+          mapName,
+          gameMode,
+          telemetryUrl,
+          source: "manual_sample_fallback",
+        },
+      });
+
+      await prisma.pubgMatchVodLink.upsert({
+        where: {
+          twitchUserId_matchLink: {
+            twitchUserId: streamer.twitchUserId,
+            matchId,
+          },
+        },
+        create: {
+          twitchUserId: streamer.twitchUserId,
+          twitchUserLogin: streamer.userLogin,
+          twitchUserName: streamer.userName,
+          matchId,
+          videoId: bestVod.videoId,
+          matchCreatedAt: parseIso(matchCreatedAt),
+          vodStartedAt: bestVod.vodStartedAt,
+          vodOffsetSeconds: bestVod.vodOffsetSeconds,
+          deltaSeconds: bestVod.deltaSeconds,
+          confidenceTag: bestVod.confidenceTag,
+        },
+        update: {
+          twitchUserLogin: streamer.userLogin,
+          twitchUserName: streamer.userName,
+          videoId: bestVod.videoId,
+          matchCreatedAt: parseIso(matchCreatedAt),
+          vodStartedAt: bestVod.vodStartedAt,
+          vodOffsetSeconds: bestVod.vodOffsetSeconds,
+          deltaSeconds: bestVod.deltaSeconds,
+          confidenceTag: bestVod.confidenceTag,
+          linkedAt: new Date(),
+        },
+      });
+
+      for (const encounter of encounters) {
+        const dedupeKey = [
+          streamer.twitchUserId,
+          matchId,
+          "vod_moment",
+          normalizeName(encounter.opponent),
+          encounter.eventTs,
+        ].join(":");
+
+        await prisma.pubgLinkEvent.upsert({
+          where: { dedupeKey },
+          create: {
+            dedupeKey,
+            eventType: "vod_moment",
+            pubgNameRaw: encounter.opponent,
+            pubgNameNormalized: normalizeName(encounter.opponent),
+            twitchUserId: streamer.twitchUserId,
+            twitchUserLogin: streamer.userLogin,
+            twitchUserName: streamer.userName,
+            twitchVideoId: bestVod.videoId,
+            shard: args.sampleShard,
+            platform: "steam",
+            encounterAt: parseIso(encounter.eventTs),
+          },
+          update: {
+            twitchUserLogin: streamer.userLogin,
+            twitchUserName: streamer.userName,
+            twitchVideoId: bestVod.videoId,
+            shard: args.sampleShard,
+            platform: "steam",
+            encounterAt: parseIso(encounter.eventTs),
+          },
+        });
+      }
+    }
+
+    return {
+      success: true,
+      mode: "sample_fallback",
+      dryRun: args.dryRun,
+      streamer: {
+        twitchUserId: streamer.twitchUserId,
+        twitchUserLogin: streamer.userLogin,
+        twitchUserName: streamer.userName,
+      },
+      player: {
+        pubgPlayerId: `manual-sample:${args.sampleShard}:${matchId}:${normalizeName(anchorPlayer)}`,
+        pubgPlayerName: anchorPlayer,
+        shard: args.sampleShard,
+      },
+      match: {
+        matchId,
+        createdAt: matchCreatedAt,
+        mapName,
+        gameMode,
+      },
+      mappedToVideoId: bestVod.videoId,
+      encountersInserted: encounters.length,
+      sampleEncounter: encounters[0],
+    };
+  }
+
+  return null;
+}
+
 async function run() {
   const args = parseArgs(process.argv);
   const { token, clientId } = await getTwitchToken();
+
+  let sampleMatchIds = [];
+  if (args.sampleFallback) {
+    const samples = await pubgGet(`/shards/${encodeURIComponent(args.sampleShard)}/samples`);
+    sampleMatchIds = (samples?.data?.relationships?.matches?.data ?? [])
+      .map((entry) => entry.id)
+      .slice(0, args.matchLimit);
+  }
 
   const candidates = await buildCandidateStreamers(args, token, clientId);
   if (!candidates.length) {
@@ -336,7 +524,15 @@ async function run() {
       if (resolved) break;
     }
 
-    if (!resolved) continue;
+    if (!resolved) {
+      if (!args.sampleFallback) continue;
+      const sampleFallbackResult = await mapFromSampleTelemetryForStreamer(streamer, vodRows, args, sampleMatchIds);
+      if (sampleFallbackResult) {
+        console.log(JSON.stringify(sampleFallbackResult, null, 2));
+        return;
+      }
+      continue;
+    }
 
     for (const matchId of resolved.matchIds.slice(0, args.matchLimit)) {
       const matchPayload = await pubgGet(`/shards/${encodeURIComponent(resolved.shard)}/matches/${encodeURIComponent(matchId)}`);
@@ -500,6 +696,11 @@ async function run() {
       );
       return;
     }
+  }
+
+  if (args.sampleFallback && sampleMatchIds.length === 0) {
+    console.log(JSON.stringify({ success: false, reason: "sample_fallback_no_sample_matches_or_rate_limited", sampleShard: args.sampleShard }, null, 2));
+    return;
   }
 
   console.log(JSON.stringify({ success: false, reason: "no_candidate_with_match_telemetry_encounters" }, null, 2));
