@@ -150,6 +150,7 @@ async function isIdentityPresentInKnownPlayerCache(input: {
 }
 
 const recentMatchIndexAttempts = new Map<string, number>();
+const recentUnconfirmedIdentityProbes = new Map<string, number>();
 
 function shouldThrottleMatchIndexAttempt(twitchUserId: string) {
   const cooldownMinRaw = Number(process.env.PUBG_EVENTSUB_MATCH_INDEX_COOLDOWN_MIN ?? "20");
@@ -167,6 +168,24 @@ function shouldThrottleMatchIndexAttempt(twitchUserId: string) {
 
   recentMatchIndexAttempts.set(twitchUserId, now);
   return { throttled: false as const, waitMs: 0, cooldownMin };
+}
+
+function shouldProbeUnconfirmedIdentity(key: string) {
+  const cooldownMinRaw = Number(process.env.PUBG_EVENTSUB_UNCONFIRMED_PROBE_COOLDOWN_MIN ?? "720");
+  const cooldownMin = Number.isFinite(cooldownMinRaw)
+    ? Math.max(30, Math.min(24 * 60, Math.floor(cooldownMinRaw)))
+    : 720;
+  const cooldownMs = cooldownMin * 60_000;
+
+  const now = Date.now();
+  const lastProbe = recentUnconfirmedIdentityProbes.get(key) ?? 0;
+  if (now - lastProbe < cooldownMs) {
+    const waitMs = cooldownMs - (now - lastProbe);
+    return { allowed: false as const, waitMs, cooldownMin };
+  }
+
+  recentUnconfirmedIdentityProbes.set(key, now);
+  return { allowed: true as const, waitMs: 0, cooldownMin };
 }
 
 async function processStreamOnlineNotification(input: {
@@ -445,23 +464,43 @@ async function processStreamOnlineNotification(input: {
         }).catch(() => false);
 
         if (!cachedIdentityConfirmed) {
-          matchVodIndexing = {
-            indexed: false,
-            reason: `identity_not_in_known_player_cache:${selectedIdentity.source}`,
-            matchesScanned: 0,
-            matchesIndexed: 0,
-            vodsIndexed: 0,
-            linksMapped: 0,
-            matchErrors: 0,
-          };
-          console.info("[twitch-eventsub] skipping match-vod index attempt due to unconfirmed fallback identity", {
-            broadcasterId: twitchUserId,
-            broadcasterLogin: twitchUserLogin,
-            identitySource: selectedIdentity.source,
-            platform: selectedIdentity.platform,
-            shard: selectedIdentity.shard,
-            pubgPlayerName: selectedIdentity.pubgPlayerName,
-          });
+          const probeKey = [
+            twitchUserId,
+            selectedIdentity.platform,
+            normalizeForCompare(selectedIdentity.pubgPlayerName),
+          ].join(":");
+          const probe = shouldProbeUnconfirmedIdentity(probeKey);
+
+          if (!probe.allowed) {
+            matchVodIndexing = {
+              indexed: false,
+              reason: `identity_not_in_known_player_cache:${selectedIdentity.source}`,
+              matchesScanned: 0,
+              matchesIndexed: 0,
+              vodsIndexed: 0,
+              linksMapped: 0,
+              matchErrors: 0,
+            };
+            console.info("[twitch-eventsub] skipping match-vod index attempt due to unconfirmed fallback identity", {
+              broadcasterId: twitchUserId,
+              broadcasterLogin: twitchUserLogin,
+              identitySource: selectedIdentity.source,
+              platform: selectedIdentity.platform,
+              shard: selectedIdentity.shard,
+              pubgPlayerName: selectedIdentity.pubgPlayerName,
+              nextProbeInMs: probe.waitMs,
+            });
+          } else {
+            console.info("[twitch-eventsub] allowing sparse probe for unconfirmed fallback identity", {
+              broadcasterId: twitchUserId,
+              broadcasterLogin: twitchUserLogin,
+              identitySource: selectedIdentity.source,
+              platform: selectedIdentity.platform,
+              shard: selectedIdentity.shard,
+              pubgPlayerName: selectedIdentity.pubgPlayerName,
+              probeCooldownMin: probe.cooldownMin,
+            });
+          }
         }
       }
 
