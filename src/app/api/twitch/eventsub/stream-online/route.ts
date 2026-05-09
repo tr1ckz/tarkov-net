@@ -94,6 +94,40 @@ function getResolvedIdentityForSeenIndexing(value: unknown): {
   return { platform, shard, pubgPlayerName };
 }
 
+function getLooseIdentityForMatchIndexing(value: unknown): {
+  platform: PubgPlatform;
+  shard: string;
+  pubgPlayerName: string;
+} | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const platform = parsePubgPlatform(row.platform);
+  const shard = typeof row.shard === "string" ? row.shard.trim() : "";
+  const pubgPlayerName = typeof row.pubgPlayerName === "string" ? row.pubgPlayerName.trim() : "";
+  if (!platform || !shard || !pubgPlayerName) return null;
+  return { platform, shard, pubgPlayerName };
+}
+
+const recentMatchIndexAttempts = new Map<string, number>();
+
+function shouldThrottleMatchIndexAttempt(twitchUserId: string) {
+  const cooldownMinRaw = Number(process.env.PUBG_EVENTSUB_MATCH_INDEX_COOLDOWN_MIN ?? "20");
+  const cooldownMin = Number.isFinite(cooldownMinRaw)
+    ? Math.max(1, Math.min(180, Math.floor(cooldownMinRaw)))
+    : 20;
+  const cooldownMs = cooldownMin * 60_000;
+
+  const now = Date.now();
+  const lastAttempt = recentMatchIndexAttempts.get(twitchUserId) ?? 0;
+  if (now - lastAttempt < cooldownMs) {
+    const waitMs = cooldownMs - (now - lastAttempt);
+    return { throttled: true as const, waitMs, cooldownMin };
+  }
+
+  recentMatchIndexAttempts.set(twitchUserId, now);
+  return { throttled: false as const, waitMs: 0, cooldownMin };
+}
+
 async function processStreamOnlineNotification(input: {
   event: StreamOnlineEvent;
   messageId: string;
@@ -262,13 +296,15 @@ async function processStreamOnlineNotification(input: {
       });
     }
 
-    // For match/VOD indexing: use ANY existing real identity link from DB (not just this session's verified one)
-    // A "real" pubgPlayerId does not start with the unverified/heuristic fake-id prefixes
-    const identityLink = await db.pubgStreamerIdentityLink.findFirst({
+    // Prefer a real verified identity link, but fall back to any supported link or this event's autolink identity.
+    const realIdentityLink = await db.pubgStreamerIdentityLink.findFirst({
       where: {
         twitchUserId,
         platform: {
           in: ["steam", "xbox", "psn"]
+        },
+        pubgPlayerName: {
+          not: ""
         },
         NOT: {
           OR: [
@@ -287,28 +323,106 @@ async function processStreamOnlineNotification(input: {
       orderBy: { lastLinkedAt: "desc" }
     });
 
+    const fallbackIdentityLink = realIdentityLink
+      ? null
+      : await db.pubgStreamerIdentityLink.findFirst({
+          where: {
+            twitchUserId,
+            platform: {
+              in: ["steam", "xbox", "psn"]
+            },
+            pubgPlayerName: {
+              not: ""
+            }
+          },
+          select: {
+            platform: true,
+            shard: true,
+            pubgPlayerId: true,
+            pubgPlayerName: true,
+          },
+          orderBy: { lastLinkedAt: "desc" }
+        });
+
+    const looseAutoLinkIdentity = getLooseIdentityForMatchIndexing(autoLink);
+
+    const selectedIdentity = realIdentityLink
+      ? {
+          source: "real_identity_link" as const,
+          platform: realIdentityLink.platform as PubgPlatform,
+          shard: realIdentityLink.shard,
+          pubgPlayerId: realIdentityLink.pubgPlayerId,
+          pubgPlayerName: realIdentityLink.pubgPlayerName,
+        }
+      : fallbackIdentityLink
+        ? {
+            source: "fallback_identity_link" as const,
+            platform: fallbackIdentityLink.platform as PubgPlatform,
+            shard: fallbackIdentityLink.shard,
+            pubgPlayerId: fallbackIdentityLink.pubgPlayerId,
+            pubgPlayerName: fallbackIdentityLink.pubgPlayerName,
+          }
+        : looseAutoLinkIdentity
+          ? {
+              source: "autolink_identity" as const,
+              platform: looseAutoLinkIdentity.platform,
+              shard: looseAutoLinkIdentity.shard,
+              pubgPlayerId: `autolink:${looseAutoLinkIdentity.platform}:${looseAutoLinkIdentity.pubgPlayerName.toLowerCase()}`,
+              pubgPlayerName: looseAutoLinkIdentity.pubgPlayerName,
+            }
+          : null;
+
     console.info("[twitch-eventsub] identity link for match/VOD indexer", {
       broadcasterId: twitchUserId,
       broadcasterLogin: twitchUserLogin,
-      identityLinkFound: Boolean(identityLink),
-      platform: identityLink?.platform ?? null,
-      shard: identityLink?.shard ?? null,
-      pubgPlayerName: identityLink?.pubgPlayerName ?? null,
-      pubgPlayerId: identityLink?.pubgPlayerId
-        ? identityLink.pubgPlayerId.slice(0, 12) + "..."
+      identityLinkFound: Boolean(selectedIdentity),
+      identitySource: selectedIdentity?.source ?? "none",
+      platform: selectedIdentity?.platform ?? null,
+      shard: selectedIdentity?.shard ?? null,
+      pubgPlayerName: selectedIdentity?.pubgPlayerName ?? null,
+      pubgPlayerId: selectedIdentity?.pubgPlayerId
+        ? selectedIdentity.pubgPlayerId.slice(0, 12) + "..."
         : null,
     });
 
-    if (identityLink) {
+    if (!selectedIdentity) {
+      matchVodIndexing = {
+        indexed: false,
+        reason: "missing_identity_for_match_indexing",
+        matchesScanned: 0,
+        matchesIndexed: 0,
+        vodsIndexed: 0,
+        linksMapped: 0,
+        matchErrors: 0,
+      };
+    } else {
+      const throttle = shouldThrottleMatchIndexAttempt(twitchUserId);
+      if (throttle.throttled) {
+        matchVodIndexing = {
+          indexed: false,
+          reason: `match_index_cooldown_${throttle.cooldownMin}m`,
+          matchesScanned: 0,
+          matchesIndexed: 0,
+          vodsIndexed: 0,
+          linksMapped: 0,
+          matchErrors: 0,
+        };
+        console.info("[twitch-eventsub] skipping match-vod index attempt due to cooldown", {
+          broadcasterId: twitchUserId,
+          broadcasterLogin: twitchUserLogin,
+          cooldownMin: throttle.cooldownMin,
+          waitMs: throttle.waitMs,
+        });
+      } else {
       matchVodIndexing = await indexStreamerMatchesAndVods({
         identity: {
           twitchUserId,
           twitchUserLogin,
           twitchUserName,
-          platform: identityLink.platform as import("@/lib/pubg-api").PubgPlatform,
-          shard: identityLink.shard,
-          pubgPlayerId: identityLink.pubgPlayerId,
-          pubgPlayerName: identityLink.pubgPlayerName,
+          platform: selectedIdentity.platform,
+          shard: selectedIdentity.shard,
+          pubgPlayerId: selectedIdentity.pubgPlayerId,
+          pubgPlayerName: selectedIdentity.pubgPlayerName,
         },
         maxMatches: Number(process.env.PUBG_EVENTSUB_MATCH_INDEX_MATCHES ?? "8"),
         maxVods: Number(process.env.PUBG_EVENTSUB_VOD_INDEX_LIMIT ?? "12"),
@@ -316,13 +430,22 @@ async function processStreamOnlineNotification(input: {
         console.error("[twitch-eventsub] match-vod indexing failed", {
           broadcasterId: twitchUserId,
           broadcasterLogin: twitchUserLogin,
-          platform: identityLink.platform,
-          shard: identityLink.shard,
-          pubgPlayerId: identityLink.pubgPlayerId,
+          platform: selectedIdentity.platform,
+          shard: selectedIdentity.shard,
+          pubgPlayerId: selectedIdentity.pubgPlayerId,
           error: error instanceof Error ? error.message : String(error)
         });
-        return null;
+        return {
+          indexed: false,
+          reason: "match_vod_indexer_exception",
+          matchesScanned: 0,
+          matchesIndexed: 0,
+          vodsIndexed: 0,
+          linksMapped: 0,
+          matchErrors: 0,
+        };
       });
+      }
     }
 
     console.info("[twitch-eventsub] stream.online processed", {
