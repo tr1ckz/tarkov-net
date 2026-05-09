@@ -3,6 +3,8 @@ import {
   getMatchSummary,
   getPlayerWithMatches,
   lookupPlayerAcrossShards,
+  getMatchTelemetryParticipants,
+  validatePlayerInMatch,
   type PubgPlatform,
 } from "@/lib/pubg-api";
 import { getVideosByUserId, parseTwitchDurationToSeconds } from "@/lib/twitch";
@@ -158,6 +160,7 @@ export async function indexStreamerMatchesAndVods(options: {
       matchesScanned: 0,
       matchesIndexed: 0,
       vodsIndexed: 0,
+      identityValidated: false,
       linksMapped: 0,
       matchErrors: 0,
     };
@@ -234,6 +237,32 @@ export async function indexStreamerMatchesAndVods(options: {
     });
   }
 
+  // Validate identity by checking if player appears in their recent matches
+  let identityValidated = false;
+  for (const match of matchRows) {
+    if (!match.telemetryUrl) continue;
+    const isInMatch = await validatePlayerInMatch(activePlayerName, match.telemetryUrl).catch(() => false);
+    if (isInMatch) {
+      identityValidated = true;
+      console.info("[pubg-match-vod-indexer] identity validated via telemetry", {
+        twitchUserId: identity.twitchUserId,
+        pubgPlayerName: activePlayerName,
+        matchId: match.matchId,
+        shard: activeShard,
+      });
+      break;
+    }
+  }
+
+  if (!identityValidated && matchRows.length > 0) {
+    console.warn("[pubg-match-vod-indexer] identity NOT found in recent match telemetry", {
+      twitchUserId: identity.twitchUserId,
+      pubgPlayerName: activePlayerName,
+      matchesChecked: matchRows.length,
+      shard: activeShard,
+    });
+  }
+
   const videos = await getVideosByUserId(identity.twitchUserId, maxVods).catch((err) => {
     console.error("[pubg-match-vod-indexer] getVideosByUserId (Twitch) failed", {
       twitchUserId: identity.twitchUserId,
@@ -246,6 +275,7 @@ export async function indexStreamerMatchesAndVods(options: {
     twitchUserId: identity.twitchUserId,
     vodsReturned: videos.length,
     matchRowsReady: matchRows.length,
+    identityValidated,
     matchErrors,
   });
   const vodRows: VodIndexRow[] = [];
@@ -336,6 +366,7 @@ export async function indexStreamerMatchesAndVods(options: {
     matchesScanned: matchIds.length,
     matchesIndexed: matchRows.length,
     vodsIndexed: vodRows.length,
+    identityValidated,
     linksMapped,
     matchErrors,
   });
@@ -346,6 +377,7 @@ export async function indexStreamerMatchesAndVods(options: {
     matchesScanned: matchIds.length,
     matchesIndexed: matchRows.length,
     vodsIndexed: vodRows.length,
+    identityValidated,
     linksMapped,
     matchErrors,
   };

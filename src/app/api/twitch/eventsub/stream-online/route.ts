@@ -389,6 +389,7 @@ async function processStreamOnlineNotification(input: {
       matchesScanned: number;
       matchesIndexed: number;
       vodsIndexed: number;
+      identityValidated: boolean;
       linksMapped: number;
       matchErrors: number;
     } | null = null;
@@ -579,6 +580,7 @@ async function processStreamOnlineNotification(input: {
         matchesScanned: 0,
         matchesIndexed: 0,
         vodsIndexed: 0,
+        identityValidated: false,
         linksMapped: 0,
         matchErrors: 0,
       };
@@ -611,6 +613,7 @@ async function processStreamOnlineNotification(input: {
               matchesScanned: 0,
               matchesIndexed: 0,
               vodsIndexed: 0,
+              identityValidated: false,
               linksMapped: 0,
               matchErrors: 0,
             };
@@ -654,6 +657,7 @@ async function processStreamOnlineNotification(input: {
           matchesScanned: 0,
           matchesIndexed: 0,
           vodsIndexed: 0,
+          identityValidated: false,
           linksMapped: 0,
           matchErrors: 0,
         };
@@ -691,6 +695,7 @@ async function processStreamOnlineNotification(input: {
           matchesScanned: 0,
           matchesIndexed: 0,
           vodsIndexed: 0,
+          identityValidated: false,
           linksMapped: 0,
           matchErrors: 0,
         };
@@ -701,17 +706,25 @@ async function processStreamOnlineNotification(input: {
         selectedIdentity.identityLinkId &&
         weakIdentity
       ) {
-        const validationQueue = await enqueueIdentityValidationJob(
-          selectedIdentity.identityLinkId,
-          "eventsub_match_index_player_not_found"
-        );
-        console.info("[twitch-eventsub] queued identity validation after player_not_found", {
-          broadcasterId: twitchUserId,
-          broadcasterLogin: twitchUserLogin,
-          identitySource: selectedIdentity.source,
-          identityLinkId: selectedIdentity.identityLinkId,
-          validationQueue,
-        });
+        if (matchVodIndexing.identityValidated) {
+          console.info("[twitch-eventsub] skipping validation enqueue: identity validated via telemetry", {
+            broadcasterId: twitchUserId,
+            broadcasterLogin: twitchUserLogin,
+            identitySource: selectedIdentity.source,
+          });
+        } else {
+          const validationQueue = await enqueueIdentityValidationJob(
+            selectedIdentity.identityLinkId,
+            "eventsub_match_index_player_not_found"
+          );
+          console.info("[twitch-eventsub] queued identity validation after player_not_found", {
+            broadcasterId: twitchUserId,
+            broadcasterLogin: twitchUserLogin,
+            identitySource: selectedIdentity.source,
+            identityLinkId: selectedIdentity.identityLinkId,
+            validationQueue,
+          });
+        }
       }
       }
       }

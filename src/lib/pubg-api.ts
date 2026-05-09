@@ -478,6 +478,47 @@ export async function getMatchParticipantNames(shard: string, matchId: string) {
   return Array.from(seen);
 }
 
+export async function getMatchTelemetryParticipants(telemetryUrl: string): Promise<string[]> {
+  if (!telemetryUrl) return [];
+
+  try {
+    const response = await fetch(telemetryUrl, {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      console.warn("[pubg-api] telemetry fetch failed", {
+        status: response.status,
+        url: telemetryUrl,
+      });
+      return [];
+    }
+
+    const events = await response.json() as PubgTelemetryEvent[];
+
+    // Extract unique player names from all events
+    const seen = new Set<string>();
+    for (const event of events) {
+      if (event.killer?.name) seen.add(event.killer.name);
+      if (event.victim?.name) seen.add(event.victim.name);
+      if (event.attacker?.name) seen.add(event.attacker.name);
+    }
+
+    return Array.from(seen);
+  } catch (err) {
+    console.warn("[pubg-api] telemetry parse failed", {
+      url: telemetryUrl,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return [];
+  }
+}
+
+export async function validatePlayerInMatch(playerName: string, telemetryUrl: string): Promise<boolean> {
+  const participants = await getMatchTelemetryParticipants(telemetryUrl);
+  return participants.some(p => p.toLowerCase() === playerName.toLowerCase());
+}
+
 export async function indexSeenPlayersFromRecentMatches(options: {
   platform: PubgPlatform;
   shard: string;
