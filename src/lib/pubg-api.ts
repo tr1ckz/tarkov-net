@@ -65,7 +65,7 @@ export type PubgEncounterEvent = {
   povTag: PubgEncounterPovTag;
 };
 
-export type PubgPlatform = "steam" | "xbox" | "psn" | "kakao";
+export type PubgPlatform = "steam" | "xbox" | "psn";
 
 export type PubgMatchSummary = {
   matchId: string;
@@ -314,11 +314,7 @@ export function getCandidateShards(platform: PubgPlatform): string[] {
     return ["psn-na", "psn-eu", "psn-as", "psn-oc", "psn-sa"];
   }
 
-  if (platform === "kakao") {
-    return ["pc-kakao", "pc-krjp", "pc-as"];
-  }
-
-  return ["pc-na", "pc-eu", "pc-as", "pc-kakao", "pc-krjp", "pc-sa", "pc-oc"];
+  return ["pc-na", "pc-eu", "pc-as", "pc-sa", "pc-oc", "pc-krjp"];
 }
 
 export async function lookupPlayerAcrossShards(options: {

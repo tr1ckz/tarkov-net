@@ -75,7 +75,7 @@ function isFreshTimestamp(value: string) {
 }
 
 function parsePubgPlatform(value: unknown): PubgPlatform | null {
-  if (value === "steam" || value === "xbox" || value === "psn" || value === "kakao") return value;
+  if (value === "steam" || value === "xbox" || value === "psn") return value;
   return null;
 }
 
@@ -267,6 +267,9 @@ async function processStreamOnlineNotification(input: {
     const identityLink = await db.pubgStreamerIdentityLink.findFirst({
       where: {
         twitchUserId,
+        platform: {
+          in: ["steam", "xbox", "psn"]
+        },
         NOT: {
           OR: [
             { pubgPlayerId: { startsWith: "unverified:" } },

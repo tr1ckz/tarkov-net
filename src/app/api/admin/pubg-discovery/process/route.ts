@@ -20,7 +20,7 @@ function requireAdmin(session: Session | null) {
 }
 
 function parsePlatform(value: string): PubgPlatform | null {
-  if (value === "steam" || value === "xbox" || value === "psn" || value === "kakao") return value;
+  if (value === "steam" || value === "xbox" || value === "psn") return value;
   return null;
 }
 

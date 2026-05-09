@@ -428,7 +428,6 @@ export function PubgClipsPanel() {
             <option value="steam">Steam</option>
             <option value="xbox">Xbox</option>
             <option value="psn">PSN</option>
-            <option value="kakao">Kakao</option>
           </select>
           <div className="w-full border border-[#2d2d2d] bg-[#0b0b0b] px-3 py-2 text-xs uppercase tracking-[0.12em] text-[#7f7768]">
             shard auto-resolve

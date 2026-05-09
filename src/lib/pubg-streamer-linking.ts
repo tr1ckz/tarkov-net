@@ -196,10 +196,6 @@ function parseUserPubgClaims(user: {
     const playerName = user.pubgPsnUser.trim();
     claims.push({ platform: "psn", playerName, normalized: normalizeForLinking(playerName) });
   }
-  if (user.pubgKakaoUser?.trim()) {
-    const playerName = user.pubgKakaoUser.trim();
-    claims.push({ platform: "kakao", playerName, normalized: normalizeForLinking(playerName) });
-  }
 
   return claims.filter((c) => c.normalized.length >= 4);
 }
@@ -210,15 +206,13 @@ async function maybeAutoLinkByUserClaims(input: PubgTwitchIdentityInput) {
       OR: [
         { pubgSteamUser: { not: null } },
         { pubgXboxUser: { not: null } },
-        { pubgPsnUser: { not: null } },
-        { pubgKakaoUser: { not: null } }
+        { pubgPsnUser: { not: null } }
       ]
     },
     select: {
       pubgSteamUser: true,
       pubgXboxUser: true,
-      pubgPsnUser: true,
-      pubgKakaoUser: true
+      pubgPsnUser: true
     },
     take: 1200
   });

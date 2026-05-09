@@ -6,7 +6,8 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const q = searchParams.get("q")?.trim() ?? "";
-  const platform = searchParams.get("platform")?.trim().toLowerCase() ?? "steam";
+  const requestedPlatform = searchParams.get("platform")?.trim().toLowerCase() ?? "steam";
+  const platform = requestedPlatform === "xbox" || requestedPlatform === "psn" ? requestedPlatform : "steam";
   const limit = Math.max(1, Math.min(20, Number(searchParams.get("limit") ?? "10")));
 
   if (q.length < 2) {

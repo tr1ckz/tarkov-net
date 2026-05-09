@@ -46,7 +46,7 @@ function getLoginCandidates(pubgName: string) {
 }
 
 function parsePlatform(value: string): PubgPlatform {
-  if (value === "xbox" || value === "psn" || value === "kakao") return value;
+  if (value === "xbox" || value === "psn") return value;
   return "steam";
 }
 
