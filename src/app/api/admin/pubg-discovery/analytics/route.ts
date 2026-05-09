@@ -145,7 +145,7 @@ export async function GET(request: Request) {
         createdAt: { gte: since },
       },
       orderBy: { createdAt: "desc" },
-      take: 20,
+      take: 300,
       select: {
         createdAt: true,
         status: true,
@@ -197,26 +197,35 @@ export async function GET(request: Request) {
       observations: normalizeCount(row.observations),
       uniquePlayers: normalizeCount(row.uniquePlayers),
     })),
-    recentEventSubRuns: recentDiscoveryRuns.map((run) => {
-      let seenIndexing: Record<string, unknown> | null = null;
-      let matchVodIndexing: Record<string, unknown> | null = null;
-      if (run.metadataJson) {
-        try {
-          const parsed = JSON.parse(run.metadataJson) as Record<string, unknown>;
-          seenIndexing = (parsed.seenIndexing as Record<string, unknown> | null) ?? null;
-          matchVodIndexing = (parsed.matchVodIndexing as Record<string, unknown> | null) ?? null;
-        } catch {
-          seenIndexing = null;
-          matchVodIndexing = null;
+    recentEventSubRuns: recentDiscoveryRuns
+      .map((run) => {
+        let seenIndexing: Record<string, unknown> | null = null;
+        let matchVodIndexing: Record<string, unknown> | null = null;
+        let backgroundProcessed = false;
+        if (run.metadataJson) {
+          try {
+            const parsed = JSON.parse(run.metadataJson) as Record<string, unknown>;
+            seenIndexing = (parsed.seenIndexing as Record<string, unknown> | null) ?? null;
+            matchVodIndexing = (parsed.matchVodIndexing as Record<string, unknown> | null) ?? null;
+            backgroundProcessed = parsed.backgroundProcessed === true;
+          } catch {
+            seenIndexing = null;
+            matchVodIndexing = null;
+            backgroundProcessed = false;
+          }
         }
-      }
-      return {
-        createdAt: run.createdAt,
-        status: run.status,
-        playerName: run.playerName,
-        seenIndexing,
-        matchVodIndexing,
-      };
-    })
+
+        return {
+          createdAt: run.createdAt,
+          status: run.status,
+          playerName: run.playerName,
+          seenIndexing,
+          matchVodIndexing,
+          backgroundProcessed,
+        };
+      })
+      .filter((run) => run.backgroundProcessed)
+      .slice(0, 20)
+      .map(({ backgroundProcessed: _ignored, ...run }) => run)
   });
 }

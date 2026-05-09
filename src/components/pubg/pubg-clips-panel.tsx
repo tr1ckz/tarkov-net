@@ -108,6 +108,7 @@ export function PubgClipsPanel() {
   const [platform, setPlatform] = useState("steam");
   const [pendingPlatform, setPendingPlatform] = useState("steam");
   const [resolvedShard, setResolvedShard] = useState("");
+  const [pendingShardHint, setPendingShardHint] = useState("");
   const [loading, setLoading] = useState(false);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [liveLookupLoading, setLiveLookupLoading] = useState(false);
@@ -143,6 +144,7 @@ export function PubgClipsPanel() {
       const parsed = JSON.parse(saved) as {
         playerName?: string;
         platform?: string;
+        shard?: string;
       };
 
       if (parsed.playerName) {
@@ -154,6 +156,11 @@ export function PubgClipsPanel() {
       if (parsed.platform) {
         setPendingPlatform(parsed.platform);
         setPlatform(parsed.platform);
+      }
+
+      if (parsed.shard) {
+        setResolvedShard(parsed.shard);
+        setPendingShardHint(parsed.shard);
       }
     } catch {
       // ignore malformed local cache
@@ -169,9 +176,12 @@ export function PubgClipsPanel() {
     if (mode === "encounters" && playerName) {
       params.set("playerName", playerName);
       params.set("platform", platform);
+      if (resolvedShard && resolvedShard !== "unresolved") {
+        params.set("shard", resolvedShard);
+      }
     }
     return `/api/pubg/clips?${params.toString()}`;
-  }, [mode, playerName, platform, streamer]);
+  }, [mode, playerName, platform, streamer, resolvedShard]);
 
   useEffect(() => {
     let cancelled = false;
@@ -220,6 +230,7 @@ export function PubgClipsPanel() {
       setLiveLookupLoading(false);
       setSearchSuggestions([]);
       setShowSuggestions(false);
+      setPendingShardHint("");
       return;
     }
 
@@ -284,6 +295,7 @@ export function PubgClipsPanel() {
     setPendingPlayerName(profile.playerName);
     setPlayerName(profile.playerName);
     setResolvedShard(profile.shard);
+    setPendingShardHint(profile.shard);
     setPlatform(pendingPlatform);
     setMode("encounters");
 
@@ -291,7 +303,8 @@ export function PubgClipsPanel() {
       "pubg-clips-profile",
       JSON.stringify({
         playerName: profile.playerName,
-        platform: pendingPlatform
+        platform: pendingPlatform,
+        shard: profile.shard
       })
     );
   }
@@ -318,13 +331,15 @@ export function PubgClipsPanel() {
     setMode("encounters");
     setPlayerName(nextName);
     setPlatform(pendingPlatform);
-    setResolvedShard("");
+    const fallbackShard = pendingShardHint || resolvedShard;
+    setResolvedShard(fallbackShard || "");
 
     localStorage.setItem(
       "pubg-clips-profile",
       JSON.stringify({
         playerName: nextName,
-        platform: pendingPlatform
+        platform: pendingPlatform,
+        shard: fallbackShard || undefined
       })
     );
   }
@@ -374,6 +389,7 @@ export function PubgClipsPanel() {
     setPendingStreamer("");
     setStreamer("");
     setPendingPlayerName("");
+    setPendingShardHint("");
     setPlayerName("");
     setResolvedShard("");
     setMode("pubg");
@@ -394,7 +410,11 @@ export function PubgClipsPanel() {
           <div className="relative sm:col-span-2">
             <input
               value={pendingPlayerName}
-              onChange={(e) => { setPendingPlayerName(e.target.value); setShowSuggestions(true); }}
+              onChange={(e) => {
+                setPendingPlayerName(e.target.value);
+                setPendingShardHint("");
+                setShowSuggestions(true);
+              }}
               onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
               onFocus={() => searchSuggestions.length > 0 && setShowSuggestions(true)}
               placeholder="your PUBG username"
@@ -408,6 +428,8 @@ export function PubgClipsPanel() {
                       type="button"
                       onMouseDown={() => {
                         setPendingPlayerName(s.playerName);
+                        setPendingShardHint(s.shard);
+                        setResolvedShard(s.shard);
                         setShowSuggestions(false);
                       }}
                       className="w-full px-3 py-2 text-left text-sm text-[#e2d2af] hover:bg-[#1a1a1a] flex justify-between"
@@ -422,7 +444,12 @@ export function PubgClipsPanel() {
           </div>
           <select
             value={pendingPlatform}
-            onChange={(e) => setPendingPlatform(e.target.value)}
+            onChange={(e) => {
+              const next = e.target.value;
+              setPendingPlatform(next);
+              setPendingShardHint("");
+              setResolvedShard("");
+            }}
             className="w-full border border-[#2d2d2d] bg-[#0b0b0b] px-3 py-2 text-sm text-[#e2d2af] outline-none focus:border-[#f5c842]"
           >
             <option value="steam">Steam</option>
@@ -499,7 +526,11 @@ export function PubgClipsPanel() {
 
       {mode === "encounters" && playerName && (
         <div className="border border-[#2d2d2d] bg-[#111] px-3 py-2 text-xs uppercase tracking-[0.12em] text-[#9a9080]">
-          My account: <span className="text-[#e2d2af]">{playerName}</span> · {platform} · {loading ? "resolving..." : (resolvedShard || "unresolved")}
+          My account: <span className="text-[#e2d2af]">{playerName}</span> · {platform} · {
+            loading
+              ? (resolvedShard && resolvedShard !== "unresolved" ? `${resolvedShard} (refreshing...)` : "resolving...")
+              : (resolvedShard || "unresolved")
+          }
           {typeof resultMeta?.encountersScanned === "number" && (
             <span className="ml-2 text-[#7f7768]">(encounters scanned: {resultMeta.encountersScanned})</span>
           )}
