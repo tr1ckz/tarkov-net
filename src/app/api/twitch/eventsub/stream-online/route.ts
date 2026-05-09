@@ -144,11 +144,10 @@ function shouldAllowSparseProbeForWeakIdentity(input: {
   linkSource: string | null;
   pubgPlayerId: string;
 }) {
-  // Auto-linked and synthetic identities are too noisy for direct indexing probes.
   if (input.identitySource === "autolink_identity") return false;
+  if (input.identitySource === "fallback_identity_link") return true;
   if (isSyntheticPubgPlayerId(input.pubgPlayerId)) return false;
-  if (!input.linkSource) return false;
-  return true;
+  return Boolean(input.linkSource);
 }
 
 async function isIdentityPresentInKnownPlayerCache(input: {
