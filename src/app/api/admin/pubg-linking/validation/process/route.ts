@@ -31,6 +31,16 @@ function isSyntheticId(playerId: string) {
   );
 }
 
+function isWeakValidationTarget(link: { source: string; pubgPlayerId: string }) {
+  return (
+    isSyntheticId(link.pubgPlayerId) ||
+    link.source === "eventsub_login_heuristic" ||
+    link.source === "eventsub_profile_claim" ||
+    link.source === "eventsub_known_player_unverified" ||
+    link.source === "eventsub_login_heuristic_unverified"
+  );
+}
+
 function clampLimit(value: unknown, fallback = 40) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
@@ -84,6 +94,20 @@ export async function POST(request: Request) {
             data: {
               status: "invalid",
               lastError: "identity_link_missing",
+              completedAt: new Date(),
+            }
+          });
+          continue;
+        }
+
+        if (!isWeakValidationTarget(link)) {
+          completed += 1;
+          results.push({ queueId: job.id, identityLinkId: job.identityLinkId, result: "completed", reason: "trusted_source_skipped" });
+          await prisma.pubgIdentityValidationQueue.update({
+            where: { id: job.id },
+            data: {
+              status: "completed",
+              lastError: "trusted_source_skipped",
               completedAt: new Date(),
             }
           });

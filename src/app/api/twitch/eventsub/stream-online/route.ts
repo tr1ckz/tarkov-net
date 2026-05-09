@@ -112,6 +112,33 @@ function normalizePubgNameForCacheLookup(value: string) {
   return value.toLowerCase().trim();
 }
 
+const WEAK_IDENTITY_LINK_SOURCES = new Set<string>([
+  "eventsub_login_heuristic",
+  "eventsub_profile_claim",
+  "eventsub_known_player_unverified",
+  "eventsub_login_heuristic_unverified",
+]);
+
+function isSyntheticPubgPlayerId(value: string) {
+  return (
+    value.startsWith("unverified:") ||
+    value.startsWith("login-heuristic:") ||
+    value.startsWith("profile-claim:") ||
+    value.startsWith("autolink:")
+  );
+}
+
+function shouldTreatIdentityAsWeakForValidation(input: {
+  identitySource: "real_identity_link" | "fallback_identity_link" | "autolink_identity";
+  linkSource: string | null;
+  pubgPlayerId: string;
+}) {
+  if (input.identitySource === "autolink_identity") return true;
+  if (isSyntheticPubgPlayerId(input.pubgPlayerId)) return true;
+  if (!input.linkSource) return true;
+  return WEAK_IDENTITY_LINK_SOURCES.has(input.linkSource);
+}
+
 async function isIdentityPresentInKnownPlayerCache(input: {
   platform: PubgPlatform;
   shard: string;
@@ -424,6 +451,7 @@ async function processStreamOnlineNotification(input: {
       },
       select: {
         id: true,
+        source: true,
         platform: true,
         shard: true,
         pubgPlayerId: true,
@@ -432,7 +460,38 @@ async function processStreamOnlineNotification(input: {
       orderBy: { lastLinkedAt: "desc" }
     });
 
-    const fallbackIdentityLink = realIdentityLink
+    const strongFallbackIdentityLink = realIdentityLink
+      ? null
+      : await db.pubgStreamerIdentityLink.findFirst({
+          where: {
+            twitchUserId,
+            platform: {
+              in: ["steam", "xbox", "psn"]
+            },
+            pubgPlayerName: {
+              not: ""
+            },
+            source: {
+              notIn: [
+                "eventsub_login_heuristic",
+                "eventsub_profile_claim",
+                "eventsub_known_player_unverified",
+                "eventsub_login_heuristic_unverified"
+              ]
+            }
+          },
+          select: {
+            id: true,
+            source: true,
+            platform: true,
+            shard: true,
+            pubgPlayerId: true,
+            pubgPlayerName: true,
+          },
+          orderBy: { lastLinkedAt: "desc" }
+        });
+
+    const fallbackIdentityLink = realIdentityLink || strongFallbackIdentityLink
       ? null
       : await db.pubgStreamerIdentityLink.findFirst({
           where: {
@@ -446,6 +505,7 @@ async function processStreamOnlineNotification(input: {
           },
           select: {
             id: true,
+            source: true,
             platform: true,
             shard: true,
             pubgPlayerId: true,
@@ -460,15 +520,27 @@ async function processStreamOnlineNotification(input: {
       ? {
           source: "real_identity_link" as const,
           identityLinkId: realIdentityLink.id,
+          linkSource: realIdentityLink.source,
           platform: realIdentityLink.platform as PubgPlatform,
           shard: realIdentityLink.shard,
           pubgPlayerId: realIdentityLink.pubgPlayerId,
           pubgPlayerName: realIdentityLink.pubgPlayerName,
         }
+      : strongFallbackIdentityLink
+        ? {
+            source: "fallback_identity_link" as const,
+            identityLinkId: strongFallbackIdentityLink.id,
+            linkSource: strongFallbackIdentityLink.source,
+            platform: strongFallbackIdentityLink.platform as PubgPlatform,
+            shard: strongFallbackIdentityLink.shard,
+            pubgPlayerId: strongFallbackIdentityLink.pubgPlayerId,
+            pubgPlayerName: strongFallbackIdentityLink.pubgPlayerName,
+          }
       : fallbackIdentityLink
         ? {
             source: "fallback_identity_link" as const,
             identityLinkId: fallbackIdentityLink.id,
+            linkSource: fallbackIdentityLink.source,
             platform: fallbackIdentityLink.platform as PubgPlatform,
             shard: fallbackIdentityLink.shard,
             pubgPlayerId: fallbackIdentityLink.pubgPlayerId,
@@ -478,6 +550,7 @@ async function processStreamOnlineNotification(input: {
           ? {
               source: "autolink_identity" as const,
               identityLinkId: null,
+              linkSource: null,
               platform: looseAutoLinkIdentity.platform,
               shard: looseAutoLinkIdentity.shard,
               pubgPlayerId: `autolink:${looseAutoLinkIdentity.platform}:${looseAutoLinkIdentity.pubgPlayerName.toLowerCase()}`,
@@ -490,6 +563,7 @@ async function processStreamOnlineNotification(input: {
       broadcasterLogin: twitchUserLogin,
       identityLinkFound: Boolean(selectedIdentity),
       identitySource: selectedIdentity?.source ?? "none",
+      linkSource: selectedIdentity?.linkSource ?? null,
       platform: selectedIdentity?.platform ?? null,
       shard: selectedIdentity?.shard ?? null,
       pubgPlayerName: selectedIdentity?.pubgPlayerName ?? null,
@@ -509,7 +583,13 @@ async function processStreamOnlineNotification(input: {
         matchErrors: 0,
       };
     } else {
-      if (selectedIdentity.source !== "real_identity_link") {
+      const weakIdentity = shouldTreatIdentityAsWeakForValidation({
+        identitySource: selectedIdentity.source,
+        linkSource: selectedIdentity.linkSource,
+        pubgPlayerId: selectedIdentity.pubgPlayerId,
+      });
+
+      if (selectedIdentity.source !== "real_identity_link" && weakIdentity) {
         const cachedIdentityConfirmed = await isIdentityPresentInKnownPlayerCache({
           platform: selectedIdentity.platform,
           shard: selectedIdentity.shard,
@@ -535,7 +615,7 @@ async function processStreamOnlineNotification(input: {
               matchErrors: 0,
             };
             let validationQueue = "not_applicable";
-            if (selectedIdentity.identityLinkId) {
+            if (selectedIdentity.identityLinkId && weakIdentity) {
               validationQueue = await enqueueIdentityValidationJob(
                 selectedIdentity.identityLinkId,
                 `eventsub_cache_block:${selectedIdentity.source}`
@@ -618,7 +698,8 @@ async function processStreamOnlineNotification(input: {
 
       if (
         matchVodIndexing?.reason === "player_not_found" &&
-        selectedIdentity.identityLinkId
+        selectedIdentity.identityLinkId &&
+        weakIdentity
       ) {
         const validationQueue = await enqueueIdentityValidationJob(
           selectedIdentity.identityLinkId,

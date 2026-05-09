@@ -12,6 +12,18 @@ function requireAdmin(session: Session | null) {
   return null;
 }
 
+function isWeakValidationTarget(link: { source: string; pubgPlayerId: string }) {
+  return (
+    link.pubgPlayerId.startsWith("unverified:") ||
+    link.pubgPlayerId.startsWith("login-heuristic:") ||
+    link.pubgPlayerId.startsWith("profile-claim:") ||
+    link.source === "eventsub_login_heuristic" ||
+    link.source === "eventsub_profile_claim" ||
+    link.source === "eventsub_known_player_unverified" ||
+    link.source === "eventsub_login_heuristic_unverified"
+  );
+}
+
 export async function POST() {
   const session = await getServerSession(authOptions);
   const denied = requireAdmin(session);
@@ -19,13 +31,15 @@ export async function POST() {
   const adminEmail = (session?.user as { email?: string } | undefined)?.email ?? null;
 
   const links = await prisma.pubgStreamerIdentityLink.findMany({
-    select: { id: true },
+    select: { id: true, source: true, pubgPlayerId: true },
   });
+
+  const targetLinks = links.filter(isWeakValidationTarget);
 
   let queued = 0;
   let reset = 0;
 
-  for (const link of links) {
+  for (const link of targetLinks) {
     const existing = await prisma.pubgIdentityValidationQueue.findUnique({
       where: { identityLinkId: link.id },
       select: { status: true }
@@ -70,6 +84,7 @@ export async function POST() {
       linkEventsQueued: queued + reset,
       metadataJson: JSON.stringify({
         totalLinks: links.length,
+        weakLinks: targetLinks.length,
         queued,
         reset,
         triggeredBy: adminEmail,
@@ -81,6 +96,7 @@ export async function POST() {
   return NextResponse.json({
     ok: true,
     totalLinks: links.length,
+    weakLinks: targetLinks.length,
     newlyQueued: queued,
     reQueued: reset,
     totalQueuedNow: queued + reset,
