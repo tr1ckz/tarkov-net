@@ -4,11 +4,11 @@ import {
   getPlayerWithMatches,
   lookupPlayerAcrossShards,
   getPlayerTelemetryData,
-  getMatchTelemetryEvents,
-  validatePlayerInMatch,
   type PubgPlatform,
 } from "@/lib/pubg-api";
 import { getVideosByUserId, parseTwitchDurationToSeconds } from "@/lib/twitch";
+
+const db = prisma as any;
 
 type StreamerIdentityInput = {
   twitchUserId: string;
@@ -58,6 +58,31 @@ function computeEventVodOffset(eventTimestampIso: string, vodStartedAt: Date | n
   const eventTime = parseIso(eventTimestampIso);
   if (!eventTime) return null;
   return Math.max(0, Math.floor((eventTime.getTime() - vodStartedAt.getTime()) / 1000));
+}
+
+function normalizeName(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function toDistanceMeters(value: number | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.round(value));
+}
+
+function getInteractionDetails(input: {
+  kind: "killed_by_streamer" | "killed_streamer" | "knocked_by_streamer" | "knocked_streamer";
+  streamerName: string;
+}) {
+  if (input.kind === "killed_by_streamer") {
+    return { type: "killed_by_streamer", title: `Killed by ${input.streamerName}` };
+  }
+  if (input.kind === "killed_streamer") {
+    return { type: "killed_streamer", title: `Killed ${input.streamerName}` };
+  }
+  if (input.kind === "knocked_by_streamer") {
+    return { type: "knocked_by_streamer", title: `Knocked by ${input.streamerName}` };
+  }
+  return { type: "knocked_streamer", title: `Knocked ${input.streamerName}` };
 }
 
 function computeMatchVodMapping(
@@ -245,31 +270,7 @@ export async function indexStreamerMatchesAndVods(options: {
     });
   }
 
-  // Validate identity by checking if player appears in their recent matches
-  let identityValidated = false;
-  for (const match of matchRows) {
-    if (!match.telemetryUrl) continue;
-    const isInMatch = await validatePlayerInMatch(activePlayerName, match.telemetryUrl).catch(() => false);
-    if (isInMatch) {
-      identityValidated = true;
-      console.info("[pubg-match-vod-indexer] identity validated via telemetry", {
-        twitchUserId: identity.twitchUserId,
-        pubgPlayerName: activePlayerName,
-        matchId: match.matchId,
-        shard: activeShard,
-      });
-      break;
-    }
-  }
-
-  if (!identityValidated && matchRows.length > 0) {
-    console.warn("[pubg-match-vod-indexer] identity NOT found in recent match telemetry", {
-      twitchUserId: identity.twitchUserId,
-      pubgPlayerName: activePlayerName,
-      matchesChecked: matchRows.length,
-      shard: activeShard,
-    });
-  }
+  const identityValidated = matchRows.length > 0;
 
   const videos = await getVideosByUserId(identity.twitchUserId, maxVods).catch((err) => {
     console.error("[pubg-match-vod-indexer] getVideosByUserId (Twitch) failed", {
@@ -368,7 +369,7 @@ export async function indexStreamerMatchesAndVods(options: {
 
     linksMapped += 1;
 
-    // Extract and map events from telemetry
+    // Extract and map non-streamer interactions from telemetry
     if (match.telemetryUrl) {
       const streamerData = await getPlayerTelemetryData(activePlayerName, match.telemetryUrl).catch((err) => {
         console.warn("[pubg-match-vod-indexer] failed to extract streamer telemetry", {
@@ -380,100 +381,151 @@ export async function indexStreamerMatchesAndVods(options: {
       });
 
       if (streamerData) {
-        // Process streamer's kills
-        for (const kill of streamerData.kills) {
-          const eventVodOffset = computeEventVodOffset(kill.timestamp, mapped.vodStartedAt);
-          if (eventVodOffset !== null && kill.target) {
-            const targetNormalized = kill.target.toLowerCase().replace(/[^a-z0-9]/g, "");
-            const dedupeKey = `${identity.twitchUserId}|${match.matchId}|kill|${kill.target}|${kill.timestamp}`;
-            
-            await prisma.pubgLinkEvent.upsert({
-              where: { dedupeKey },
-              create: {
-                dedupeKey,
-                eventType: "vod_moment",
-                pubgNameRaw: kill.target,
-                pubgNameNormalized: targetNormalized,
-                twitchUserId: identity.twitchUserId,
-                twitchUserLogin: identity.twitchUserLogin,
-                twitchUserName: identity.twitchUserName,
-                twitchVideoId: mapped.videoId,
-                shard: activeShard,
-                platform: identity.platform,
-                encounterAt: parseIso(kill.timestamp),
-              },
-              update: {
-                twitchUserLogin: identity.twitchUserLogin,
-                twitchUserName: identity.twitchUserName,
-                encounterAt: parseIso(kill.timestamp),
-              }
-            }).catch((err) => {
-              console.warn("[pubg-match-vod-indexer] failed to store kill event", {
-                matchId: match.matchId,
-                target: kill.target,
-                error: err instanceof Error ? err.message : String(err),
-              });
-            });
-            
-            console.info("[pubg-match-vod-indexer] streamer encounter stored: killed", {
+        const persistInteraction = async (input: {
+          kind: "killed_by_streamer" | "killed_streamer" | "knocked_by_streamer" | "knocked_streamer";
+          counterpartyName: string;
+          counterpartyPlayerId?: string | null;
+          timestamp: string;
+          weapon?: string;
+          distance?: number;
+        }) => {
+          const eventVodOffset = computeEventVodOffset(input.timestamp, mapped.vodStartedAt);
+          if (eventVodOffset === null || !input.counterpartyName) return;
+
+          const details = getInteractionDetails({
+            kind: input.kind,
+            streamerName: identity.twitchUserName || identity.twitchUserLogin,
+          });
+
+          const counterpartyNameNormalized = normalizeName(input.counterpartyName);
+          if (!counterpartyNameNormalized) return;
+
+          const dedupeKey = [
+            identity.twitchUserId,
+            match.matchId,
+            details.type,
+            input.counterpartyPlayerId ?? "na",
+            counterpartyNameNormalized,
+            input.timestamp,
+          ].join("|");
+
+          await db.pubgMatchInteraction.upsert({
+            where: { dedupeKey },
+            create: {
+              dedupeKey,
               twitchUserId: identity.twitchUserId,
+              twitchUserLogin: identity.twitchUserLogin,
+              twitchUserName: identity.twitchUserName,
+              streamerPubgPlayerId: identity.pubgPlayerId,
+              streamerPubgPlayerName: activePlayerName,
+              counterpartyPubgPlayerId: input.counterpartyPlayerId ?? null,
+              counterpartyPubgNameRaw: input.counterpartyName,
+              counterpartyPubgNameNormalized: counterpartyNameNormalized,
+              interactionType: details.type,
+              interactionTitle: details.title,
+              platform: identity.platform,
+              shard: activeShard,
               matchId: match.matchId,
-              victim: kill.target,
-              weapon: kill.weapon,
-              distance: kill.distance,
-              eventTimestamp: kill.timestamp,
-              vodOffset: eventVodOffset,
+              matchCreatedAt: parseIso(match.matchCreatedAt),
+              encounterAt: parseIso(input.timestamp),
+              twitchVideoId: mapped.videoId,
+              vodOffsetSeconds: eventVodOffset,
+              weapon: input.weapon ?? null,
+              distanceMeters: toDistanceMeters(input.distance),
+              mapTag: match.mapName,
+              gameModeTag: match.gameMode,
+            },
+            update: {
+              twitchUserLogin: identity.twitchUserLogin,
+              twitchUserName: identity.twitchUserName,
+              streamerPubgPlayerId: identity.pubgPlayerId,
+              streamerPubgPlayerName: activePlayerName,
+              counterpartyPubgPlayerId: input.counterpartyPlayerId ?? null,
+              encounterAt: parseIso(input.timestamp),
+              twitchVideoId: mapped.videoId,
+              vodOffsetSeconds: eventVodOffset,
+              interactionType: details.type,
+              interactionTitle: details.title,
+              weapon: input.weapon ?? null,
+              distanceMeters: toDistanceMeters(input.distance),
+              mapTag: match.mapName,
+              gameModeTag: match.gameMode,
+            }
+          });
+
+          encountersProcessed += 1;
+        };
+
+        // Streamer killed opponent
+        for (const kill of streamerData.kills) {
+          await persistInteraction({
+            kind: "killed_by_streamer",
+            counterpartyName: kill.target,
+            counterpartyPlayerId: kill.targetId ?? null,
+            timestamp: kill.timestamp,
+            weapon: kill.weapon,
+            distance: kill.distance,
+          }).catch((err) => {
+            console.warn("[pubg-match-vod-indexer] failed to store kill interaction", {
+              matchId: match.matchId,
+              target: kill.target,
+              error: err instanceof Error ? err.message : String(err),
             });
-            encountersProcessed += 1;
-          }
+          });
         }
 
-        // Process streamer's deaths
+        // Streamer was killed by opponent
         for (const death of streamerData.deaths) {
-          const eventVodOffset = computeEventVodOffset(death.timestamp, mapped.vodStartedAt);
-          if (eventVodOffset !== null && death.killer) {
-            const killerNormalized = death.killer.toLowerCase().replace(/[^a-z0-9]/g, "");
-            const dedupeKey = `${identity.twitchUserId}|${match.matchId}|death|${death.killer}|${death.timestamp}`;
-            
-            await prisma.pubgLinkEvent.upsert({
-              where: { dedupeKey },
-              create: {
-                dedupeKey,
-                eventType: "vod_moment",
-                pubgNameRaw: death.killer,
-                pubgNameNormalized: killerNormalized,
-                twitchUserId: identity.twitchUserId,
-                twitchUserLogin: identity.twitchUserLogin,
-                twitchUserName: identity.twitchUserName,
-                twitchVideoId: mapped.videoId,
-                shard: activeShard,
-                platform: identity.platform,
-                encounterAt: parseIso(death.timestamp),
-              },
-              update: {
-                twitchUserLogin: identity.twitchUserLogin,
-                twitchUserName: identity.twitchUserName,
-                encounterAt: parseIso(death.timestamp),
-              }
-            }).catch((err) => {
-              console.warn("[pubg-match-vod-indexer] failed to store death event", {
-                matchId: match.matchId,
-                killer: death.killer,
-                error: err instanceof Error ? err.message : String(err),
-              });
-            });
-            
-            console.info("[pubg-match-vod-indexer] streamer encounter stored: was killed by", {
-              twitchUserId: identity.twitchUserId,
+          await persistInteraction({
+            kind: "killed_streamer",
+            counterpartyName: death.killer,
+            counterpartyPlayerId: death.killerId ?? null,
+            timestamp: death.timestamp,
+            weapon: death.weapon,
+            distance: death.distance,
+          }).catch((err) => {
+            console.warn("[pubg-match-vod-indexer] failed to store death interaction", {
               matchId: match.matchId,
               killer: death.killer,
-              weapon: death.weapon,
-              distance: death.distance,
-              eventTimestamp: death.timestamp,
-              vodOffset: eventVodOffset,
+              error: err instanceof Error ? err.message : String(err),
             });
-            encountersProcessed += 1;
-          }
+          });
+        }
+
+        // Streamer knocked opponent
+        for (const knockout of streamerData.knockouts) {
+          await persistInteraction({
+            kind: "knocked_by_streamer",
+            counterpartyName: knockout.target,
+            counterpartyPlayerId: knockout.targetId ?? null,
+            timestamp: knockout.timestamp,
+            weapon: knockout.weapon,
+            distance: knockout.distance,
+          }).catch((err) => {
+            console.warn("[pubg-match-vod-indexer] failed to store knockout interaction", {
+              matchId: match.matchId,
+              target: knockout.target,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
+        }
+
+        // Streamer was knocked by opponent
+        for (const knockedOut of streamerData.wasKnockedOut) {
+          await persistInteraction({
+            kind: "knocked_streamer",
+            counterpartyName: knockedOut.knocker,
+            counterpartyPlayerId: knockedOut.knockerId ?? null,
+            timestamp: knockedOut.timestamp,
+            weapon: knockedOut.weapon,
+            distance: knockedOut.distance,
+          }).catch((err) => {
+            console.warn("[pubg-match-vod-indexer] failed to store was-knocked-out interaction", {
+              matchId: match.matchId,
+              knocker: knockedOut.knocker,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
         }
       }
     }

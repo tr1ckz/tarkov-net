@@ -32,6 +32,7 @@ type PubgMatchResponse = {
 
 type TelemetryCharacterRef = {
   name?: string | null;
+  accountId?: string | null;
 } | null;
 
 type PubgTelemetryEvent = {
@@ -493,18 +494,21 @@ export type MatchTelemetryEvent = {
   timestamp: string;
   type: string;
   killer?: string;
+  killerId?: string | null;
   victim?: string;
+  victimId?: string | null;
   attacker?: string;
+  attackerId?: string | null;
   weapon?: string;
   distance?: number;
 };
 
 export type PlayerTelemetryData = {
   playerName: string;
-  kills: Array<{ target: string; timestamp: string; weapon?: string; distance?: number }>;
-  deaths: Array<{ killer: string; timestamp: string; weapon?: string; distance?: number }>;
-  knockouts: Array<{ target: string; timestamp: string }>;
-  wasKnockedOut: Array<{ knocker: string; timestamp: string }>;
+  kills: Array<{ target: string; targetId?: string | null; timestamp: string; weapon?: string; distance?: number }>;
+  deaths: Array<{ killer: string; killerId?: string | null; timestamp: string; weapon?: string; distance?: number }>;
+  knockouts: Array<{ target: string; targetId?: string | null; timestamp: string; weapon?: string; distance?: number }>;
+  wasKnockedOut: Array<{ knocker: string; knockerId?: string | null; timestamp: string; weapon?: string; distance?: number }>;
 };
 
 export async function getMatchTelemetryEvents(telemetryUrl: string): Promise<MatchTelemetryEvent[]> {
@@ -531,13 +535,29 @@ export async function getMatchTelemetryEvents(telemetryUrl: string): Promise<Mat
 
       const timestamp = event._D ?? new Date().toISOString();
 
-      // LogPlayerKill
-      if (event._T === "LogPlayerKill" && event.killer?.name && event.victim?.name) {
+      // LogPlayerKill / LogPlayerKillV2
+      if ((event._T === "LogPlayerKill" || event._T === "LogPlayerKillV2") && event.killer?.name && event.victim?.name) {
         result.push({
           timestamp,
           type: "kill",
           killer: event.killer.name,
+          killerId: event.killer.accountId ?? null,
           victim: event.victim.name,
+          victimId: event.victim.accountId ?? null,
+          weapon: event.damageCauserName ?? undefined,
+          distance: event.distance ?? undefined,
+        });
+      }
+
+      // LogPlayerMakeGroggy
+      if (event._T === "LogPlayerMakeGroggy" && event.attacker?.name && event.victim?.name) {
+        result.push({
+          timestamp,
+          type: "knockout",
+          attacker: event.attacker.name,
+          attackerId: event.attacker.accountId ?? null,
+          victim: event.victim.name,
+          victimId: event.victim.accountId ?? null,
           weapon: event.damageCauserName ?? undefined,
           distance: event.distance ?? undefined,
         });
@@ -576,6 +596,7 @@ export async function getPlayerTelemetryData(playerName: string, telemetryUrl: s
       .filter(e => e.type === "kill" && e.killer?.toLowerCase() === normalizedName)
       .map(e => ({
         target: e.victim!,
+        targetId: e.victimId ?? null,
         timestamp: e.timestamp,
         weapon: e.weapon,
         distance: e.distance,
@@ -584,21 +605,28 @@ export async function getPlayerTelemetryData(playerName: string, telemetryUrl: s
       .filter(e => e.type === "kill" && e.victim?.toLowerCase() === normalizedName)
       .map(e => ({
         killer: e.killer!,
+        killerId: e.killerId ?? null,
         timestamp: e.timestamp,
         weapon: e.weapon,
         distance: e.distance,
       })),
     knockouts: events
-      .filter(e => e.type === "knockout" && e.killer?.toLowerCase() === normalizedName)
+      .filter(e => e.type === "knockout" && e.attacker?.toLowerCase() === normalizedName)
       .map(e => ({
         target: e.victim!,
+        targetId: e.victimId ?? null,
         timestamp: e.timestamp,
+        weapon: e.weapon,
+        distance: e.distance,
       })),
     wasKnockedOut: events
       .filter(e => e.type === "knockout" && e.victim?.toLowerCase() === normalizedName)
       .map(e => ({
-        knocker: e.killer!,
+        knocker: e.attacker!,
+        knockerId: e.attackerId ?? null,
         timestamp: e.timestamp,
+        weapon: e.weapon,
+        distance: e.distance,
       })),
   };
 }

@@ -374,3 +374,37 @@ model PubgMatchVodLink {
   @@index([videoId])
   @@index([linkedAt])
 }
+
+model PubgMatchInteraction {
+  id                        String   @id @default(cuid())
+  dedupeKey                 String   @unique
+  twitchUserId              String
+  twitchUserLogin           String
+  twitchUserName            String
+  streamerPubgPlayerId      String
+  streamerPubgPlayerName    String
+  counterpartyPubgPlayerId  String?
+  counterpartyPubgNameRaw   String
+  counterpartyPubgNameNormalized String
+  interactionType           String
+  interactionTitle          String
+  platform                  String
+  shard                     String
+  matchId                   String
+  matchCreatedAt            DateTime?
+  encounterAt               DateTime?
+  twitchVideoId             String
+  vodOffsetSeconds          Int      @default(0)
+  weapon                    String?
+  distanceMeters            Int?
+  mapTag                    String?
+  gameModeTag               String?
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  @@index([counterpartyPubgNameNormalized])
+  @@index([counterpartyPubgPlayerId])
+  @@index([platform, shard])
+  @@index([encounterAt])
+  @@index([twitchUserId, createdAt])
+}

@@ -76,6 +76,7 @@ type EncounterClipResponseRow = {
 
 async function getCachedEncounterClips(options: {
   playerName: string;
+  playerId?: string | null;
   platform: string;
   shard?: string;
   limit: number;
@@ -90,6 +91,101 @@ async function getCachedEncounterClips(options: {
     365
   );
   const cutoff = new Date(Date.now() - cacheWindowDays * 24 * 60 * 60 * 1000);
+
+  const interactionRows = await db.pubgMatchInteraction.findMany({
+    where: {
+      platform: options.platform,
+      shard: options.shard || undefined,
+      createdAt: { gte: cutoff },
+      OR: [
+        { counterpartyPubgNameNormalized: normalized },
+        ...(options.playerId ? [{ counterpartyPubgPlayerId: options.playerId }] : [])
+      ]
+    },
+    orderBy: [{ encounterAt: "desc" }, { createdAt: "desc" }],
+    take: Math.max(options.limit * 8, 80)
+  });
+
+  if (interactionRows.length) {
+    const vodIds: string[] = Array.from(
+      new Set(
+        interactionRows
+          .map((row: any) => String(row.twitchVideoId ?? "").trim())
+          .filter((value: string) => Boolean(value))
+      )
+    );
+    const vodRows = vodIds.length
+      ? await prisma.pubgStreamerVod.findMany({
+          where: { videoId: { in: vodIds } },
+          select: {
+            videoId: true,
+            twitchUserId: true,
+            twitchUserName: true,
+            title: true,
+            url: true,
+            thumbnailUrl: true,
+            createdAtTwitch: true,
+            durationSeconds: true
+          }
+        })
+      : [];
+
+    const vodById = new Map(vodRows.map((row) => [row.videoId, row]));
+    const out: EncounterClipResponseRow[] = [];
+    const seen = new Set<string>();
+
+    for (const row of interactionRows) {
+      const vod = vodById.get(row.twitchVideoId);
+      if (!vod) continue;
+
+      const uniqueKey = [
+        row.matchId,
+        row.counterpartyPubgPlayerId ?? row.counterpartyPubgNameNormalized,
+        row.interactionType,
+        row.encounterAt?.toISOString?.() ?? row.createdAt.toISOString?.() ?? "na"
+      ].join(":");
+      if (seen.has(uniqueKey)) continue;
+      seen.add(uniqueKey);
+
+      const offset = Math.max(0, Number(row.vodOffsetSeconds ?? 0));
+      const encounterWith = row.counterpartyPubgNameRaw || options.playerName;
+      const actionText = row.interactionTitle || `Encountered ${row.twitchUserName || row.twitchUserLogin}`;
+
+      out.push({
+        id: `cached-interaction-${row.id}`,
+        url: `${vod.url}?t=${offset}s`,
+        embed_url: `${vod.url}?t=${offset}s`,
+        broadcaster_id: row.twitchUserId,
+        broadcaster_name: row.twitchUserName || row.twitchUserLogin,
+        creator_id: row.twitchUserId,
+        creator_name: row.twitchUserName || row.twitchUserLogin,
+        video_id: row.twitchVideoId,
+        game_id: "27971",
+        language: "",
+        title: `[Cached Interaction] ${vod.title}`,
+        view_count: 0,
+        created_at: row.encounterAt?.toISOString?.() ?? row.createdAt.toISOString(),
+        thumbnail_url: (vod.thumbnailUrl ?? "")
+          .replace("%{width}", "640")
+          .replace("%{height}", "360"),
+        duration: Math.max(0, vod.durationSeconds ?? 0),
+        encounterWith,
+        encounterActionText: actionText,
+        encounterActionType: row.interactionType,
+        encounterWeapon: row.weapon ?? null,
+        encounterDistanceMeters: row.distanceMeters ?? null,
+        mapTag: row.mapTag ?? null,
+        gameModeTag: row.gameModeTag ?? null,
+        sourceType: "vod"
+      });
+
+      if (out.length >= options.limit) break;
+    }
+
+    if (out.length) {
+      return out;
+    }
+  }
 
   const linkRows = await prisma.pubgLinkEvent.findMany({
     where: {
@@ -419,6 +515,7 @@ export async function GET(request: Request) {
 
       const resolvedPlayer = {
         playerName: cachedPlayer.playerName,
+        playerId: cachedPlayer.playerId,
         shard: cachedPlayer.shard,
         matchCount: cachedPlayer.matchCount,
       };
@@ -427,6 +524,7 @@ export async function GET(request: Request) {
 
       const cachedEncounterClips = await getCachedEncounterClips({
         playerName: resolvedPlayer.playerName,
+        playerId: resolvedPlayer.playerId,
         platform,
         shard: resolvedPlayer.shard,
         limit
