@@ -51,6 +51,12 @@ function parsePlatform(value: string): PubgPlatform {
   return "steam";
 }
 
+function parseBoundedInt(raw: string | undefined, fallback: number, min: number, max: number) {
+  const parsed = Number(raw ?? String(fallback));
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(parsed)));
+}
+
 function describeEncounterAction(encounter: PubgEncounterEvent) {
   switch (encounter.actionType) {
     case "knocking_out_streamer":
@@ -347,13 +353,28 @@ export async function GET(request: Request) {
 
       pushVerbose(`encounters lookup resolved player=${resolvedPlayer.playerName} shard=${resolvedPlayer.shard}`);
 
+      const encounterMaxMatches = parseBoundedInt(
+        process.env.PUBG_CLIPS_ENCOUNTER_MAX_MATCHES,
+        3,
+        1,
+        12
+      );
+      const encounterMaxOpponents = parseBoundedInt(
+        process.env.PUBG_CLIPS_ENCOUNTER_MAX_OPPONENTS,
+        12,
+        1,
+        50
+      );
+
       const encounters = await getRecentEncounterNames({
         shard: resolvedPlayer.shard,
         playerName: resolvedPlayer.playerName,
-        maxMatches: 12,
-        maxOpponents: 25
+        maxMatches: encounterMaxMatches,
+        maxOpponents: encounterMaxOpponents
       });
-      pushVerbose(`encounters fetched count=${encounters.length}`);
+      pushVerbose(
+        `encounters fetched count=${encounters.length} maxMatches=${encounterMaxMatches} maxOpponents=${encounterMaxOpponents}`
+      );
       if (encounters.length === 0) {
         pushVerbose("no opponents extracted from recent matches; downstream twitch mapping skipped");
       }
