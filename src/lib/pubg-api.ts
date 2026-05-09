@@ -75,6 +75,15 @@ export type PubgMatchSummary = {
   telemetryUrl: string | null;
 };
 
+export type CachedPubgPlayerProfile = {
+  source: "identity_link" | "known_player";
+  playerName: string;
+  shard: string;
+  platform: PubgPlatform;
+  playerId: string | null;
+  matchCount: number;
+};
+
 const PUBG_API_MAX_CALLS_PER_MINUTE = (() => {
   const parsed = Number(process.env.PUBG_API_MAX_CALLS_PER_MINUTE ?? "5");
   if (!Number.isFinite(parsed)) return 5;
@@ -302,6 +311,81 @@ export async function getPlayerWithMatches(shard: string, playerName: string) {
     playerId: player.id,
     playerName: player.attributes.name,
     matchIds
+  };
+}
+
+export async function resolveCachedPubgPlayer(options: {
+  playerName: string;
+  platform: PubgPlatform;
+  preferredShard?: string;
+}): Promise<CachedPubgPlayerProfile | null> {
+  const playerName = options.playerName.trim();
+  if (!playerName) return null;
+
+  const preferredShard = options.preferredShard?.trim().toLowerCase() || null;
+  const normalized = normalizeName(playerName);
+  const lower = playerName.toLowerCase();
+  const { prisma } = await import("@/lib/prisma");
+
+  const findIdentityLink = (shard: string | null) =>
+    prisma.pubgStreamerIdentityLink.findFirst({
+      where: {
+        platform: options.platform,
+        pubgNameNormalized: normalized,
+        pubgPlayerName: { not: "" },
+        ...(shard ? { shard } : {}),
+      },
+      select: {
+        shard: true,
+        pubgPlayerId: true,
+        pubgPlayerName: true,
+      },
+      orderBy: [{ lastLinkedAt: "desc" }, { confidenceScore: "desc" }],
+    });
+
+  const identityLink = preferredShard
+    ? (await findIdentityLink(preferredShard)) ?? (await findIdentityLink(null))
+    : await findIdentityLink(null);
+
+  if (identityLink) {
+    return {
+      source: "identity_link",
+      playerName: identityLink.pubgPlayerName,
+      shard: identityLink.shard,
+      platform: options.platform,
+      playerId: identityLink.pubgPlayerId,
+      matchCount: 0,
+    };
+  }
+
+  const findKnownPlayer = (shard: string | null) =>
+    prisma.pubgKnownPlayer.findFirst({
+      where: {
+        platform: options.platform,
+        playerNameLower: lower,
+        ...(shard ? { shard } : {}),
+      },
+      select: {
+        playerName: true,
+        shard: true,
+        seenCount: true,
+      },
+      orderBy: [{ seenCount: "desc" }, { lastSeenAt: "desc" }],
+    });
+
+  const knownPlayer = preferredShard
+    ? (await findKnownPlayer(preferredShard)) ?? (await findKnownPlayer(null))
+    : await findKnownPlayer(null);
+
+  if (!knownPlayer) return null;
+
+  return {
+    source: "known_player",
+    playerName: knownPlayer.playerName,
+    shard: knownPlayer.shard,
+    platform: options.platform,
+    playerId: null,
+    matchCount: knownPlayer.seenCount,
   };
 }
 

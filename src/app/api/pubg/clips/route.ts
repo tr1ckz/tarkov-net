@@ -14,6 +14,7 @@ import {
   getPlayerWithMatches,
   getRecentEncounterNames,
   lookupPlayerAcrossShards,
+  resolveCachedPubgPlayer,
   setPubgCallContext,
   type PubgEncounterEvent,
   type PubgPlatform
@@ -295,11 +296,29 @@ export async function GET(request: Request) {
   try {
     if (playerName) {
       pushVerbose(`encounters lookup start player=${playerName}`);
-      const resolvedPlayer = await lookupPlayerAcrossShards({
+      const cachedPlayer = await resolveCachedPubgPlayer({
         playerName,
         platform,
-        preferredShard: requestedShard || undefined
-      });
+        preferredShard: requestedShard || undefined,
+      }).catch(() => null);
+
+      if (cachedPlayer) {
+        pushVerbose(
+          `encounters lookup cache-hit source=${cachedPlayer.source} player=${cachedPlayer.playerName} shard=${cachedPlayer.shard}`
+        );
+      }
+
+      const resolvedPlayer = cachedPlayer
+        ? {
+            playerName: cachedPlayer.playerName,
+            shard: cachedPlayer.shard,
+            matchCount: cachedPlayer.matchCount,
+          }
+        : await lookupPlayerAcrossShards({
+            playerName,
+            platform,
+            preferredShard: requestedShard || undefined
+          });
       if (!resolvedPlayer) {
         pushVerbose("encounters lookup result=not_found");
         await writePubgLinkRunLog({

@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { lookupPlayerAcrossShards, type PubgPlatform } from "@/lib/pubg-api";
+import {
+  lookupPlayerAcrossShards,
+  resolveCachedPubgPlayer,
+  type PubgPlatform,
+} from "@/lib/pubg-api";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +22,25 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Missing playerName" }, { status: 400 });
   }
 
+  const cached = await resolveCachedPubgPlayer({
+    playerName,
+    platform,
+    preferredShard: preferredShard || undefined,
+  }).catch(() => null);
+
+  if (cached) {
+    return NextResponse.json({
+      found: true,
+      profile: {
+        playerName: cached.playerName,
+        shard: cached.shard,
+        matchCount: cached.matchCount,
+      },
+      cacheHit: true,
+      source: cached.source,
+    });
+  }
+
   try {
     const found = await lookupPlayerAcrossShards({
       playerName,
@@ -32,7 +55,7 @@ export async function GET(request: Request) {
       );
     }
 
-    return NextResponse.json({ found: true, profile: found });
+    return NextResponse.json({ found: true, profile: found, cacheHit: false, source: "pubg_api" });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Lookup failed";
 
