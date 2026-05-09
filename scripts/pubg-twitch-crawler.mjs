@@ -12,6 +12,10 @@ const PROFILE_MAPPING_LIMIT = Math.max(1, Math.min(500, Number(process.env.PUBG_
 const KNOWN_PLAYER_MAPPING_LIMIT = Math.max(1, Math.min(500, Number(process.env.PUBG_KNOWN_PLAYER_MAPPING_LIMIT ?? "120")));
 const KNOWN_PLAYER_CANDIDATES_LIMIT = Math.max(1000, Math.min(100000, Number(process.env.PUBG_KNOWN_PLAYER_CANDIDATES_LIMIT ?? "30000")));
 const KNOWN_PLAYER_SIMILARITY_MIN = Math.max(0.75, Math.min(0.99, Number(process.env.PUBG_KNOWN_PLAYER_SIMILARITY_MIN ?? "0.91")));
+const INTERACTION_BACKFILL_ENABLED = (process.env.PUBG_INTERACTION_BACKFILL_ENABLED ?? "1").trim() !== "0";
+const INTERACTION_BACKFILL_STREAMERS = Math.max(1, Math.min(200, Number(process.env.PUBG_INTERACTION_BACKFILL_STREAMERS ?? "30")));
+const INTERACTION_BACKFILL_MATCHES = Math.max(1, Math.min(20, Number(process.env.PUBG_INTERACTION_BACKFILL_MATCHES ?? "6")));
+const INTERACTION_BACKFILL_VODS = Math.max(1, Math.min(20, Number(process.env.PUBG_INTERACTION_BACKFILL_VODS ?? "12")));
 
 let tokenState = null;
 let lastEventSubSyncMs = 0;
@@ -899,6 +903,337 @@ async function syncEventSubSubscriptions(streams) {
   });
 }
 
+function parseIso(value) {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms)) return null;
+  return new Date(ms);
+}
+
+function computeBestVodForMatch(matchCreatedAt, vodRows) {
+  const matchTime = parseIso(matchCreatedAt);
+  if (!matchTime) return null;
+
+  let best = null;
+  for (const vod of vodRows) {
+    if (!vod.createdAtTwitch || !vod.durationSeconds || vod.durationSeconds <= 0) continue;
+    const vodStart = vod.createdAtTwitch;
+    const vodEnd = new Date(vodStart.getTime() + vod.durationSeconds * 1000);
+    const insideWindow = matchTime >= vodStart && matchTime <= vodEnd;
+    const deltaSeconds = insideWindow
+      ? 0
+      : Math.floor(
+          Math.min(
+            Math.abs(matchTime.getTime() - vodStart.getTime()),
+            Math.abs(matchTime.getTime() - vodEnd.getTime())
+          ) / 1000
+        );
+
+    if (!best || deltaSeconds < best.deltaSeconds) {
+      best = {
+        videoId: vod.videoId,
+        vodStartedAt: vodStart,
+        deltaSeconds,
+        vodOffsetSeconds: Math.max(0, Math.floor((matchTime.getTime() - vodStart.getTime()) / 1000)),
+        confidenceTag: insideWindow ? "inside_vod" : deltaSeconds <= 900 ? "nearby_15m" : "weak"
+      };
+    }
+  }
+
+  return best;
+}
+
+function buildVodMomentDedupeKey(input) {
+  return [
+    input.twitchUserId,
+    input.matchId,
+    "vod_moment",
+    normalizeForCompare(input.opponent),
+    input.eventTimestamp
+  ].join(":");
+}
+
+async function runInteractionBackfill() {
+  if (!INTERACTION_BACKFILL_ENABLED) {
+    return {
+      enabled: false,
+      streamersScanned: 0,
+      streamersWithIdentity: 0,
+      streamersWithMatches: 0,
+      matchesPersisted: 0,
+      linksPersisted: 0,
+      vodMomentsPersisted: 0,
+      errors: 0
+    };
+  }
+
+  const summary = {
+    enabled: true,
+    streamersScanned: 0,
+    streamersWithIdentity: 0,
+    streamersWithMatches: 0,
+    matchesPersisted: 0,
+    linksPersisted: 0,
+    vodMomentsPersisted: 0,
+    errors: 0
+  };
+
+  const recentVods = await prisma.pubgStreamerVod.findMany({
+    orderBy: { createdAtTwitch: "desc" },
+    take: Math.max(INTERACTION_BACKFILL_STREAMERS * INTERACTION_BACKFILL_VODS, 200),
+    select: {
+      twitchUserId: true,
+      twitchUserLogin: true,
+      twitchUserName: true,
+      videoId: true,
+      title: true,
+      url: true,
+      thumbnailUrl: true,
+      durationSeconds: true,
+      createdAtTwitch: true,
+      publishedAtTwitch: true
+    }
+  });
+
+  const byStreamer = new Map();
+  for (const vod of recentVods) {
+    if (!byStreamer.has(vod.twitchUserId)) {
+      byStreamer.set(vod.twitchUserId, {
+        twitchUserId: vod.twitchUserId,
+        twitchUserLogin: vod.twitchUserLogin,
+        twitchUserName: vod.twitchUserName,
+        vods: []
+      });
+    }
+    const bucket = byStreamer.get(vod.twitchUserId);
+    if (bucket.vods.length < INTERACTION_BACKFILL_VODS) {
+      bucket.vods.push(vod);
+    }
+  }
+
+  const streamerRows = Array.from(byStreamer.values()).slice(0, INTERACTION_BACKFILL_STREAMERS);
+
+  for (const streamer of streamerRows) {
+    summary.streamersScanned += 1;
+    try {
+      const identityLinks = await prisma.pubgStreamerIdentityLink.findMany({
+        where: {
+          twitchUserId: streamer.twitchUserId,
+          platform: { in: ["steam", "xbox", "psn"] },
+          pubgPlayerName: { not: "" }
+        },
+        orderBy: [
+          { confidenceScore: "desc" },
+          { lastLinkedAt: "desc" }
+        ],
+        take: 3,
+        select: {
+          platform: true,
+          shard: true,
+          pubgPlayerName: true,
+          pubgPlayerId: true,
+          source: true
+        }
+      });
+
+      if (!identityLinks.length) continue;
+      summary.streamersWithIdentity += 1;
+
+      let resolved = null;
+      for (const link of identityLinks) {
+        const direct = await getPlayerWithMatches(link.shard, link.pubgPlayerName).catch(() => null);
+        if (direct && direct.matchIds.length > 0) {
+          resolved = {
+            platform: link.platform,
+            shard: link.shard,
+            pubgPlayerName: direct.playerName ?? link.pubgPlayerName,
+            pubgPlayerId: direct.playerId,
+            matchIds: direct.matchIds.slice(0, INTERACTION_BACKFILL_MATCHES)
+          };
+          break;
+        }
+
+        const cross = await lookupPlayerAcrossShards(link.pubgPlayerName, link.platform).catch(() => null);
+        if (cross && cross.matchCount > 0) {
+          const playerWithMatches = await getPlayerWithMatches(cross.shard, cross.playerName).catch(() => null);
+          if (playerWithMatches && playerWithMatches.matchIds.length > 0) {
+            resolved = {
+              platform: link.platform,
+              shard: cross.shard,
+              pubgPlayerName: playerWithMatches.playerName ?? cross.playerName,
+              pubgPlayerId: playerWithMatches.playerId,
+              matchIds: playerWithMatches.matchIds.slice(0, INTERACTION_BACKFILL_MATCHES)
+            };
+            break;
+          }
+        }
+      }
+
+      if (!resolved || !resolved.matchIds.length) continue;
+      summary.streamersWithMatches += 1;
+
+      for (const matchId of resolved.matchIds) {
+        const matchPayload = await pubgGet(`/shards/${encodeURIComponent(resolved.shard)}/matches/${encodeURIComponent(matchId)}`).catch(() => null);
+        if (!matchPayload?.data) continue;
+
+        const matchCreatedAt = matchPayload.data.attributes?.createdAt ?? null;
+        const mapName = matchPayload.data.attributes?.mapName ?? null;
+        const gameMode = matchPayload.data.attributes?.gameMode ?? null;
+        const telemetryAsset = (matchPayload.included ?? []).find((entry) => entry.type === "asset");
+        const telemetryUrl = telemetryAsset?.attributes?.URL ?? null;
+        if (!telemetryUrl) continue;
+
+        await prisma.pubgStreamerMatch.upsert({
+          where: {
+            twitchUserId_matchId: {
+              twitchUserId: streamer.twitchUserId,
+              matchId
+            }
+          },
+          create: {
+            twitchUserId: streamer.twitchUserId,
+            twitchUserLogin: streamer.twitchUserLogin,
+            twitchUserName: streamer.twitchUserName,
+            platform: resolved.platform,
+            shard: resolved.shard,
+            pubgPlayerId: resolved.pubgPlayerId,
+            pubgPlayerName: resolved.pubgPlayerName,
+            matchId,
+            matchCreatedAt: parseIso(matchCreatedAt),
+            mapName,
+            gameMode,
+            telemetryUrl,
+            source: "crawler_interaction_backfill"
+          },
+          update: {
+            twitchUserLogin: streamer.twitchUserLogin,
+            twitchUserName: streamer.twitchUserName,
+            platform: resolved.platform,
+            shard: resolved.shard,
+            pubgPlayerId: resolved.pubgPlayerId,
+            pubgPlayerName: resolved.pubgPlayerName,
+            matchCreatedAt: parseIso(matchCreatedAt),
+            mapName,
+            gameMode,
+            telemetryUrl
+          }
+        });
+        summary.matchesPersisted += 1;
+
+        const bestVod = computeBestVodForMatch(matchCreatedAt, streamer.vods);
+        if (!bestVod) continue;
+
+        await prisma.pubgMatchVodLink.upsert({
+          where: {
+            twitchUserId_matchLink: {
+              twitchUserId: streamer.twitchUserId,
+              matchId
+            }
+          },
+          create: {
+            twitchUserId: streamer.twitchUserId,
+            twitchUserLogin: streamer.twitchUserLogin,
+            twitchUserName: streamer.twitchUserName,
+            matchId,
+            videoId: bestVod.videoId,
+            matchCreatedAt: parseIso(matchCreatedAt),
+            vodStartedAt: bestVod.vodStartedAt,
+            vodOffsetSeconds: bestVod.vodOffsetSeconds,
+            deltaSeconds: bestVod.deltaSeconds,
+            confidenceTag: bestVod.confidenceTag
+          },
+          update: {
+            twitchUserLogin: streamer.twitchUserLogin,
+            twitchUserName: streamer.twitchUserName,
+            videoId: bestVod.videoId,
+            matchCreatedAt: parseIso(matchCreatedAt),
+            vodStartedAt: bestVod.vodStartedAt,
+            vodOffsetSeconds: bestVod.vodOffsetSeconds,
+            deltaSeconds: bestVod.deltaSeconds,
+            confidenceTag: bestVod.confidenceTag,
+            linkedAt: new Date()
+          }
+        });
+        summary.linksPersisted += 1;
+
+        const telemetryResponse = await fetch(telemetryUrl, { cache: "no-store" }).catch(() => null);
+        if (!telemetryResponse?.ok) continue;
+        const telemetryEvents = await telemetryResponse.json().catch(() => null);
+        if (!Array.isArray(telemetryEvents)) continue;
+
+        for (const event of telemetryEvents) {
+          if (event?._T !== "LogPlayerKillV2" && event?._T !== "LogPlayerTakeDamage") continue;
+
+          const attacker = event?.killer?.name ?? event?.attacker?.name ?? null;
+          const victim = event?.victim?.name ?? null;
+          const eventTimestamp = event?._D ?? matchCreatedAt;
+
+          let opponent = null;
+          if (
+            attacker &&
+            normalizeForCompare(attacker) === normalizeForCompare(resolved.pubgPlayerName) &&
+            victim &&
+            normalizeForCompare(victim) !== normalizeForCompare(resolved.pubgPlayerName)
+          ) {
+            opponent = victim;
+          } else if (
+            victim &&
+            normalizeForCompare(victim) === normalizeForCompare(resolved.pubgPlayerName) &&
+            attacker &&
+            normalizeForCompare(attacker) !== normalizeForCompare(resolved.pubgPlayerName)
+          ) {
+            opponent = attacker;
+          }
+
+          if (!opponent) continue;
+
+          const dedupeKey = buildVodMomentDedupeKey({
+            twitchUserId: streamer.twitchUserId,
+            matchId,
+            opponent,
+            eventTimestamp
+          });
+
+          await prisma.pubgLinkEvent.upsert({
+            where: { dedupeKey },
+            create: {
+              dedupeKey,
+              eventType: "vod_moment",
+              pubgNameRaw: opponent,
+              pubgNameNormalized: normalizeForCompare(opponent),
+              twitchUserId: streamer.twitchUserId,
+              twitchUserLogin: streamer.twitchUserLogin,
+              twitchUserName: streamer.twitchUserName,
+              twitchVideoId: bestVod.videoId,
+              shard: resolved.shard,
+              platform: resolved.platform,
+              encounterAt: parseIso(eventTimestamp)
+            },
+            update: {
+              twitchUserLogin: streamer.twitchUserLogin,
+              twitchUserName: streamer.twitchUserName,
+              twitchVideoId: bestVod.videoId,
+              encounterAt: parseIso(eventTimestamp),
+              shard: resolved.shard,
+              platform: resolved.platform
+            }
+          });
+          summary.vodMomentsPersisted += 1;
+        }
+      }
+    } catch (error) {
+      summary.errors += 1;
+      log("warn", "interaction backfill failed for streamer", {
+        twitchUserId: streamer.twitchUserId,
+        twitchUserLogin: streamer.twitchUserLogin,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  return summary;
+}
+
 async function indexStreams() {
   const startedAt = Date.now();
   const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -941,6 +1276,16 @@ async function indexStreams() {
     streamLimit: KNOWN_PLAYER_MAPPING_LIMIT,
     candidatePool: KNOWN_PLAYER_CANDIDATES_LIMIT,
     similarityMin: KNOWN_PLAYER_SIMILARITY_MIN
+  };
+  let interactionBackfillSummary = {
+    enabled: INTERACTION_BACKFILL_ENABLED,
+    streamersScanned: 0,
+    streamersWithIdentity: 0,
+    streamersWithMatches: 0,
+    matchesPersisted: 0,
+    linksPersisted: 0,
+    vodMomentsPersisted: 0,
+    errors: 0
   };
 
   for (const stream of streams) {
@@ -1023,6 +1368,14 @@ async function indexStreams() {
     });
   }
 
+  try {
+    interactionBackfillSummary = await runInteractionBackfill();
+  } catch (error) {
+    log("error", "interaction backfill failed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+
   // Run discovery worker (self-throttled to DISCOVERY_INTERVAL_MS, default 1 hour)
   try {
     await runDiscoveryWorker();
@@ -1052,7 +1405,8 @@ async function indexStreams() {
       durationMs: Date.now() - startedAt,
       eventSubSyncIntervalMs: EVENTSUB_SYNC_INTERVAL_MS,
       profileMapping: profileMappingSummary,
-      knownPlayerMapping: knownPlayerMappingSummary
+      knownPlayerMapping: knownPlayerMappingSummary,
+      interactionBackfill: interactionBackfillSummary
     }
   });
 }
