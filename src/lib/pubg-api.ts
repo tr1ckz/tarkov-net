@@ -478,7 +478,25 @@ export async function getMatchParticipantNames(shard: string, matchId: string) {
   return Array.from(seen);
 }
 
-export async function getMatchTelemetryParticipants(telemetryUrl: string): Promise<string[]> {
+export type MatchTelemetryEvent = {
+  timestamp: string;
+  type: string;
+  killer?: string;
+  victim?: string;
+  attacker?: string;
+  weapon?: string;
+  distance?: number;
+};
+
+export type PlayerTelemetryData = {
+  playerName: string;
+  kills: Array<{ target: string; timestamp: string; weapon?: string; distance?: number }>;
+  deaths: Array<{ killer: string; timestamp: string; weapon?: string; distance?: number }>;
+  knockouts: Array<{ target: string; timestamp: string }>;
+  wasKnockedOut: Array<{ knocker: string; timestamp: string }>;
+};
+
+export async function getMatchTelemetryEvents(telemetryUrl: string): Promise<MatchTelemetryEvent[]> {
   if (!telemetryUrl) return [];
 
   try {
@@ -495,16 +513,39 @@ export async function getMatchTelemetryParticipants(telemetryUrl: string): Promi
     }
 
     const events = await response.json() as PubgTelemetryEvent[];
+    const result: MatchTelemetryEvent[] = [];
 
-    // Extract unique player names from all events
-    const seen = new Set<string>();
     for (const event of events) {
-      if (event.killer?.name) seen.add(event.killer.name);
-      if (event.victim?.name) seen.add(event.victim.name);
-      if (event.attacker?.name) seen.add(event.attacker.name);
+      if (!event._T) continue; // skip events without type
+
+      const timestamp = event._D ?? new Date().toISOString();
+
+      // LogPlayerKill
+      if (event._T === "LogPlayerKill" && event.killer?.name && event.victim?.name) {
+        result.push({
+          timestamp,
+          type: "kill",
+          killer: event.killer.name,
+          victim: event.victim.name,
+          weapon: event.damageCauserName ?? undefined,
+          distance: event.distance ?? undefined,
+        });
+      }
+
+      // LogPlayerTakeDamage
+      if (event._T === "LogPlayerTakeDamage" && event.attacker?.name && event.victim?.name) {
+        result.push({
+          timestamp,
+          type: "damage",
+          attacker: event.attacker.name,
+          victim: event.victim.name,
+          weapon: event.damageCauserName ?? undefined,
+          distance: event.distance ?? undefined,
+        });
+      }
     }
 
-    return Array.from(seen);
+    return result;
   } catch (err) {
     console.warn("[pubg-api] telemetry parse failed", {
       url: telemetryUrl,
@@ -514,9 +555,47 @@ export async function getMatchTelemetryParticipants(telemetryUrl: string): Promi
   }
 }
 
+export async function getPlayerTelemetryData(playerName: string, telemetryUrl: string): Promise<PlayerTelemetryData> {
+  const events = await getMatchTelemetryEvents(telemetryUrl);
+  const normalizedName = playerName.toLowerCase();
+
+  return {
+    playerName,
+    kills: events
+      .filter(e => e.type === "kill" && e.killer?.toLowerCase() === normalizedName)
+      .map(e => ({
+        target: e.victim!,
+        timestamp: e.timestamp,
+        weapon: e.weapon,
+        distance: e.distance,
+      })),
+    deaths: events
+      .filter(e => e.type === "kill" && e.victim?.toLowerCase() === normalizedName)
+      .map(e => ({
+        killer: e.killer!,
+        timestamp: e.timestamp,
+        weapon: e.weapon,
+        distance: e.distance,
+      })),
+    knockouts: events
+      .filter(e => e.type === "knockout" && e.killer?.toLowerCase() === normalizedName)
+      .map(e => ({
+        target: e.victim!,
+        timestamp: e.timestamp,
+      })),
+    wasKnockedOut: events
+      .filter(e => e.type === "knockout" && e.victim?.toLowerCase() === normalizedName)
+      .map(e => ({
+        knocker: e.killer!,
+        timestamp: e.timestamp,
+      })),
+  };
+}
+
 export async function validatePlayerInMatch(playerName: string, telemetryUrl: string): Promise<boolean> {
-  const participants = await getMatchTelemetryParticipants(telemetryUrl);
-  return participants.some(p => p.toLowerCase() === playerName.toLowerCase());
+  const data = await getPlayerTelemetryData(playerName, telemetryUrl);
+  // Player is in the match if they have any events
+  return data.kills.length > 0 || data.deaths.length > 0 || data.knockouts.length > 0 || data.wasKnockedOut.length > 0;
 }
 
 export async function indexSeenPlayersFromRecentMatches(options: {

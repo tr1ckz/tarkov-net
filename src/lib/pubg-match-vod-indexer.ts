@@ -3,7 +3,8 @@ import {
   getMatchSummary,
   getPlayerWithMatches,
   lookupPlayerAcrossShards,
-  getMatchTelemetryParticipants,
+  getPlayerTelemetryData,
+  getMatchTelemetryEvents,
   validatePlayerInMatch,
   type PubgPlatform,
 } from "@/lib/pubg-api";
@@ -50,6 +51,13 @@ function mapConfidence(deltaSeconds: number, insideWindow: boolean) {
   if (deltaSeconds <= 300) return "nearby_5m";
   if (deltaSeconds <= 900) return "nearby_15m";
   return "weak";
+}
+
+function computeEventVodOffset(eventTimestampIso: string, vodStartedAt: Date | null): number | null {
+  if (!vodStartedAt) return null;
+  const eventTime = parseIso(eventTimestampIso);
+  if (!eventTime) return null;
+  return Math.max(0, Math.floor((eventTime.getTime() - vodStartedAt.getTime()) / 1000));
 }
 
 function computeMatchVodMapping(
@@ -320,6 +328,8 @@ export async function indexStreamerMatchesAndVods(options: {
   }
 
   let linksMapped = 0;
+  let encountersProcessed = 0;
+  
   for (const match of matchRows) {
     const mapped = computeMatchVodMapping(match.matchCreatedAt, vodRows);
     if (!mapped) continue;
@@ -357,6 +367,54 @@ export async function indexStreamerMatchesAndVods(options: {
     });
 
     linksMapped += 1;
+
+    // Extract and map events from telemetry
+    if (match.telemetryUrl) {
+      const streamerData = await getPlayerTelemetryData(activePlayerName, match.telemetryUrl).catch((err) => {
+        console.warn("[pubg-match-vod-indexer] failed to extract streamer telemetry", {
+          matchId: match.matchId,
+          playerName: activePlayerName,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return null;
+      });
+
+      if (streamerData) {
+        // Process streamer's kills
+        for (const kill of streamerData.kills) {
+          const eventVodOffset = computeEventVodOffset(kill.timestamp, mapped.vodStartedAt);
+          if (eventVodOffset !== null) {
+            console.info("[pubg-match-vod-indexer] streamer encounter: killed", {
+              twitchUserId: identity.twitchUserId,
+              matchId: match.matchId,
+              victim: kill.target,
+              weapon: kill.weapon,
+              distance: kill.distance,
+              eventTimestamp: kill.timestamp,
+              vodOffset: eventVodOffset,
+            });
+            encountersProcessed += 1;
+          }
+        }
+
+        // Process streamer's deaths
+        for (const death of streamerData.deaths) {
+          const eventVodOffset = computeEventVodOffset(death.timestamp, mapped.vodStartedAt);
+          if (eventVodOffset !== null) {
+            console.info("[pubg-match-vod-indexer] streamer encounter: was killed by", {
+              twitchUserId: identity.twitchUserId,
+              matchId: match.matchId,
+              killer: death.killer,
+              weapon: death.weapon,
+              distance: death.distance,
+              eventTimestamp: death.timestamp,
+              vodOffset: eventVodOffset,
+            });
+            encountersProcessed += 1;
+          }
+        }
+      }
+    }
   }
 
   console.info("[pubg-match-vod-indexer] indexing complete", {
@@ -368,6 +426,7 @@ export async function indexStreamerMatchesAndVods(options: {
     vodsIndexed: vodRows.length,
     identityValidated,
     linksMapped,
+    encountersProcessed,
     matchErrors,
   });
 
