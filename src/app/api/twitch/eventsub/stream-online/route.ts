@@ -108,6 +108,47 @@ function getLooseIdentityForMatchIndexing(value: unknown): {
   return { platform, shard, pubgPlayerName };
 }
 
+function normalizePubgNameForCacheLookup(value: string) {
+  return value.toLowerCase().trim();
+}
+
+async function isIdentityPresentInKnownPlayerCache(input: {
+  platform: PubgPlatform;
+  shard: string;
+  pubgPlayerName: string;
+}) {
+  const playerNameLower = normalizePubgNameForCacheLookup(input.pubgPlayerName);
+  if (!playerNameLower) return false;
+
+  const recentDaysRaw = Number(process.env.PUBG_MATCH_INDEX_CACHE_WINDOW_DAYS ?? "21");
+  const recentDays = Number.isFinite(recentDaysRaw)
+    ? Math.max(1, Math.min(90, Math.floor(recentDaysRaw)))
+    : 21;
+  const seenSince = new Date(Date.now() - recentDays * 24 * 60 * 60 * 1000);
+
+  const exactOnShard = await db.pubgKnownPlayer.findFirst({
+    where: {
+      platform: input.platform,
+      shard: input.shard,
+      playerNameLower,
+      lastSeenAt: { gte: seenSince }
+    },
+    select: { id: true }
+  });
+  if (exactOnShard) return true;
+
+  const exactAnyShard = await db.pubgKnownPlayer.findFirst({
+    where: {
+      platform: input.platform,
+      playerNameLower,
+      lastSeenAt: { gte: seenSince }
+    },
+    select: { id: true }
+  });
+
+  return Boolean(exactAnyShard);
+}
+
 const recentMatchIndexAttempts = new Map<string, number>();
 
 function shouldThrottleMatchIndexAttempt(twitchUserId: string) {
@@ -396,6 +437,35 @@ async function processStreamOnlineNotification(input: {
         matchErrors: 0,
       };
     } else {
+      if (selectedIdentity.source !== "real_identity_link") {
+        const cachedIdentityConfirmed = await isIdentityPresentInKnownPlayerCache({
+          platform: selectedIdentity.platform,
+          shard: selectedIdentity.shard,
+          pubgPlayerName: selectedIdentity.pubgPlayerName,
+        }).catch(() => false);
+
+        if (!cachedIdentityConfirmed) {
+          matchVodIndexing = {
+            indexed: false,
+            reason: `identity_not_in_known_player_cache:${selectedIdentity.source}`,
+            matchesScanned: 0,
+            matchesIndexed: 0,
+            vodsIndexed: 0,
+            linksMapped: 0,
+            matchErrors: 0,
+          };
+          console.info("[twitch-eventsub] skipping match-vod index attempt due to unconfirmed fallback identity", {
+            broadcasterId: twitchUserId,
+            broadcasterLogin: twitchUserLogin,
+            identitySource: selectedIdentity.source,
+            platform: selectedIdentity.platform,
+            shard: selectedIdentity.shard,
+            pubgPlayerName: selectedIdentity.pubgPlayerName,
+          });
+        }
+      }
+
+      if (!matchVodIndexing) {
       const throttle = shouldThrottleMatchIndexAttempt(twitchUserId);
       if (throttle.throttled) {
         matchVodIndexing = {
@@ -445,6 +515,7 @@ async function processStreamOnlineNotification(input: {
           matchErrors: 0,
         };
       });
+      }
       }
     }
 
