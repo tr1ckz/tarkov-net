@@ -23,8 +23,7 @@ export default async function ProfilePage() {
       tarkovArenaProfileId: true,
       pubgSteamUser: true,
       pubgXboxUser: true,
-      pubgPsnUser: true,
-      pubgKakaoUser: true
+      pubgPsnUser: true
     }
   });
 
@@ -51,7 +50,6 @@ export default async function ProfilePage() {
           pubgSteamUser={user.pubgSteamUser}
           pubgXboxUser={user.pubgXboxUser}
           pubgPsnUser={user.pubgPsnUser}
-          pubgKakaoUser={user.pubgKakaoUser}
         />
       </Card>
     </div>

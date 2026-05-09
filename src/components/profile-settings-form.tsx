@@ -15,7 +15,6 @@ type Props = {
   pubgSteamUser: string | null;
   pubgXboxUser: string | null;
   pubgPsnUser: string | null;
-  pubgKakaoUser: string | null;
 };
 
 export function ProfileSettingsForm({
@@ -26,15 +25,13 @@ export function ProfileSettingsForm({
   tarkovArenaProfileId,
   pubgSteamUser,
   pubgXboxUser,
-  pubgPsnUser,
-  pubgKakaoUser
+  pubgPsnUser
 }: Props) {
   const [displayName, setDisplayName] = useState(initialDisplayName);
   const [gameName, setGameName] = useState(initialGameName ?? "");
   const [steamUser, setSteamUser] = useState(pubgSteamUser ?? "");
   const [xboxUser, setXboxUser] = useState(pubgXboxUser ?? "");
   const [psnUser, setPsnUser] = useState(pubgPsnUser ?? "");
-  const [kakaoUser, setKakaoUser] = useState(pubgKakaoUser ?? "");
   const [pvpProfileId, setPvpProfileId] = useState(tarkovProfileId ?? "");
   const [pveProfileId, setPveProfileId] = useState(tarkovPveProfileId ?? "");
   const [arenaProfileId, setArenaProfileId] = useState(tarkovArenaProfileId ?? "");
@@ -57,8 +54,7 @@ export function ProfileSettingsForm({
           gameName,
           pubgSteamUser: steamUser,
           pubgXboxUser: xboxUser,
-          pubgPsnUser: psnUser,
-          pubgKakaoUser: kakaoUser
+          pubgPsnUser: psnUser
         })
       });
 
@@ -74,7 +70,6 @@ export function ProfileSettingsForm({
       setSteamUser(data.user?.pubgSteamUser ?? "");
       setXboxUser(data.user?.pubgXboxUser ?? "");
       setPsnUser(data.user?.pubgPsnUser ?? "");
-      setKakaoUser(data.user?.pubgKakaoUser ?? "");
       setSaved("Profile saved and game accounts updated");
       router.refresh();
     });
@@ -114,10 +109,6 @@ export function ProfileSettingsForm({
           <div className="space-y-1">
             <p className="text-[11px] uppercase tracking-[0.08em] text-[#7f7768]">PSN</p>
             <Input value={psnUser} onChange={(event) => setPsnUser(event.target.value)} maxLength={40} placeholder="psn id" />
-          </div>
-          <div className="space-y-1">
-            <p className="text-[11px] uppercase tracking-[0.08em] text-[#7f7768]">Kakao</p>
-            <Input value={kakaoUser} onChange={(event) => setKakaoUser(event.target.value)} maxLength={40} placeholder="kakao name" />
           </div>
         </div>
       </div>

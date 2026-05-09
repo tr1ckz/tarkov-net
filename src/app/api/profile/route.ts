@@ -9,8 +9,7 @@ const profileSchema = z.object({
   gameName: z.string().trim().max(15).optional().or(z.literal("")),
   pubgSteamUser: z.string().trim().max(40).optional().or(z.literal("")),
   pubgXboxUser: z.string().trim().max(40).optional().or(z.literal("")),
-  pubgPsnUser: z.string().trim().max(40).optional().or(z.literal("")),
-  pubgKakaoUser: z.string().trim().max(40).optional().or(z.literal(""))
+  pubgPsnUser: z.string().trim().max(40).optional().or(z.literal(""))
 });
 
 function cleanOptional(value: string | undefined) {
@@ -68,8 +67,7 @@ export async function PATCH(request: Request) {
       tarkovArenaProfileId: lookup.arenaProfileId,
       pubgSteamUser: cleanOptional(parsed.data.pubgSteamUser),
       pubgXboxUser: cleanOptional(parsed.data.pubgXboxUser),
-      pubgPsnUser: cleanOptional(parsed.data.pubgPsnUser),
-      pubgKakaoUser: cleanOptional(parsed.data.pubgKakaoUser)
+      pubgPsnUser: cleanOptional(parsed.data.pubgPsnUser)
     },
     select: {
       displayName: true,
@@ -80,8 +78,7 @@ export async function PATCH(request: Request) {
       tarkovArenaProfileId: true,
       pubgSteamUser: true,
       pubgXboxUser: true,
-      pubgPsnUser: true,
-      pubgKakaoUser: true
+      pubgPsnUser: true
     }
   });
 

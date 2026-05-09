@@ -180,7 +180,6 @@ function parseUserPubgClaims(user: {
   pubgSteamUser?: string | null;
   pubgXboxUser?: string | null;
   pubgPsnUser?: string | null;
-  pubgKakaoUser?: string | null;
 }) {
   const claims: Array<{ platform: string; playerName: string; normalized: string }> = [];
 
