@@ -503,29 +503,6 @@ async function processStreamOnlineNotification(input: {
           orderBy: { lastLinkedAt: "desc" }
         });
 
-    const fallbackIdentityLink = realIdentityLink || strongFallbackIdentityLink
-      ? null
-      : await db.pubgStreamerIdentityLink.findFirst({
-          where: {
-            twitchUserId,
-            platform: {
-              in: ["steam", "xbox", "psn"]
-            },
-            pubgPlayerName: {
-              not: ""
-            }
-          },
-          select: {
-            id: true,
-            source: true,
-            platform: true,
-            shard: true,
-            pubgPlayerId: true,
-            pubgPlayerName: true,
-          },
-          orderBy: { lastLinkedAt: "desc" }
-        });
-
     const looseAutoLinkIdentity = getLooseIdentityForMatchIndexing(autoLink);
 
     const selectedIdentity = realIdentityLink
@@ -547,16 +524,6 @@ async function processStreamOnlineNotification(input: {
             shard: strongFallbackIdentityLink.shard,
             pubgPlayerId: strongFallbackIdentityLink.pubgPlayerId,
             pubgPlayerName: strongFallbackIdentityLink.pubgPlayerName,
-          }
-      : fallbackIdentityLink
-        ? {
-            source: "fallback_identity_link" as const,
-            identityLinkId: fallbackIdentityLink.id,
-            linkSource: fallbackIdentityLink.source,
-            platform: fallbackIdentityLink.platform as PubgPlatform,
-            shard: fallbackIdentityLink.shard,
-            pubgPlayerId: fallbackIdentityLink.pubgPlayerId,
-            pubgPlayerName: fallbackIdentityLink.pubgPlayerName,
           }
         : looseAutoLinkIdentity
           ? {

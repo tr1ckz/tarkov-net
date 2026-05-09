@@ -312,6 +312,9 @@ async function maybeAutoLinkByUserClaims(input: PubgTwitchIdentityInput) {
 }
 
 async function maybeAutoLinkByLoginHeuristic(input: PubgTwitchIdentityInput) {
+  const heuristicsEnabled = process.env.PUBG_ENABLE_EVENTSUB_LOGIN_HEURISTIC_AUTOLINK === "1";
+  if (!heuristicsEnabled) return null;
+
   const normalized = normalizeForLinking(input.twitchUserLogin);
   if (normalized.length < 4) return null;
 
