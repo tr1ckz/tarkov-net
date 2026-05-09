@@ -54,21 +54,21 @@ function parsePlatform(value: string): PubgPlatform {
 function describeEncounterAction(encounter: PubgEncounterEvent) {
   switch (encounter.actionType) {
     case "knocking_out_streamer":
-      return `knocking out ${encounter.name}`;
+      return `YOU knocked down ${encounter.name}`;
     case "getting_knocked_out_by_streamer": {
       const weaponPart = encounter.weapon ? ` with ${encounter.weapon}` : "";
       const distancePart = typeof encounter.distanceMeters === "number" ? ` from ${encounter.distanceMeters}m` : "";
-      return `getting knocked out by ${encounter.name}${weaponPart}${distancePart}`;
+      return `YOU were knocked by ${encounter.name}${weaponPart}${distancePart}`;
     }
     case "killing_streamer":
-      return `killing ${encounter.name}`;
+      return `YOU killed ${encounter.name}`;
     case "getting_killed_by_streamer": {
       const weaponPart = encounter.weapon ? ` with ${encounter.weapon}` : "";
       const distancePart = typeof encounter.distanceMeters === "number" ? ` from ${encounter.distanceMeters}m` : "";
-      return `getting killed by ${encounter.name}${weaponPart}${distancePart}`;
+      return `YOU were killed by ${encounter.name}${weaponPart}${distancePart}`;
     }
     default:
-      return `encountered ${encounter.name}`;
+      return `YOU encountered ${encounter.name}`;
   }
 }
 
