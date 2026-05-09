@@ -57,6 +57,186 @@ function parseBoundedInt(raw: string | undefined, fallback: number, min: number,
   return Math.max(min, Math.min(max, Math.floor(parsed)));
 }
 
+type EncounterClipResponseRow = {
+  id: string;
+  url: string;
+  embed_url: string;
+  broadcaster_id: string;
+  broadcaster_name: string;
+  creator_id: string;
+  creator_name: string;
+  video_id: string;
+  game_id: string;
+  language: string;
+  title: string;
+  view_count: number;
+  created_at: string;
+  thumbnail_url: string;
+  duration: number;
+  encounterWith: string;
+  encounterActionText: string;
+  encounterActionType: string;
+  encounterWeapon?: string | null;
+  encounterDistanceMeters?: number | null;
+  mapTag?: string | null;
+  gameModeTag?: string | null;
+  teamSizeModeTag?: string | null;
+  povTag?: string | null;
+  sourceType: "vod" | "clip";
+};
+
+async function getCachedEncounterClips(options: {
+  playerName: string;
+  platform: string;
+  shard?: string;
+  limit: number;
+}) {
+  const normalized = normalizeName(options.playerName);
+  if (!normalized) return [] as EncounterClipResponseRow[];
+
+  const cacheWindowDays = parseBoundedInt(
+    process.env.PUBG_ENCOUNTER_CACHE_WINDOW_DAYS,
+    30,
+    1,
+    365
+  );
+  const cutoff = new Date(Date.now() - cacheWindowDays * 24 * 60 * 60 * 1000);
+
+  const linkRows = await prisma.pubgLinkEvent.findMany({
+    where: {
+      pubgNameNormalized: normalized,
+      platform: options.platform,
+      shard: options.shard || undefined,
+      createdAt: { gte: cutoff },
+      eventType: { in: ["vod_moment", "clip_match", "active_live"] }
+    },
+    orderBy: [{ encounterAt: "desc" }, { createdAt: "desc" }],
+    take: Math.max(options.limit * 6, 60)
+  });
+
+  if (!linkRows.length) return [] as EncounterClipResponseRow[];
+
+  const vodIds = Array.from(
+    new Set(
+      linkRows
+        .filter((row) => row.eventType === "vod_moment" && row.twitchVideoId)
+        .map((row) => row.twitchVideoId as string)
+    )
+  );
+
+  const vodRows = vodIds.length
+    ? await prisma.pubgStreamerVod.findMany({
+        where: { videoId: { in: vodIds } },
+        select: {
+          videoId: true,
+          twitchUserId: true,
+          twitchUserName: true,
+          title: true,
+          url: true,
+          thumbnailUrl: true,
+          createdAtTwitch: true,
+          durationSeconds: true
+        }
+      })
+    : [];
+
+  const vodById = new Map(vodRows.map((row) => [row.videoId, row]));
+  const out: EncounterClipResponseRow[] = [];
+  const seen = new Set<string>();
+
+  for (const row of linkRows) {
+    const uniqueKey = [row.eventType, row.twitchUserId, row.twitchVideoId ?? row.twitchStreamId ?? "na", row.encounterAt?.toISOString() ?? "na"].join(":");
+    if (seen.has(uniqueKey)) continue;
+    seen.add(uniqueKey);
+
+    const encounterAtIso = row.encounterAt?.toISOString() ?? row.createdAt.toISOString();
+    const encounterWith = row.pubgNameRaw || options.playerName;
+
+    if (row.eventType === "vod_moment" && row.twitchVideoId) {
+      const vod = vodById.get(row.twitchVideoId);
+      if (!vod) continue;
+
+      const offset = vod.createdAtTwitch
+        ? computeVodOffsetSeconds(encounterAtIso, vod.createdAtTwitch.toISOString())
+        : 0;
+
+      out.push({
+        id: `cached-vod-${row.twitchVideoId}-${row.id}`,
+        url: `${vod.url}?t=${Math.max(0, offset)}s`,
+        embed_url: `${vod.url}?t=${Math.max(0, offset)}s`,
+        broadcaster_id: vod.twitchUserId,
+        broadcaster_name: row.twitchUserName || vod.twitchUserName || row.twitchUserLogin,
+        creator_id: vod.twitchUserId,
+        creator_name: row.twitchUserName || vod.twitchUserName || row.twitchUserLogin,
+        video_id: vod.videoId,
+        game_id: "27971",
+        language: "",
+        title: `[Cached VOD] ${vod.title}`,
+        view_count: 0,
+        created_at: vod.createdAtTwitch?.toISOString() ?? encounterAtIso,
+        thumbnail_url: (vod.thumbnailUrl ?? "")
+          .replace("%{width}", "640")
+          .replace("%{height}", "360"),
+        duration: Math.max(0, vod.durationSeconds ?? 0),
+        encounterWith,
+        encounterActionText: `YOU encountered ${encounterWith}`,
+        encounterActionType: "cached_vod_moment",
+        sourceType: "vod"
+      });
+    } else if (row.eventType === "clip_match" && row.twitchVideoId) {
+      const clipUrl = `https://clips.twitch.tv/${row.twitchVideoId}`;
+      out.push({
+        id: `cached-clip-${row.twitchVideoId}-${row.id}`,
+        url: clipUrl,
+        embed_url: clipUrl,
+        broadcaster_id: row.twitchUserId,
+        broadcaster_name: row.twitchUserName || row.twitchUserLogin,
+        creator_id: row.twitchUserId,
+        creator_name: row.twitchUserName || row.twitchUserLogin,
+        video_id: row.twitchVideoId,
+        game_id: "27971",
+        language: "",
+        title: `[Cached Clip] ${row.twitchUserName || row.twitchUserLogin}`,
+        view_count: 0,
+        created_at: encounterAtIso,
+        thumbnail_url: "",
+        duration: 0,
+        encounterWith,
+        encounterActionText: `YOU encountered ${encounterWith}`,
+        encounterActionType: "cached_clip_match",
+        sourceType: "clip"
+      });
+    } else if (row.eventType === "active_live" && row.twitchUserLogin) {
+      const liveUrl = `https://www.twitch.tv/${row.twitchUserLogin}`;
+      out.push({
+        id: `cached-live-${row.twitchStreamId ?? row.id}`,
+        url: liveUrl,
+        embed_url: liveUrl,
+        broadcaster_id: row.twitchUserId,
+        broadcaster_name: row.twitchUserName || row.twitchUserLogin,
+        creator_id: row.twitchUserId,
+        creator_name: row.twitchUserName || row.twitchUserLogin,
+        video_id: "",
+        game_id: "27971",
+        language: "",
+        title: `[Cached Live] ${row.twitchUserName || row.twitchUserLogin}`,
+        view_count: 0,
+        created_at: encounterAtIso,
+        thumbnail_url: `https://static-cdn.jtvnw.net/previews-ttv/live_user_${row.twitchUserLogin}-640x360.jpg`,
+        duration: 0,
+        encounterWith,
+        encounterActionText: `YOU encountered ${encounterWith}`,
+        encounterActionType: "cached_live_overlap",
+        sourceType: "vod"
+      });
+    }
+
+    if (out.length >= options.limit) break;
+  }
+
+  return out;
+}
+
 function describeEncounterAction(encounter: PubgEncounterEvent) {
   switch (encounter.actionType) {
     case "knocking_out_streamer":
@@ -352,6 +532,54 @@ export async function GET(request: Request) {
       }
 
       pushVerbose(`encounters lookup resolved player=${resolvedPlayer.playerName} shard=${resolvedPlayer.shard}`);
+
+      const cachedEncounterClips = await getCachedEncounterClips({
+        playerName: resolvedPlayer.playerName,
+        platform,
+        shard: resolvedPlayer.shard,
+        limit
+      });
+      if (cachedEncounterClips.length) {
+        pushVerbose(`cache hit clips=${cachedEncounterClips.length} source=pubgLinkEvent/pubgStreamerVod`);
+
+        await writePubgLinkRunLog({
+          source: "encounters",
+          status: "ok",
+          playerName: resolvedPlayer.playerName,
+          platform,
+          requestedShard,
+          resolvedShard: resolvedPlayer.shard,
+          encountersFound: cachedEncounterClips.length,
+          clipsReturned: cachedEncounterClips.length,
+          metadata: {
+            cacheHit: true,
+            cacheSource: "pubg_link_event",
+            probeMode,
+            verboseMessages
+          }
+        });
+
+        return NextResponse.json({
+          clips: cachedEncounterClips,
+          source: "encounters",
+          profile: { playerName: resolvedPlayer.playerName, shard: resolvedPlayer.shard, platform },
+          encountersScanned: 0,
+          debug: {
+            encountersFound: cachedEncounterClips.length,
+            encountersAfterKnownFilter: cachedEncounterClips.length,
+            directLoginMatches: 0,
+            searchChannelMatches: 0,
+            channelsWithClips: 0,
+            vodMoments: 0,
+            activeIndexMatches: 0,
+            activeOverlapMatches: 0,
+            linkEventsQueued: 0,
+            linkEventsPersisted: 0,
+            resolvedShard: resolvedPlayer.shard,
+            cacheHit: true
+          }
+        });
+      }
 
       const encounterMaxMatches = parseBoundedInt(
         process.env.PUBG_CLIPS_ENCOUNTER_MAX_MATCHES,
