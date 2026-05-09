@@ -149,6 +149,54 @@ async function isIdentityPresentInKnownPlayerCache(input: {
   return Boolean(exactAnyShard);
 }
 
+async function enqueueIdentityValidationJob(identityLinkId: string, reason: string) {
+  try {
+    const existing = await db.pubgIdentityValidationQueue.findUnique({
+      where: { identityLinkId },
+      select: { status: true }
+    });
+
+    if (!existing) {
+      await db.pubgIdentityValidationQueue.create({
+        data: {
+          identityLinkId,
+          status: "queued",
+          queuedAt: new Date(),
+          nextAttemptAt: null,
+          lastError: reason.slice(0, 500),
+          completedAt: null,
+          startedAt: null,
+        }
+      });
+      return "created" as const;
+    }
+
+    if (existing.status === "queued" || existing.status === "processing") {
+      return "already_queued" as const;
+    }
+
+    await db.pubgIdentityValidationQueue.update({
+      where: { identityLinkId },
+      data: {
+        status: "queued",
+        queuedAt: new Date(),
+        nextAttemptAt: null,
+        lastError: reason.slice(0, 500),
+        completedAt: null,
+        startedAt: null,
+      }
+    });
+    return "requeued" as const;
+  } catch (error) {
+    console.warn("[twitch-eventsub] failed to enqueue identity validation job", {
+      identityLinkId,
+      reason,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return "error" as const;
+  }
+}
+
 const recentMatchIndexAttempts = new Map<string, number>();
 const recentUnconfirmedIdentityProbes = new Map<string, number>();
 
@@ -375,6 +423,7 @@ async function processStreamOnlineNotification(input: {
         }
       },
       select: {
+        id: true,
         platform: true,
         shard: true,
         pubgPlayerId: true,
@@ -396,6 +445,7 @@ async function processStreamOnlineNotification(input: {
             }
           },
           select: {
+            id: true,
             platform: true,
             shard: true,
             pubgPlayerId: true,
@@ -409,6 +459,7 @@ async function processStreamOnlineNotification(input: {
     const selectedIdentity = realIdentityLink
       ? {
           source: "real_identity_link" as const,
+          identityLinkId: realIdentityLink.id,
           platform: realIdentityLink.platform as PubgPlatform,
           shard: realIdentityLink.shard,
           pubgPlayerId: realIdentityLink.pubgPlayerId,
@@ -417,6 +468,7 @@ async function processStreamOnlineNotification(input: {
       : fallbackIdentityLink
         ? {
             source: "fallback_identity_link" as const,
+            identityLinkId: fallbackIdentityLink.id,
             platform: fallbackIdentityLink.platform as PubgPlatform,
             shard: fallbackIdentityLink.shard,
             pubgPlayerId: fallbackIdentityLink.pubgPlayerId,
@@ -425,6 +477,7 @@ async function processStreamOnlineNotification(input: {
         : looseAutoLinkIdentity
           ? {
               source: "autolink_identity" as const,
+              identityLinkId: null,
               platform: looseAutoLinkIdentity.platform,
               shard: looseAutoLinkIdentity.shard,
               pubgPlayerId: `autolink:${looseAutoLinkIdentity.platform}:${looseAutoLinkIdentity.pubgPlayerName.toLowerCase()}`,
@@ -481,6 +534,13 @@ async function processStreamOnlineNotification(input: {
               linksMapped: 0,
               matchErrors: 0,
             };
+            let validationQueue = "not_applicable";
+            if (selectedIdentity.identityLinkId) {
+              validationQueue = await enqueueIdentityValidationJob(
+                selectedIdentity.identityLinkId,
+                `eventsub_cache_block:${selectedIdentity.source}`
+              );
+            }
             console.info("[twitch-eventsub] skipping match-vod index attempt due to unconfirmed fallback identity", {
               broadcasterId: twitchUserId,
               broadcasterLogin: twitchUserLogin,
@@ -489,6 +549,7 @@ async function processStreamOnlineNotification(input: {
               shard: selectedIdentity.shard,
               pubgPlayerName: selectedIdentity.pubgPlayerName,
               nextProbeInMs: probe.waitMs,
+              validationQueue,
             });
           } else {
             console.info("[twitch-eventsub] allowing sparse probe for unconfirmed fallback identity", {
@@ -554,6 +615,23 @@ async function processStreamOnlineNotification(input: {
           matchErrors: 0,
         };
       });
+
+      if (
+        matchVodIndexing?.reason === "player_not_found" &&
+        selectedIdentity.identityLinkId
+      ) {
+        const validationQueue = await enqueueIdentityValidationJob(
+          selectedIdentity.identityLinkId,
+          "eventsub_match_index_player_not_found"
+        );
+        console.info("[twitch-eventsub] queued identity validation after player_not_found", {
+          broadcasterId: twitchUserId,
+          broadcasterLogin: twitchUserLogin,
+          identitySource: selectedIdentity.source,
+          identityLinkId: selectedIdentity.identityLinkId,
+          validationQueue,
+        });
+      }
       }
       }
     }
