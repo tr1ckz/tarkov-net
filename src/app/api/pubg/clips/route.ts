@@ -474,6 +474,76 @@ export async function GET(request: Request) {
       }
 
       pushVerbose("cache miss in DB-only mode; returning empty without external lookups");
+
+      const exactLogin = resolvedPlayer.playerName.trim().toLowerCase();
+      const fallbackVodRows = await prisma.pubgStreamerVod.findMany({
+        where: {
+          OR: [
+            { twitchUserLogin: exactLogin },
+            { twitchUserLogin: resolvedPlayer.playerName.trim() }
+          ]
+        },
+        orderBy: [{ createdAtTwitch: "desc" }, { indexedAt: "desc" }],
+        take: Math.max(1, Math.min(limit, 24)),
+        select: {
+          videoId: true,
+          twitchUserId: true,
+          twitchUserLogin: true,
+          twitchUserName: true,
+          title: true,
+          url: true,
+          thumbnailUrl: true,
+          createdAtTwitch: true,
+          durationSeconds: true
+        }
+      });
+
+      if (fallbackVodRows.length) {
+        const fallbackClips = mapVodRowsToClipShape(fallbackVodRows);
+        pushVerbose(`encounters fallback to streamer-login db rows=${fallbackVodRows.length}`);
+
+        await writePubgLinkRunLog({
+          source: "encounters",
+          status: "ok",
+          playerName: resolvedPlayer.playerName,
+          platform,
+          requestedShard,
+          resolvedShard: resolvedPlayer.shard,
+          encountersFound: 0,
+          clipsReturned: fallbackClips.length,
+          metadata: {
+            dbOnly: true,
+            cacheHit: false,
+            fallback: "streamer_login_vods",
+            probeMode,
+            verboseMessages
+          }
+        });
+
+        return NextResponse.json({
+          clips: fallbackClips,
+          source: "encounters",
+          profile: { playerName: resolvedPlayer.playerName, shard: resolvedPlayer.shard, platform },
+          encountersScanned: 0,
+          debug: {
+            encountersFound: 0,
+            encountersAfterKnownFilter: 0,
+            directLoginMatches: 0,
+            searchChannelMatches: 0,
+            channelsWithClips: fallbackClips.length,
+            vodMoments: fallbackClips.length,
+            activeIndexMatches: 0,
+            activeOverlapMatches: 0,
+            linkEventsQueued: 0,
+            linkEventsPersisted: 0,
+            resolvedShard: resolvedPlayer.shard,
+            dbOnly: true,
+            cacheHit: false,
+            fallback: "streamer_login_vods"
+          }
+        });
+      }
+
       await writePubgLinkRunLog({
         source: "encounters",
         status: "empty",
