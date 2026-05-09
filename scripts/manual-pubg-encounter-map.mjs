@@ -2,8 +2,6 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-const DEFAULT_SHARDS = ["pc-na", "pc-eu", "pc-as", "pc-krjp", "pc-kakao", "pc-sa", "pc-oc"];
-
 function parseArgs(argv) {
   const args = {
     streamerLogin: null,
@@ -160,20 +158,18 @@ async function pubgGet(path) {
   return response.json();
 }
 
-async function findPlayerWithMatches(playerName, preferredShard = null) {
-  const shards = preferredShard ? [preferredShard, ...DEFAULT_SHARDS.filter((s) => s !== preferredShard)] : DEFAULT_SHARDS;
-  for (const shard of shards) {
-    const payload = await pubgGet(`/shards/${encodeURIComponent(shard)}/players?filter[playerNames]=${encodeURIComponent(playerName)}`);
-    const player = payload?.data?.[0];
-    const matchIds = player?.relationships?.matches?.data?.map((entry) => entry.id) ?? [];
-    if (player && matchIds.length > 0) {
-      return {
-        shard,
-        playerId: player.id,
-        playerName: player.attributes?.name ?? playerName,
-        matchIds,
-      };
-    }
+async function findPlayerWithMatches(playerName, shard) {
+  if (!shard) return null;
+  const payload = await pubgGet(`/shards/${encodeURIComponent(shard)}/players?filter[playerNames]=${encodeURIComponent(playerName)}`);
+  const player = payload?.data?.[0];
+  const matchIds = player?.relationships?.matches?.data?.map((entry) => entry.id) ?? [];
+  if (player && matchIds.length > 0) {
+    return {
+      shard,
+      playerId: player.id,
+      playerName: player.attributes?.name ?? playerName,
+      matchIds,
+    };
   }
   return null;
 }
@@ -519,7 +515,7 @@ async function run() {
 
     let resolved = null;
     for (const candidateName of candidatePubgNames) {
-      const preferredShard = args.shard || identityRows.find((row) => row.pubgPlayerName === candidateName)?.shard || null;
+      const preferredShard = args.shard || identityRows.find((row) => row.pubgPlayerName === candidateName)?.shard || args.sampleShard;
       resolved = await findPlayerWithMatches(candidateName, preferredShard);
       if (resolved) break;
     }
