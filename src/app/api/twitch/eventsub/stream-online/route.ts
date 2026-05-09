@@ -224,21 +224,19 @@ async function processStreamOnlineNotification(input: {
       matchErrors: number;
     } | null = null;
 
+    // For seen-player discovery: only run if current autoLink is verified via PUBG API
     const resolvedIdentity = getResolvedIdentityForSeenIndexing(autoLink);
-    if (resolvedIdentity) {
-      const identityLink = await db.pubgStreamerIdentityLink.findUnique({
-        where: {
-          twitchUserId_platform: {
-            twitchUserId,
-            platform: resolvedIdentity.platform,
-          }
-        },
-        select: {
-          pubgPlayerId: true,
-          pubgPlayerName: true,
-        }
-      });
+    console.info("[twitch-eventsub] autoLink result", {
+      broadcasterId: twitchUserId,
+      broadcasterLogin: twitchUserLogin,
+      autoLinkSource: autoLink?.source ?? null,
+      autoLinkVerified: (autoLink as Record<string, unknown> | null)?.verified ?? null,
+      autoLinkPlatform: (autoLink as Record<string, unknown> | null)?.platform ?? null,
+      autoLinkShard: (autoLink as Record<string, unknown> | null)?.shard ?? null,
+      resolvedIdentityAvailable: Boolean(resolvedIdentity),
+    });
 
+    if (resolvedIdentity) {
       seenIndexing = await indexSeenPlayersFromRecentMatches({
         platform: resolvedIdentity.platform,
         shard: resolvedIdentity.shard,
@@ -262,32 +260,66 @@ async function processStreamOnlineNotification(input: {
         });
         return null;
       });
+    }
 
-      if (identityLink?.pubgPlayerId) {
-        matchVodIndexing = await indexStreamerMatchesAndVods({
-          identity: {
-            twitchUserId,
-            twitchUserLogin,
-            twitchUserName,
-            platform: resolvedIdentity.platform,
-            shard: resolvedIdentity.shard,
-            pubgPlayerId: identityLink.pubgPlayerId,
-            pubgPlayerName: identityLink.pubgPlayerName || resolvedIdentity.pubgPlayerName,
-          },
-          maxMatches: Number(process.env.PUBG_EVENTSUB_MATCH_INDEX_MATCHES ?? "8"),
-          maxVods: Number(process.env.PUBG_EVENTSUB_VOD_INDEX_LIMIT ?? "12"),
-        }).catch((error) => {
-          console.warn("[twitch-eventsub] match-vod indexing failed", {
-            broadcasterId: twitchUserId,
-            broadcasterLogin: twitchUserLogin,
-            platform: resolvedIdentity.platform,
-            shard: resolvedIdentity.shard,
-            pubgPlayerId: identityLink.pubgPlayerId,
-            error: error instanceof Error ? error.message : String(error)
-          });
-          return null;
+    // For match/VOD indexing: use ANY existing real identity link from DB (not just this session's verified one)
+    // A "real" pubgPlayerId does not start with the unverified/heuristic fake-id prefixes
+    const identityLink = await db.pubgStreamerIdentityLink.findFirst({
+      where: {
+        twitchUserId,
+        NOT: {
+          OR: [
+            { pubgPlayerId: { startsWith: "unverified:" } },
+            { pubgPlayerId: { startsWith: "login-heuristic:" } },
+            { pubgPlayerId: { startsWith: "profile-claim:" } },
+          ]
+        }
+      },
+      select: {
+        platform: true,
+        shard: true,
+        pubgPlayerId: true,
+        pubgPlayerName: true,
+      },
+      orderBy: { lastLinkedAt: "desc" }
+    });
+
+    console.info("[twitch-eventsub] identity link for match/VOD indexer", {
+      broadcasterId: twitchUserId,
+      broadcasterLogin: twitchUserLogin,
+      identityLinkFound: Boolean(identityLink),
+      platform: identityLink?.platform ?? null,
+      shard: identityLink?.shard ?? null,
+      pubgPlayerName: identityLink?.pubgPlayerName ?? null,
+      pubgPlayerId: identityLink?.pubgPlayerId
+        ? identityLink.pubgPlayerId.slice(0, 12) + "..."
+        : null,
+    });
+
+    if (identityLink) {
+      matchVodIndexing = await indexStreamerMatchesAndVods({
+        identity: {
+          twitchUserId,
+          twitchUserLogin,
+          twitchUserName,
+          platform: identityLink.platform as import("@/lib/pubg-api").PubgPlatform,
+          shard: identityLink.shard,
+          pubgPlayerId: identityLink.pubgPlayerId,
+          pubgPlayerName: identityLink.pubgPlayerName,
+        },
+        maxMatches: Number(process.env.PUBG_EVENTSUB_MATCH_INDEX_MATCHES ?? "8"),
+        maxVods: Number(process.env.PUBG_EVENTSUB_VOD_INDEX_LIMIT ?? "12"),
+      }).catch((error) => {
+        console.error("[twitch-eventsub] match-vod indexing failed", {
+          broadcasterId: twitchUserId,
+          broadcasterLogin: twitchUserLogin,
+          platform: identityLink.platform,
+          shard: identityLink.shard,
+          pubgPlayerId: identityLink.pubgPlayerId,
+          error: error instanceof Error ? error.message : String(error)
         });
-      }
+        return null;
+      });
     }
 
     console.info("[twitch-eventsub] stream.online processed", {

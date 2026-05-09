@@ -267,6 +267,7 @@ model PubgApiCallLog {
   durationMs  Int?
   success     Boolean
   triggeredBy String?  // "stream_online", "clips_route", "batch_linker", "indexer", "manual"
+  errorMessage String?
   calledAt    DateTime @default(now())
 
   @@index([calledAt])

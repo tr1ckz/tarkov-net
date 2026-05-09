@@ -11,6 +11,15 @@ type BucketRow = {
   failed: number;
 };
 
+type RecentFailureRow = {
+  calledAt: Date;
+  statusCode: number | null;
+  callType: string;
+  triggeredBy: string;
+  endpoint: string;
+  errorMessage: string | null;
+};
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const granularity = searchParams.get("granularity") ?? "hour"; // "minute" | "hour" | "day"
@@ -28,6 +37,8 @@ export async function GET(request: Request) {
       triggeredBy: true,
       durationMs: true,
       statusCode: true,
+      endpoint: true,
+      errorMessage: true,
     },
     orderBy: { calledAt: "asc" },
   });
@@ -60,6 +71,7 @@ export async function GET(request: Request) {
   // Breakdown by callType
   const callTypeMap = new Map<string, number>();
   const triggeredByMap = new Map<string, number>();
+  const failedStatusCodeMap = new Map<string, number>();
   let totalCalls = 0;
   let successCalls = 0;
   let notFoundCalls = 0;
@@ -70,7 +82,11 @@ export async function GET(request: Request) {
     totalCalls += 1;
     if (row.success) successCalls += 1;
     else if (row.statusCode === 404) notFoundCalls += 1;
-    else errorCalls += 1;
+    else {
+      errorCalls += 1;
+      const key = row.statusCode == null ? "network_or_unknown" : String(row.statusCode);
+      failedStatusCodeMap.set(key, (failedStatusCodeMap.get(key) ?? 0) + 1);
+    }
     avgDurationMs += row.durationMs ?? 0;
     const ct = normalizeCallType(row.callType);
     callTypeMap.set(ct, (callTypeMap.get(ct) ?? 0) + 1);
@@ -87,6 +103,26 @@ export async function GET(request: Request) {
   const triggeredByBreakdown = Array.from(triggeredByMap.entries())
     .sort(([, a], [, b]) => b - a)
     .map(([triggeredBy, count]) => ({ triggeredBy, count }));
+
+  const failedStatusBreakdown = Array.from(failedStatusCodeMap.entries())
+    .sort(([, a], [, b]) => b - a)
+    .map(([statusCode, count]) => ({ statusCode, count }));
+
+  const recentFailures: RecentFailureRow[] = logs
+    .filter((row) => !row.success && row.statusCode !== 404)
+    .slice(-40)
+    .reverse()
+    .map((row) => ({
+      calledAt: row.calledAt,
+      statusCode: row.statusCode ?? null,
+      callType: normalizeCallType(row.callType),
+      triggeredBy: normalizeTriggeredBy(row.triggeredBy),
+      endpoint: row.endpoint,
+      errorMessage: row.errorMessage ?? null,
+    }));
+
+  const rateLimitHits = failedStatusCodeMap.get("429") ?? 0;
+  const callsPerMinuteCap = Number(process.env.PUBG_API_MAX_CALLS_PER_MINUTE ?? "5");
 
   // Per-minute rate for the last 60 min
   const last60minSince = new Date(Date.now() - 60 * 60 * 1000);
@@ -105,10 +141,15 @@ export async function GET(request: Request) {
       rangeHours,
       granularity,
       since: since.toISOString(),
+      rateLimitHits,
+      likelyRateLimited: rateLimitHits > 0,
+      configuredMaxCallsPerMinute: Number.isFinite(callsPerMinuteCap) ? callsPerMinuteCap : 5,
     },
     buckets,
     callTypeBreakdown,
     triggeredByBreakdown,
+    failedStatusBreakdown,
+    recentFailures,
   });
 }
 

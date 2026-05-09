@@ -24,10 +24,22 @@ type MetricsResponse = {
     rangeHours: number;
     granularity: string;
     since: string;
+    rateLimitHits: number;
+    likelyRateLimited: boolean;
+    configuredMaxCallsPerMinute: number;
   };
   buckets: Array<{ bucket: string; total: number; success: number; notFound: number; failed: number }>;
   callTypeBreakdown: Array<{ callType: string; count: number }>;
   triggeredByBreakdown: Array<{ triggeredBy: string; count: number }>;
+  failedStatusBreakdown: Array<{ statusCode: string; count: number }>;
+  recentFailures: Array<{
+    calledAt: string;
+    statusCode: number | null;
+    callType: string;
+    triggeredBy: string;
+    endpoint: string;
+    errorMessage: string | null;
+  }>;
 };
 
 const GRANULARITY_OPTIONS = [
@@ -105,6 +117,13 @@ export default function PubgApiMetricsPage() {
 
       {s && !loading && (
         <>
+          <div className={`rounded border p-3 text-xs ${s.likelyRateLimited ? "border-[#8b3a3a] bg-[#2a1212] text-[#f1b0b0]" : "border-[#2a2010] bg-[#12100a] text-[#9a9080]"}`}>
+            {s.likelyRateLimited
+              ? `Rate limit signals detected: ${s.rateLimitHits} call(s) returned 429 in this window.`
+              : "No 429 rate-limit responses detected in this window."}
+            {` Configured cap: ${s.configuredMaxCallsPerMinute}/min. Observed avg: ${s.callsPerMinuteLast60}/min (last 60m).`}
+          </div>
+
           {/* Summary cards */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
             {[
@@ -217,6 +236,68 @@ export default function PubgApiMetricsPage() {
                 </tbody>
               </table>
             </div>
+
+            <div className="rounded border border-[#2a2010] bg-[#12100a] p-4 sm:col-span-2">
+              <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[#9a9080]">
+                Failed Calls By Status Code
+              </h2>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-[#7a7060]">
+                    <th className="pb-2">Status</th>
+                    <th className="pb-2 text-right">Count</th>
+                    <th className="pb-2">Meaning</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data!.failedStatusBreakdown.map((row) => (
+                    <tr key={row.statusCode} className="border-t border-[#1e1a10]">
+                      <td className="py-1 font-mono text-[#c8a96e]">{row.statusCode}</td>
+                      <td className="py-1 text-right text-[#f1d6aa]">{row.count.toLocaleString()}</td>
+                      <td className="py-1 text-[#9a9080]">{labelFailureStatus(row.statusCode)}</td>
+                    </tr>
+                  ))}
+                  {data!.failedStatusBreakdown.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="py-2 text-[#7a7060]">No failed calls in this window</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="rounded border border-[#2a2010] bg-[#12100a] p-4 sm:col-span-2">
+              <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[#9a9080]">
+                Recent Failure Log
+              </h2>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-[#7a7060]">
+                    <th className="pb-2">Time (UTC)</th>
+                    <th className="pb-2">Status</th>
+                    <th className="pb-2">Type</th>
+                    <th className="pb-2">Source</th>
+                    <th className="pb-2">Error</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data!.recentFailures.map((row, idx) => (
+                    <tr key={`${row.calledAt}-${idx}`} className="border-t border-[#1e1a10] align-top">
+                      <td className="py-1 text-[#9a9080]">{new Date(row.calledAt).toISOString().replace("T", " ").slice(0, 19)}</td>
+                      <td className="py-1 font-mono text-[#c8a96e]">{row.statusCode ?? "network"}</td>
+                      <td className="py-1 text-[#c8a96e]">{labelCallType(row.callType)}</td>
+                      <td className="py-1 text-[#c8a96e]">{labelTriggeredBy(row.triggeredBy)}</td>
+                      <td className="py-1 text-[#9a9080]">{row.errorMessage || row.endpoint}</td>
+                    </tr>
+                  ))}
+                  {data!.recentFailures.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="py-2 text-[#7a7060]">No recent failures in this window</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           <p className="text-xs text-[#6a6050]">
@@ -246,4 +327,15 @@ function labelTriggeredBy(value: string) {
   if (value === "clips_pubg") return "Clips: PUBG Feed Request";
   if (value === "system_unspecified") return "System (Unspecified)";
   return value.replace(/_/g, " ");
+}
+
+function labelFailureStatus(value: string) {
+  if (value === "429") return "Rate limit";
+  if (value === "401") return "Unauthorized API key";
+  if (value === "403") return "Forbidden / disabled scope";
+  if (value === "400") return "Bad request / invalid query";
+  if (value === "500") return "PUBG API server error";
+  if (value === "502" || value === "503" || value === "504") return "Upstream temporary outage";
+  if (value === "network_or_unknown") return "Network timeout/error before response";
+  return "Other";
 }

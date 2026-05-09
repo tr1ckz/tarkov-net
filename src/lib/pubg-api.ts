@@ -75,6 +75,16 @@ export type PubgMatchSummary = {
   telemetryUrl: string | null;
 };
 
+const PUBG_API_MAX_CALLS_PER_MINUTE = (() => {
+  const parsed = Number(process.env.PUBG_API_MAX_CALLS_PER_MINUTE ?? "5");
+  if (!Number.isFinite(parsed)) return 5;
+  return Math.max(1, Math.min(120, Math.floor(parsed)));
+})();
+
+const PUBG_API_RATE_WINDOW_MS = 60_000;
+const pubgApiCallTimestamps: number[] = [];
+let pubgRateLimitMutex: Promise<void> = Promise.resolve();
+
 // Async context key for propagating triggeredBy through the call stack
 const triggeredByStorage = new Map<string, string>();
 let _triggeredByContext: string | undefined;
@@ -94,6 +104,7 @@ async function logPubgApiCall(opts: {
   statusCode?: number | null;
   durationMs: number;
   success: boolean;
+  errorMessage?: string | null;
 }) {
   try {
     const { prisma } = await import("@/lib/prisma");
@@ -106,6 +117,7 @@ async function logPubgApiCall(opts: {
         durationMs: Math.round(opts.durationMs),
         success: opts.success,
         triggeredBy: _triggeredByContext ?? null,
+        errorMessage: opts.errorMessage?.slice(0, 500) ?? null,
       }
     });
   } catch {
@@ -124,8 +136,40 @@ export async function recordPubgApiCall(opts: {
   statusCode?: number | null;
   durationMs: number;
   success: boolean;
+  errorMessage?: string | null;
 }) {
   return logPubgApiCall(opts);
+}
+
+function cleanErrorMessage(value: string) {
+  return value.replace(/\s+/g, " ").trim().slice(0, 500);
+}
+
+function pruneOldCallTimestamps(nowMs: number) {
+  while (pubgApiCallTimestamps.length > 0 && nowMs - pubgApiCallTimestamps[0] >= PUBG_API_RATE_WINDOW_MS) {
+    pubgApiCallTimestamps.shift();
+  }
+}
+
+async function reservePubgApiCallSlot() {
+  const withLock = async () => {
+    while (true) {
+      const nowMs = Date.now();
+      pruneOldCallTimestamps(nowMs);
+
+      if (pubgApiCallTimestamps.length < PUBG_API_MAX_CALLS_PER_MINUTE) {
+        pubgApiCallTimestamps.push(nowMs);
+        return;
+      }
+
+      const waitMs = Math.max(25, pubgApiCallTimestamps[0] + PUBG_API_RATE_WINDOW_MS - nowMs + 5);
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+  };
+
+  const run = pubgRateLimitMutex.then(withLock, withLock);
+  pubgRateLimitMutex = run.then(() => undefined, () => undefined);
+  await run;
 }
 
 function getPubgApiKey() {
@@ -152,8 +196,9 @@ async function pubgGet<T>(path: string): Promise<T> {
   const apiKey = getPubgApiKey();
   const start = Date.now();
   let statusCode: number | undefined;
-  let success = false;
+  let errorMessage: string | null = null;
   try {
+    await reservePubgApiCallSlot();
     const response = await fetch(`https://api.pubg.com${path}`, {
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -162,17 +207,35 @@ async function pubgGet<T>(path: string): Promise<T> {
       cache: "no-store"
     });
     statusCode = response.status;
-    success = response.ok;
     if (!response.ok) {
-      void logPubgApiCall({ callType: callTypeFromPath(path), endpoint: path, shard: shardFromPath(path), statusCode, durationMs: Date.now() - start, success: false });
-      throw new Error(`PUBG API error (${response.status})`);
+      const bodyText = await response.text().catch(() => "");
+      errorMessage = cleanErrorMessage(`PUBG API error (${response.status}) ${bodyText || ""}`);
+      void logPubgApiCall({
+        callType: callTypeFromPath(path),
+        endpoint: path,
+        shard: shardFromPath(path),
+        statusCode,
+        durationMs: Date.now() - start,
+        success: false,
+        errorMessage,
+      });
+      throw new Error(errorMessage || `PUBG API error (${response.status})`);
     }
     const data = (await response.json()) as T;
-    void logPubgApiCall({ callType: callTypeFromPath(path), endpoint: path, shard: shardFromPath(path), statusCode, durationMs: Date.now() - start, success: true });
+    void logPubgApiCall({ callType: callTypeFromPath(path), endpoint: path, shard: shardFromPath(path), statusCode, durationMs: Date.now() - start, success: true, errorMessage: null });
     return data;
   } catch (err) {
+    const message = err instanceof Error ? cleanErrorMessage(err.message) : cleanErrorMessage(String(err));
     if (statusCode === undefined) {
-      void logPubgApiCall({ callType: callTypeFromPath(path), endpoint: path, shard: shardFromPath(path), statusCode: null, durationMs: Date.now() - start, success: false });
+      void logPubgApiCall({
+        callType: callTypeFromPath(path),
+        endpoint: path,
+        shard: shardFromPath(path),
+        statusCode: null,
+        durationMs: Date.now() - start,
+        success: false,
+        errorMessage: message,
+      });
     }
     throw err;
   }
@@ -181,9 +244,10 @@ async function pubgGet<T>(path: string): Promise<T> {
 async function fetchTelemetryEvents(url: string) {
   const start = Date.now();
   const response = await fetch(url, { cache: "no-store" });
-  void logPubgApiCall({ callType: "telemetry_fetch", endpoint: "telemetry", shard: null, statusCode: response.status, durationMs: Date.now() - start, success: response.ok });
+  const telemetryError = response.ok ? null : cleanErrorMessage(`PUBG telemetry fetch error (${response.status})`);
+  void logPubgApiCall({ callType: "telemetry_fetch", endpoint: "telemetry", shard: null, statusCode: response.status, durationMs: Date.now() - start, success: response.ok, errorMessage: telemetryError });
   if (!response.ok) {
-    throw new Error(`PUBG telemetry fetch error (${response.status})`);
+    throw new Error(telemetryError || `PUBG telemetry fetch error (${response.status})`);
   }
   return (await response.json()) as PubgTelemetryEvent[];
 }

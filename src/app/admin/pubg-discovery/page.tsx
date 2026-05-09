@@ -306,6 +306,67 @@ export default function PubgDiscoveryDashboardPage() {
               </table>
             </div>
           </div>
+
+          {/* Recent EventSub run logs */}
+          <div className="rounded border border-[#2a2010] bg-[#12100a] p-4">
+            <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[#9a9080]">
+              Recent EventSub Runs (stream.online)
+            </h2>
+            {data.recentEventSubRuns.length === 0 ? (
+              <p className="text-xs text-[#7a7060]">No EventSub runs recorded yet.</p>
+            ) : (
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-[#7a7060]">
+                    <th className="pb-2">Time</th>
+                    <th className="pb-2">Streamer</th>
+                    <th className="pb-2">Status</th>
+                    <th className="pb-2">Seen Discovery</th>
+                    <th className="pb-2">Match/VOD Indexing</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.recentEventSubRuns.map((run, i) => {
+                    const si = run.seenIndexing;
+                    const mv = run.matchVodIndexing;
+                    const isError = run.status === "error";
+                    const mvReason = mv ? String((mv as Record<string, unknown>).reason ?? "") : null;
+                    const mvLinks = mv ? Number((mv as Record<string, unknown>).linksMapped ?? 0) : null;
+                    const mvMatches = mv ? Number((mv as Record<string, unknown>).matchesIndexed ?? 0) : null;
+                    const mvErrors = mv ? Number((mv as Record<string, unknown>).matchErrors ?? 0) : null;
+                    return (
+                      <tr key={i} className="border-t border-[#1e1a10]">
+                        <td className="py-1 text-[#7a7060]">
+                          {new Date(run.createdAt).toLocaleTimeString()}
+                        </td>
+                        <td className="py-1 text-[#c8a96e]">{run.playerName ?? "—"}</td>
+                        <td className={`py-1 font-mono ${isError ? "text-red-400" : "text-green-400"}`}>
+                          {run.status}
+                        </td>
+                        <td className="py-1 text-[#9a9080]">
+                          {si
+                            ? `${(si as Record<string, unknown>).namesFound ?? 0} names, ${(si as Record<string, unknown>).discoveredNew ?? 0} new`
+                            : <span className="text-red-400">null (blocked)</span>}
+                        </td>
+                        <td className="py-1">
+                          {mv === null ? (
+                            <span className="text-red-400">null (no verified link)</span>
+                          ) : mvReason !== "ok" ? (
+                            <span className="text-yellow-400">{mvReason}</span>
+                          ) : (
+                            <span className="text-green-400">
+                              {mvMatches}m / {mvLinks}links
+                              {mvErrors ? <span className="ml-1 text-yellow-400">({mvErrors} err)</span> : null}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
         </>
       )}
     </div>

@@ -102,8 +102,21 @@ export async function indexStreamerMatchesAndVods(options: {
   const maxVods = Math.max(1, Math.min(20, options.maxVods ?? 12));
   const identity = options.identity;
 
-  const player = await getPlayerWithMatches(identity.shard, identity.pubgPlayerName).catch(() => null);
+  const player = await getPlayerWithMatches(identity.shard, identity.pubgPlayerName).catch((err) => {
+    console.error("[pubg-match-vod-indexer] getPlayerWithMatches failed", {
+      shard: identity.shard,
+      pubgPlayerName: identity.pubgPlayerName,
+      twitchUserId: identity.twitchUserId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  });
   if (!player) {
+    console.warn("[pubg-match-vod-indexer] player not found or lookup failed, aborting indexer", {
+      shard: identity.shard,
+      pubgPlayerName: identity.pubgPlayerName,
+      twitchUserId: identity.twitchUserId,
+    });
     return {
       indexed: false,
       reason: "player_not_found",
@@ -116,11 +129,26 @@ export async function indexStreamerMatchesAndVods(options: {
   }
 
   const matchIds = player.matchIds.slice(0, maxMatches);
+  console.info("[pubg-match-vod-indexer] fetching match summaries", {
+    twitchUserId: identity.twitchUserId,
+    pubgPlayerName: identity.pubgPlayerName,
+    shard: identity.shard,
+    matchCount: matchIds.length,
+    maxMatches,
+  });
   const matchRows: MatchIndexRow[] = [];
   let matchErrors = 0;
 
   for (const matchId of matchIds) {
-    const summary = await getMatchSummary(identity.shard, matchId).catch(() => null);
+    const summary = await getMatchSummary(identity.shard, matchId).catch((err) => {
+      console.warn("[pubg-match-vod-indexer] getMatchSummary failed", {
+        matchId,
+        shard: identity.shard,
+        twitchUserId: identity.twitchUserId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    });
     if (!summary) {
       matchErrors += 1;
       continue;
@@ -171,7 +199,20 @@ export async function indexStreamerMatchesAndVods(options: {
     });
   }
 
-  const videos = await getVideosByUserId(identity.twitchUserId, maxVods).catch(() => []);
+  const videos = await getVideosByUserId(identity.twitchUserId, maxVods).catch((err) => {
+    console.error("[pubg-match-vod-indexer] getVideosByUserId (Twitch) failed", {
+      twitchUserId: identity.twitchUserId,
+      twitchUserLogin: identity.twitchUserLogin,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return [];
+  });
+  console.info("[pubg-match-vod-indexer] vod fetch result", {
+    twitchUserId: identity.twitchUserId,
+    vodsReturned: videos.length,
+    matchRowsReady: matchRows.length,
+    matchErrors,
+  });
   const vodRows: VodIndexRow[] = [];
 
   for (const video of videos) {
@@ -252,6 +293,16 @@ export async function indexStreamerMatchesAndVods(options: {
 
     linksMapped += 1;
   }
+
+  console.info("[pubg-match-vod-indexer] indexing complete", {
+    twitchUserId: identity.twitchUserId,
+    pubgPlayerName: identity.pubgPlayerName,
+    matchesScanned: matchIds.length,
+    matchesIndexed: matchRows.length,
+    vodsIndexed: vodRows.length,
+    linksMapped,
+    matchErrors,
+  });
 
   return {
     indexed: true,
