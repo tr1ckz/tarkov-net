@@ -297,6 +297,30 @@ model PubgIdentityValidationQueue {
   @@index([nextAttemptAt])
 }
 
+model PubgIndexBacklog {
+  id                String   @id @default(cuid())
+  twitchUserId      String   @unique
+  twitchUserLogin   String
+  twitchUserName    String
+  status            String   @default("pending") // pending | processing | resolved
+  reason            String?
+  attempts          Int      @default(0)
+  firstSeenAt       DateTime @default(now())
+  lastSeenAt        DateTime @default(now())
+  lastAttemptAt     DateTime?
+  resolvedAt        DateTime?
+  resolutionNote    String?
+  platformHint      String?
+  shardHint         String?
+  pubgPlayerNameHint String?
+  identityLinkId    String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([status, lastSeenAt])
+  @@index([lastAttemptAt])
+}
+
 // Player name index built from PUBG /samples endpoint (hourly discovery worker)
 model PubgKnownPlayer {
   id              String   @id @default(cuid())

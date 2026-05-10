@@ -51,6 +51,9 @@ type PubgLinkingStats = {
     uniqueInteractionVods: number;
     matchVodLinksTotal: number;
     matchVodLinks24h: number;
+    indexBacklogTotal: number;
+    indexBacklogPending: number;
+    indexBacklogResolved24h: number;
   };
   sourceBreakdown: Array<{ eventType: string; count: number }>;
   topPubg: Array<{
@@ -130,6 +133,23 @@ type PubgLinkingStats = {
       vodStartedAt: string | null;
     }>;
     interactionTypeBreakdown: Array<{ interactionType: string; count: number }>;
+  };
+  backlogSummary?: {
+    recentBacklog: Array<{
+      twitchUserId: string;
+      twitchUserLogin: string;
+      twitchUserName: string;
+      status: string;
+      reason: string | null;
+      attempts: number;
+      platformHint: string | null;
+      shardHint: string | null;
+      pubgPlayerNameHint: string | null;
+      lastAttemptAt: string | null;
+      lastSeenAt: string;
+      resolvedAt: string | null;
+      resolutionNote: string | null;
+    }>;
   };
 };
 
@@ -802,6 +822,18 @@ export default function AdminPage() {
                 <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Mapped Twitch-&gt;PUBG IDs</div>
                 <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.streamerIdentityLinkCount ?? 0}</div>
               </div>
+              <div className="border border-[#2d2d2d] bg-[#111] p-3">
+                <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Backlog Total</div>
+                <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.indexBacklogTotal ?? 0}</div>
+              </div>
+              <div className="border border-[#2d2d2d] bg-[#111] p-3">
+                <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Backlog Pending</div>
+                <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.indexBacklogPending ?? 0}</div>
+              </div>
+              <div className="border border-[#2d2d2d] bg-[#111] p-3">
+                <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Backlog Resolved 24h</div>
+                <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.indexBacklogResolved24h ?? 0}</div>
+              </div>
             </div>
           </div>
 
@@ -906,6 +938,35 @@ export default function AdminPage() {
                 <p className="mt-2 text-xs text-[#8e8e8e]">
                   A user is considered attached to a VOD when a match is linked to a video and telemetry yields a stored interaction row with a VOD offset. If these lists stay empty, the issue is identity coverage rather than parsing.
                 </p>
+              </div>
+            </div>
+
+            <div className="mt-4 border border-[#1f1f1f] bg-[#0d0d0d] p-3">
+              <h3 className="text-[11px] font-semibold uppercase tracking-widest text-[#c8bda0]">Index Backlog (Recent)</h3>
+              <div className="mt-2 max-h-72 space-y-2 overflow-y-auto pr-1 text-[11px]">
+                {(pubgStats?.backlogSummary?.recentBacklog ?? []).map((row) => (
+                  <div key={`${row.twitchUserId}-${row.lastSeenAt}`} className="border border-[#1f1f1f] bg-[#090909] px-2 py-1.5 text-[#b9af95]">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[#e2d2af]">{row.twitchUserName || row.twitchUserLogin}</span>
+                      <span className="uppercase tracking-widest text-[#7f7768]">{row.status}</span>
+                      <span className="text-[#666]">attempts {row.attempts}</span>
+                    </div>
+                    <div className="mt-1 text-[#666]">
+                      reason {row.reason || "unknown"}
+                      {row.platformHint ? ` • ${row.platformHint}` : ""}
+                      {row.shardHint ? `/${row.shardHint}` : ""}
+                      {row.pubgPlayerNameHint ? ` • ${row.pubgPlayerNameHint}` : ""}
+                    </div>
+                    <div className="mt-1 text-[#5f5f5f]">
+                      seen {new Date(row.lastSeenAt).toLocaleString()}
+                      {row.lastAttemptAt ? ` • last attempt ${new Date(row.lastAttemptAt).toLocaleString()}` : ""}
+                      {row.resolvedAt ? ` • resolved ${new Date(row.resolvedAt).toLocaleString()}` : ""}
+                    </div>
+                  </div>
+                ))}
+                {(pubgStats?.backlogSummary?.recentBacklog.length ?? 0) === 0 && (
+                  <p className="text-xs text-[#555]">No backlog rows yet.</p>
+                )}
               </div>
             </div>
           </div>

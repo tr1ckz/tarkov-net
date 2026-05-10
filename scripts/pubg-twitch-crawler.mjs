@@ -53,6 +53,88 @@ async function writeCrawlerRunLog(input) {
   }
 }
 
+async function upsertIndexBacklogCandidate(input) {
+  try {
+    await prisma.pubgIndexBacklog.upsert({
+      where: { twitchUserId: input.twitchUserId },
+      create: {
+        twitchUserId: input.twitchUserId,
+        twitchUserLogin: input.twitchUserLogin,
+        twitchUserName: input.twitchUserName,
+        status: "pending",
+        reason: input.reason,
+        attempts: 1,
+        lastSeenAt: new Date(),
+        lastAttemptAt: new Date(),
+        platformHint: input.platformHint ?? null,
+        shardHint: input.shardHint ?? null,
+        pubgPlayerNameHint: input.pubgPlayerNameHint ?? null,
+        identityLinkId: input.identityLinkId ?? null
+      },
+      update: {
+        twitchUserLogin: input.twitchUserLogin,
+        twitchUserName: input.twitchUserName,
+        status: "pending",
+        reason: input.reason,
+        attempts: { increment: 1 },
+        lastSeenAt: new Date(),
+        lastAttemptAt: new Date(),
+        platformHint: input.platformHint ?? null,
+        shardHint: input.shardHint ?? null,
+        pubgPlayerNameHint: input.pubgPlayerNameHint ?? null,
+        identityLinkId: input.identityLinkId ?? null,
+        resolvedAt: null,
+        resolutionNote: null
+      }
+    });
+  } catch (error) {
+    log("warn", "failed to upsert index backlog candidate", {
+      twitchUserId: input.twitchUserId,
+      twitchUserLogin: input.twitchUserLogin,
+      reason: input.reason,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
+async function resolveIndexBacklogCandidate(twitchUserId, note) {
+  try {
+    await prisma.pubgIndexBacklog.updateMany({
+      where: { twitchUserId },
+      data: {
+        status: "resolved",
+        resolvedAt: new Date(),
+        resolutionNote: String(note || "indexed").slice(0, 500),
+        lastSeenAt: new Date()
+      }
+    });
+  } catch (error) {
+    log("warn", "failed to resolve index backlog candidate", {
+      twitchUserId,
+      note,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
+async function cleanupResolvedIndexBacklog() {
+  try {
+    const cutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    const result = await prisma.pubgIndexBacklog.deleteMany({
+      where: {
+        status: "resolved",
+        resolvedAt: { lt: cutoff }
+      }
+    });
+    return result.count;
+  } catch (error) {
+    log("warn", "failed to cleanup resolved index backlog", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return 0;
+  }
+}
+
 function log(level, message, data = {}) {
   const payload = {
     ts: new Date().toISOString(),
@@ -1009,7 +1091,9 @@ async function runInteractionBackfill() {
       matchesPersisted: 0,
       linksPersisted: 0,
       vodMomentsPersisted: 0,
-      errors: 0
+      errors: 0,
+      backlogQueued: 0,
+      backlogResolved: 0
     };
   }
 
@@ -1021,7 +1105,9 @@ async function runInteractionBackfill() {
     matchesPersisted: 0,
     linksPersisted: 0,
     vodMomentsPersisted: 0,
-    errors: 0
+    errors: 0,
+    backlogQueued: 0,
+    backlogResolved: 0
   };
 
   const recentVods = await prisma.pubgStreamerVod.findMany({
@@ -1091,7 +1177,16 @@ async function runInteractionBackfill() {
         }
       });
 
-      if (!identityLinks.length) continue;
+      if (!identityLinks.length) {
+        await upsertIndexBacklogCandidate({
+          twitchUserId: streamer.twitchUserId,
+          twitchUserLogin: streamer.twitchUserLogin,
+          twitchUserName: streamer.twitchUserName,
+          reason: "missing_identity_for_backfill"
+        });
+        summary.backlogQueued += 1;
+        continue;
+      }
       summary.streamersWithIdentity += 1;
 
       let resolved = null;
@@ -1139,8 +1234,24 @@ async function runInteractionBackfill() {
         }
       }
 
-      if (!resolved || !resolved.matchIds.length) continue;
+      if (!resolved || !resolved.matchIds.length) {
+        const topLink = identityLinks[0];
+        await upsertIndexBacklogCandidate({
+          twitchUserId: streamer.twitchUserId,
+          twitchUserLogin: streamer.twitchUserLogin,
+          twitchUserName: streamer.twitchUserName,
+          reason: "no_matches_for_resolved_identity",
+          platformHint: topLink?.platform ?? null,
+          shardHint: topLink?.shard ?? null,
+          pubgPlayerNameHint: topLink?.pubgPlayerName ?? null
+        });
+        summary.backlogQueued += 1;
+        continue;
+      }
       summary.streamersWithMatches += 1;
+
+      let streamerLinksPersisted = 0;
+      let streamerMatchesPersisted = 0;
 
       for (const matchId of resolved.matchIds) {
         const matchPayload = await pubgGet(`/shards/${encodeURIComponent(resolved.shard)}/matches/${encodeURIComponent(matchId)}`).catch(() => null);
@@ -1189,6 +1300,7 @@ async function runInteractionBackfill() {
           }
         });
         summary.matchesPersisted += 1;
+        streamerMatchesPersisted += 1;
 
         const bestVod = computeBestVodForMatch(matchCreatedAt, streamer.vods);
         if (!bestVod) continue;
@@ -1225,6 +1337,7 @@ async function runInteractionBackfill() {
           }
         });
         summary.linksPersisted += 1;
+        streamerLinksPersisted += 1;
 
         const telemetryResponse = await fetch(telemetryUrl, { cache: "no-store" }).catch(() => null);
         if (!telemetryResponse?.ok) continue;
@@ -1291,6 +1404,14 @@ async function runInteractionBackfill() {
           summary.vodMomentsPersisted += 1;
         }
       }
+
+      if (streamerLinksPersisted > 0 || streamerMatchesPersisted > 0) {
+        await resolveIndexBacklogCandidate(
+          streamer.twitchUserId,
+          `crawler_backfill_indexed:matches=${streamerMatchesPersisted}:links=${streamerLinksPersisted}`
+        );
+        summary.backlogResolved += 1;
+      }
     } catch (error) {
       summary.errors += 1;
       log("warn", "interaction backfill failed for streamer", {
@@ -1355,8 +1476,11 @@ async function indexStreams() {
     matchesPersisted: 0,
     linksPersisted: 0,
     vodMomentsPersisted: 0,
-    errors: 0
+    errors: 0,
+    backlogQueued: 0,
+    backlogResolved: 0
   };
+  let backlogCleaned = 0;
 
   for (const stream of streams) {
     await prisma.pubgActiveStreamer.upsert({
@@ -1447,6 +1571,17 @@ async function indexStreams() {
     });
   }
 
+  try {
+    backlogCleaned = await cleanupResolvedIndexBacklog();
+    if (backlogCleaned > 0) {
+      log("info", "resolved index backlog cleaned", { backlogCleaned });
+    }
+  } catch (error) {
+    log("error", "resolved index backlog cleanup failed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+
   // Run discovery worker (self-throttled to DISCOVERY_INTERVAL_MS, default 1 hour)
   try {
     await runDiscoveryWorker();
@@ -1477,7 +1612,8 @@ async function indexStreams() {
       eventSubSyncIntervalMs: EVENTSUB_SYNC_INTERVAL_MS,
       profileMapping: profileMappingSummary,
       knownPlayerMapping: knownPlayerMappingSummary,
-      interactionBackfill: interactionBackfillSummary
+      interactionBackfill: interactionBackfillSummary,
+      backlogCleaned
     }
   });
 }

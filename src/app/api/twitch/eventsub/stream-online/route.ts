@@ -56,6 +56,79 @@ async function writeEventSubRunLog(input: {
   }
 }
 
+async function upsertIndexBacklogCandidate(input: {
+  twitchUserId: string;
+  twitchUserLogin: string;
+  twitchUserName: string;
+  reason: string;
+  platformHint?: string | null;
+  shardHint?: string | null;
+  pubgPlayerNameHint?: string | null;
+  identityLinkId?: string | null;
+}) {
+  try {
+    await db.pubgIndexBacklog.upsert({
+      where: { twitchUserId: input.twitchUserId },
+      create: {
+        twitchUserId: input.twitchUserId,
+        twitchUserLogin: input.twitchUserLogin,
+        twitchUserName: input.twitchUserName,
+        status: "pending",
+        reason: input.reason,
+        attempts: 1,
+        lastAttemptAt: new Date(),
+        lastSeenAt: new Date(),
+        platformHint: input.platformHint ?? null,
+        shardHint: input.shardHint ?? null,
+        pubgPlayerNameHint: input.pubgPlayerNameHint ?? null,
+        identityLinkId: input.identityLinkId ?? null,
+      },
+      update: {
+        twitchUserLogin: input.twitchUserLogin,
+        twitchUserName: input.twitchUserName,
+        status: "pending",
+        reason: input.reason,
+        attempts: { increment: 1 },
+        lastAttemptAt: new Date(),
+        lastSeenAt: new Date(),
+        platformHint: input.platformHint ?? null,
+        shardHint: input.shardHint ?? null,
+        pubgPlayerNameHint: input.pubgPlayerNameHint ?? null,
+        identityLinkId: input.identityLinkId ?? null,
+        resolvedAt: null,
+        resolutionNote: null,
+      }
+    });
+  } catch (error) {
+    console.warn("[twitch-eventsub] failed to upsert index backlog candidate", {
+      twitchUserId: input.twitchUserId,
+      twitchUserLogin: input.twitchUserLogin,
+      reason: input.reason,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function resolveIndexBacklogCandidate(twitchUserId: string, note: string) {
+  try {
+    await db.pubgIndexBacklog.updateMany({
+      where: { twitchUserId },
+      data: {
+        status: "resolved",
+        resolvedAt: new Date(),
+        resolutionNote: note.slice(0, 500),
+        lastSeenAt: new Date(),
+      }
+    });
+  } catch (error) {
+    console.warn("[twitch-eventsub] failed to resolve index backlog candidate", {
+      twitchUserId,
+      note,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 function normalizeForCompare(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -562,6 +635,16 @@ async function processStreamOnlineNotification(input: {
         linksMapped: 0,
         matchErrors: 0,
       };
+      await upsertIndexBacklogCandidate({
+        twitchUserId,
+        twitchUserLogin,
+        twitchUserName,
+        reason: matchVodIndexing.reason,
+        platformHint: looseAutoLinkIdentity?.platform ?? null,
+        shardHint: looseAutoLinkIdentity?.shard ?? null,
+        pubgPlayerNameHint: looseAutoLinkIdentity?.pubgPlayerName ?? null,
+        identityLinkId: null,
+      });
     } else {
       const weakIdentity = shouldTreatIdentityAsWeakForValidation({
         identitySource: selectedIdentity.source,
@@ -743,6 +826,30 @@ async function processStreamOnlineNotification(input: {
         }
       }
       }
+      }
+    }
+
+    if (matchVodIndexing) {
+      const indexedWithData =
+        matchVodIndexing.indexed &&
+        (matchVodIndexing.linksMapped > 0 || matchVodIndexing.matchesIndexed > 0 || matchVodIndexing.identityValidated);
+
+      if (indexedWithData) {
+        await resolveIndexBacklogCandidate(
+          twitchUserId,
+          `indexed:${matchVodIndexing.reason}:links=${matchVodIndexing.linksMapped}:matches=${matchVodIndexing.matchesIndexed}`
+        );
+      } else {
+        await upsertIndexBacklogCandidate({
+          twitchUserId,
+          twitchUserLogin,
+          twitchUserName,
+          reason: matchVodIndexing.reason,
+          platformHint: selectedIdentity?.platform ?? null,
+          shardHint: selectedIdentity?.shard ?? null,
+          pubgPlayerNameHint: selectedIdentity?.pubgPlayerName ?? null,
+          identityLinkId: selectedIdentity?.identityLinkId ?? null,
+        });
       }
     }
 

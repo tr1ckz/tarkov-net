@@ -45,6 +45,24 @@ type InteractionSummary = {
   interactionTypeBreakdown: Array<{ interactionType: string; count: number }>;
 };
 
+type BacklogSummary = {
+  recentBacklog: Array<{
+    twitchUserId: string;
+    twitchUserLogin: string;
+    twitchUserName: string;
+    status: string;
+    reason: string | null;
+    attempts: number;
+    platformHint: string | null;
+    shardHint: string | null;
+    pubgPlayerNameHint: string | null;
+    lastAttemptAt: Date | null;
+    lastSeenAt: Date;
+    resolvedAt: Date | null;
+    resolutionNote: string | null;
+  }>;
+};
+
 function requireAdmin(session: Session | null) {
   if (!session?.user || (session.user as { role?: string }).role !== "ADMIN") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -103,6 +121,10 @@ export async function GET() {
     uniqueInteractionVodsRows,
     matchVodLinksTotal,
     matchVodLinks24h,
+    indexBacklogTotal,
+    indexBacklogPending,
+    indexBacklogResolved24h,
+    recentBacklog,
     recentInteractions,
     recentMatchVodLinks,
     interactionTypeBreakdown
@@ -187,6 +209,28 @@ export async function GET() {
     prisma.pubgMatchInteraction.groupBy({ by: ["twitchVideoId"] }),
     prisma.pubgMatchVodLink.count(),
     prisma.pubgMatchVodLink.count({ where: { linkedAt: { gte: dayAgo } } }),
+    prisma.pubgIndexBacklog.count(),
+    prisma.pubgIndexBacklog.count({ where: { status: "pending" } }),
+    prisma.pubgIndexBacklog.count({ where: { status: "resolved", resolvedAt: { gte: dayAgo } } }),
+    prisma.pubgIndexBacklog.findMany({
+      orderBy: [{ lastSeenAt: "desc" }],
+      take: 25,
+      select: {
+        twitchUserId: true,
+        twitchUserLogin: true,
+        twitchUserName: true,
+        status: true,
+        reason: true,
+        attempts: true,
+        platformHint: true,
+        shardHint: true,
+        pubgPlayerNameHint: true,
+        lastAttemptAt: true,
+        lastSeenAt: true,
+        resolvedAt: true,
+        resolutionNote: true,
+      }
+    }),
     prisma.pubgMatchInteraction.findMany({
       orderBy: [{ encounterAt: "desc" }, { createdAt: "desc" }],
       take: 20,
@@ -297,6 +341,9 @@ export async function GET() {
       uniqueInteractionVods: uniqueInteractionVodsRows.length,
       matchVodLinksTotal,
       matchVodLinks24h,
+      indexBacklogTotal,
+      indexBacklogPending,
+      indexBacklogResolved24h,
     },
     sourceBreakdown: sourceBreakdown.map((row) => ({
       eventType: row.eventType,
@@ -319,6 +366,9 @@ export async function GET() {
         interactionType: row.interactionType,
         count: row._count._all
       }))
-    } satisfies InteractionSummary
+    } satisfies InteractionSummary,
+    backlogSummary: {
+      recentBacklog,
+    } satisfies BacklogSummary
   });
 }
