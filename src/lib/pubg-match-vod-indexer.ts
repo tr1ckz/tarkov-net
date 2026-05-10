@@ -2,7 +2,9 @@ import { prisma } from "@/lib/prisma";
 import {
   getMatchSummary,
   getPlayerWithMatches,
+  getPlayerWithMatchesById,
   lookupPlayerAcrossShards,
+  lookupPlayerByIdAcrossShards,
   getPlayerTelemetryData,
   type PubgPlatform,
 } from "@/lib/pubg-api";
@@ -140,9 +142,10 @@ export async function indexStreamerMatchesAndVods(options: {
   let activeShard = identity.shard;
   let activePlayerName = identity.pubgPlayerName;
 
-  let player = await getPlayerWithMatches(identity.shard, identity.pubgPlayerName).catch((err) => {
-    console.error("[pubg-match-vod-indexer] getPlayerWithMatches failed", {
+  let player = await getPlayerWithMatchesById(identity.shard, identity.pubgPlayerId).catch((err) => {
+    console.error("[pubg-match-vod-indexer] getPlayerWithMatchesById failed", {
       shard: identity.shard,
+      pubgPlayerId: identity.pubgPlayerId,
       pubgPlayerName: identity.pubgPlayerName,
       twitchUserId: identity.twitchUserId,
       error: err instanceof Error ? err.message : String(err),
@@ -150,6 +153,40 @@ export async function indexStreamerMatchesAndVods(options: {
     return null;
   });
 
+  if (!player) {
+    const crossShardById = await lookupPlayerByIdAcrossShards({
+      playerId: identity.pubgPlayerId,
+      platform: identity.platform,
+      preferredShard: identity.shard,
+    }).catch((err) => {
+      console.warn("[pubg-match-vod-indexer] lookupPlayerByIdAcrossShards retry failed", {
+        preferredShard: identity.shard,
+        platform: identity.platform,
+        pubgPlayerId: identity.pubgPlayerId,
+        pubgPlayerName: identity.pubgPlayerName,
+        twitchUserId: identity.twitchUserId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    });
+
+    if (crossShardById) {
+      activeShard = crossShardById.shard;
+      activePlayerName = crossShardById.playerName;
+      player = await getPlayerWithMatchesById(activeShard, identity.pubgPlayerId).catch((err) => {
+        console.warn("[pubg-match-vod-indexer] cross-shard getPlayerWithMatchesById failed", {
+          shard: activeShard,
+          pubgPlayerId: identity.pubgPlayerId,
+          pubgPlayerName: activePlayerName,
+          twitchUserId: identity.twitchUserId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return null;
+      });
+    }
+  }
+
+  // Last-resort fallback for legacy links missing/incorrect player IDs.
   if (!player) {
     const crossShard = await lookupPlayerAcrossShards({
       playerName: identity.pubgPlayerName,

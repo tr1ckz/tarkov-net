@@ -326,6 +326,25 @@ export async function getPlayerWithMatches(shard: string, playerName: string) {
   };
 }
 
+export async function getPlayerWithMatchesById(shard: string, playerId: string) {
+  const payload = await pubgGet<PubgPlayerResponse>(
+    `/shards/${encodeURIComponent(shard)}/players?filter[playerIds]=${encodeURIComponent(playerId)}`
+  );
+
+  const player = payload.data?.[0];
+  if (!player) {
+    return null;
+  }
+
+  const matchIds = player.relationships?.matches?.data?.map((entry) => entry.id) ?? [];
+
+  return {
+    playerId: player.id,
+    playerName: player.attributes.name,
+    matchIds
+  };
+}
+
 export async function resolveCachedPubgPlayer(options: {
   playerName: string;
   platform: PubgPlatform;
@@ -440,6 +459,38 @@ export async function lookupPlayerAcrossShards(options: {
       // 404 means player not on this shard, other errors (5xx, network) should be retried on next shard
       const errorMsg = error instanceof Error ? error.message : String(error);
       console.warn(`[pubg-api] player lookup failed on shard ${shard}: ${errorMsg}`);
+      continue;
+    }
+  }
+
+  return null;
+}
+
+export async function lookupPlayerByIdAcrossShards(options: {
+  playerId: string;
+  preferredShard?: string;
+  platform: PubgPlatform;
+}) {
+  const { playerId, platform, preferredShard } = options;
+  const candidates = getCandidateShards(platform);
+  const orderedShards = preferredShard
+    ? [preferredShard, ...candidates.filter((shard) => shard !== preferredShard)]
+    : candidates;
+
+  for (const shard of orderedShards) {
+    try {
+      const found = await getPlayerWithMatchesById(shard, playerId);
+      if (found) {
+        return {
+          shard,
+          playerId: found.playerId,
+          playerName: found.playerName,
+          matchCount: found.matchIds.length
+        };
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.warn(`[pubg-api] player-id lookup failed on shard ${shard}: ${errorMsg}`);
       continue;
     }
   }
