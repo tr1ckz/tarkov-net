@@ -202,6 +202,21 @@ async function getPlayerWithMatches(shard, playerName) {
   };
 }
 
+async function getPlayerWithMatchesById(shard, playerId) {
+  const payload = await pubgGet(
+    `/shards/${encodeURIComponent(shard)}/players?filter[playerIds]=${encodeURIComponent(playerId)}`
+  );
+
+  const player = payload.data?.[0];
+  if (!player) return null;
+
+  return {
+    playerId: player.id,
+    playerName: player.attributes?.name ?? playerId,
+    matchIds: player.relationships?.matches?.data?.map((entry) => entry.id) ?? []
+  };
+}
+
 async function lookupPlayerAcrossShards(playerName, platform) {
   const shards = getCandidateShards(platform);
   for (const shard of shards) {
@@ -215,6 +230,27 @@ async function lookupPlayerAcrossShards(playerName, platform) {
       };
     }
   }
+  return null;
+}
+
+async function lookupPlayerByIdAcrossShards(playerId, platform, preferredShard) {
+  const shards = getCandidateShards(platform);
+  const ordered = preferredShard
+    ? [preferredShard, ...shards.filter((shard) => shard !== preferredShard)]
+    : shards;
+
+  for (const shard of ordered) {
+    const player = await getPlayerWithMatchesById(shard, playerId).catch(() => null);
+    if (player) {
+      return {
+        shard,
+        playerId: player.playerId,
+        playerName: player.playerName,
+        matchCount: player.matchIds.length
+      };
+    }
+  }
+
   return null;
 }
 
@@ -1030,7 +1066,16 @@ async function runInteractionBackfill() {
         where: {
           twitchUserId: streamer.twitchUserId,
           platform: { in: ["steam", "xbox", "psn"] },
-          pubgPlayerName: { not: "" }
+          pubgPlayerName: { not: "" },
+          confidenceScore: { gte: 80 },
+          source: {
+            notIn: [
+              "eventsub_login_heuristic",
+              "eventsub_profile_claim",
+              "eventsub_known_player_unverified",
+              "eventsub_login_heuristic_unverified"
+            ]
+          }
         },
         orderBy: [
           { confidenceScore: "desc" },
@@ -1051,27 +1096,42 @@ async function runInteractionBackfill() {
 
       let resolved = null;
       for (const link of identityLinks) {
-        const direct = await getPlayerWithMatches(link.shard, link.pubgPlayerName).catch(() => null);
+        const direct = await getPlayerWithMatchesById(link.shard, link.pubgPlayerId).catch(() => null);
         if (direct && direct.matchIds.length > 0) {
           resolved = {
             platform: link.platform,
             shard: link.shard,
             pubgPlayerName: direct.playerName ?? link.pubgPlayerName,
-            pubgPlayerId: direct.playerId,
+            pubgPlayerId: link.pubgPlayerId,
             matchIds: direct.matchIds.slice(0, INTERACTION_BACKFILL_MATCHES)
           };
           break;
         }
 
-        const cross = await lookupPlayerAcrossShards(link.pubgPlayerName, link.platform).catch(() => null);
+        const cross = await lookupPlayerByIdAcrossShards(link.pubgPlayerId, link.platform, link.shard).catch(() => null);
         if (cross && cross.matchCount > 0) {
-          const playerWithMatches = await getPlayerWithMatches(cross.shard, cross.playerName).catch(() => null);
+          const playerWithMatches = await getPlayerWithMatchesById(cross.shard, link.pubgPlayerId).catch(() => null);
           if (playerWithMatches && playerWithMatches.matchIds.length > 0) {
             resolved = {
               platform: link.platform,
               shard: cross.shard,
               pubgPlayerName: playerWithMatches.playerName ?? cross.playerName,
-              pubgPlayerId: playerWithMatches.playerId,
+              pubgPlayerId: link.pubgPlayerId,
+              matchIds: playerWithMatches.matchIds.slice(0, INTERACTION_BACKFILL_MATCHES)
+            };
+            break;
+          }
+        }
+
+        const byNameCross = await lookupPlayerAcrossShards(link.pubgPlayerName, link.platform).catch(() => null);
+        if (byNameCross && byNameCross.matchCount > 0) {
+          const playerWithMatches = await getPlayerWithMatches(byNameCross.shard, byNameCross.playerName).catch(() => null);
+          if (playerWithMatches && playerWithMatches.matchIds.length > 0) {
+            resolved = {
+              platform: link.platform,
+              shard: byNameCross.shard,
+              pubgPlayerName: playerWithMatches.playerName ?? byNameCross.playerName,
+              pubgPlayerId: link.pubgPlayerId,
               matchIds: playerWithMatches.matchIds.slice(0, INTERACTION_BACKFILL_MATCHES)
             };
             break;
