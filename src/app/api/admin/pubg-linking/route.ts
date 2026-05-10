@@ -10,6 +10,41 @@ type RunMetadata = {
   [key: string]: unknown;
 };
 
+type InteractionSummary = {
+  recentInteractions: Array<{
+    createdAt: Date;
+    encounterAt: Date | null;
+    interactionType: string;
+    interactionTitle: string;
+    counterpartyPubgNameRaw: string;
+    counterpartyPubgNameNormalized: string;
+    twitchUserLogin: string;
+    twitchUserName: string;
+    twitchVideoId: string;
+    vodOffsetSeconds: number;
+    weapon: string | null;
+    distanceMeters: number | null;
+    mapTag: string | null;
+    gameModeTag: string | null;
+    platform: string;
+    shard: string;
+    matchId: string;
+  }>;
+  recentMatchVodLinks: Array<{
+    linkedAt: Date;
+    matchId: string;
+    videoId: string;
+    twitchUserLogin: string;
+    twitchUserName: string;
+    confidenceTag: string;
+    vodOffsetSeconds: number;
+    deltaSeconds: number;
+    matchCreatedAt: Date | null;
+    vodStartedAt: Date | null;
+  }>;
+  interactionTypeBreakdown: Array<{ interactionType: string; count: number }>;
+};
+
 function requireAdmin(session: Session | null) {
   if (!session?.user || (session.user as { role?: string }).role !== "ADMIN") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -61,7 +96,16 @@ export async function GET() {
     streamerProfileCount,
     streamerProfileLiveCount,
     streamerIdentityLinkCount,
-    uniquePairRows
+    uniquePairRows,
+    totalInteractions,
+    interactions24h,
+    uniqueInteractionOpponentsRows,
+    uniqueInteractionVodsRows,
+    matchVodLinksTotal,
+    matchVodLinks24h,
+    recentInteractions,
+    recentMatchVodLinks,
+    interactionTypeBreakdown
   ] = await Promise.all([
     prisma.pubgLinkEvent.count(),
     prisma.pubgLinkRunLog.count(),
@@ -136,7 +180,56 @@ export async function GET() {
         SELECT DISTINCT "pubgNameNormalized", "twitchUserId"
         FROM "PubgLinkEvent"
       )
-    `
+    `,
+    prisma.pubgMatchInteraction.count(),
+    prisma.pubgMatchInteraction.count({ where: { createdAt: { gte: dayAgo } } }),
+    prisma.pubgMatchInteraction.groupBy({ by: ["counterpartyPubgNameNormalized"] }),
+    prisma.pubgMatchInteraction.groupBy({ by: ["twitchVideoId"] }),
+    prisma.pubgMatchVodLink.count(),
+    prisma.pubgMatchVodLink.count({ where: { linkedAt: { gte: dayAgo } } }),
+    prisma.pubgMatchInteraction.findMany({
+      orderBy: [{ encounterAt: "desc" }, { createdAt: "desc" }],
+      take: 20,
+      select: {
+        createdAt: true,
+        encounterAt: true,
+        interactionType: true,
+        interactionTitle: true,
+        counterpartyPubgNameRaw: true,
+        counterpartyPubgNameNormalized: true,
+        twitchUserLogin: true,
+        twitchUserName: true,
+        twitchVideoId: true,
+        vodOffsetSeconds: true,
+        weapon: true,
+        distanceMeters: true,
+        mapTag: true,
+        gameModeTag: true,
+        platform: true,
+        shard: true,
+        matchId: true,
+      }
+    }),
+    prisma.pubgMatchVodLink.findMany({
+      orderBy: [{ linkedAt: "desc" }],
+      take: 20,
+      select: {
+        linkedAt: true,
+        matchId: true,
+        videoId: true,
+        twitchUserLogin: true,
+        twitchUserName: true,
+        confidenceTag: true,
+        vodOffsetSeconds: true,
+        deltaSeconds: true,
+        matchCreatedAt: true,
+        vodStartedAt: true,
+      }
+    }),
+    prisma.pubgMatchInteraction.groupBy({
+      by: ["interactionType"],
+      _count: { _all: true }
+    })
   ]);
 
   const topPubgWithReach = await Promise.all(
@@ -197,7 +290,13 @@ export async function GET() {
       activeIndexerCount,
       streamerProfileCount,
       streamerProfileLiveCount,
-      streamerIdentityLinkCount
+      streamerIdentityLinkCount,
+      totalInteractions,
+      interactions24h,
+      uniqueInteractionOpponents: uniqueInteractionOpponentsRows.length,
+      uniqueInteractionVods: uniqueInteractionVodsRows.length,
+      matchVodLinksTotal,
+      matchVodLinks24h,
     },
     sourceBreakdown: sourceBreakdown.map((row) => ({
       eventType: row.eventType,
@@ -212,6 +311,14 @@ export async function GET() {
         ...run,
         verboseMessages: metadata?.verboseMessages ?? []
       };
-    })
+    }),
+    interactionSummary: {
+      recentInteractions,
+      recentMatchVodLinks,
+      interactionTypeBreakdown: interactionTypeBreakdown.map((row) => ({
+        interactionType: row.interactionType,
+        count: row._count._all
+      }))
+    } satisfies InteractionSummary
   });
 }

@@ -14,3 +14,8 @@ prisma/*.db-journal
 prisma/*.db-shm
 prisma/*.db-wal
 coverage
+
+# Local debug scripts and temp files
+debug_*.py
+.debug/
+/tmp/

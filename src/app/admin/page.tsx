@@ -45,6 +45,12 @@ type PubgLinkingStats = {
     streamerProfileCount: number;
     streamerProfileLiveCount: number;
     streamerIdentityLinkCount: number;
+    totalInteractions: number;
+    interactions24h: number;
+    uniqueInteractionOpponents: number;
+    uniqueInteractionVods: number;
+    matchVodLinksTotal: number;
+    matchVodLinks24h: number;
   };
   sourceBreakdown: Array<{ eventType: string; count: number }>;
   topPubg: Array<{
@@ -91,6 +97,40 @@ type PubgLinkingStats = {
     errorMessage: string | null;
     verboseMessages: string[];
   }>;
+  interactionSummary?: {
+    recentInteractions: Array<{
+      createdAt: string;
+      encounterAt: string | null;
+      interactionType: string;
+      interactionTitle: string;
+      counterpartyPubgNameRaw: string;
+      counterpartyPubgNameNormalized: string;
+      twitchUserLogin: string;
+      twitchUserName: string;
+      twitchVideoId: string;
+      vodOffsetSeconds: number;
+      weapon: string | null;
+      distanceMeters: number | null;
+      mapTag: string | null;
+      gameModeTag: string | null;
+      platform: string;
+      shard: string;
+      matchId: string;
+    }>;
+    recentMatchVodLinks: Array<{
+      linkedAt: string;
+      matchId: string;
+      videoId: string;
+      twitchUserLogin: string;
+      twitchUserName: string;
+      confidenceTag: string;
+      vodOffsetSeconds: number;
+      deltaSeconds: number;
+      matchCreatedAt: string | null;
+      vodStartedAt: string | null;
+    }>;
+    interactionTypeBreakdown: Array<{ interactionType: string; count: number }>;
+  };
 };
 
 type LiveTailRun = {
@@ -376,29 +416,6 @@ export default function AdminPage() {
       setPubgStats(stats);
     } finally {
       setRefreshingPubg(false);
-    }
-  }
-
-  async function writeProbeLog() {
-    setProbingPubg(true);
-    setProbeMessage(null);
-    try {
-      const response = await fetch("/api/admin/pubg-linking/probe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ note: "manual-admin-probe" })
-      });
-      const payload = await response.json();
-      if (!response.ok) {
-        setProbeMessage(payload?.error ?? "Failed to write probe log");
-        return;
-      }
-      setProbeMessage("Probe run log written.");
-      await refreshPubgStats();
-    } catch (error) {
-      setProbeMessage(error instanceof Error ? error.message : "Failed to write probe log");
-    } finally {
-      setProbingPubg(false);
     }
   }
 
@@ -700,13 +717,6 @@ export default function AdminPage() {
             View PUBG Discovery Dashboard →
           </a>
 
-          <div className="border border-[#2d2d2d] bg-[#111] p-3">
-            <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">What&apos;s Going On</h2>
-            <p className="mt-2 text-xs text-[#8b816f]">
-              This panel exposes live linker activity and crawler/EventSub health. If mappings are missing, start with ACTIVE JOBS status and then inspect LOG TAIL errors.
-            </p>
-          </div>
-
           <div className="flex items-center justify-between">
             <p className="text-xs uppercase tracking-widest text-[#7f7768]">
               Last 24h runs: {pubgStats?.totals.runs24h ?? 0} | ok {pubgStats?.totals.runs24hOk ?? 0} | empty {pubgStats?.totals.runs24hEmpty ?? 0} | errors {pubgStats?.totals.runs24hError ?? 0}
@@ -724,13 +734,6 @@ export default function AdminPage() {
                 className="border border-[#49533a] bg-[#1a1f14] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-[#e2d2af] hover:bg-[#222a1a] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {refreshingPubg ? "Refreshing..." : "Refresh Stats"}
-              </button>
-              <button
-                onClick={writeProbeLog}
-                disabled={probingPubg}
-                className="border border-[#5e4d34] bg-[#1a1510] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-[#e2d2af] hover:border-[#f5c842] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Write Probe Log
               </button>
               <button
                 onClick={runClipsProbe}
@@ -798,6 +801,111 @@ export default function AdminPage() {
               <div className="border border-[#2d2d2d] bg-[#111] p-3">
                 <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Mapped Twitch-&gt;PUBG IDs</div>
                 <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.streamerIdentityLinkCount ?? 0}</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="border border-[#2d2d2d] bg-[#111] p-3">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">Match / VOD Attachments</h2>
+              <span className="text-[10px] uppercase tracking-widest text-[#666]">Stored in PubgMatchInteraction + PubgMatchVodLink</span>
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-3 lg:grid-cols-6">
+              <div className="border border-[#2d2d2d] bg-[#111] p-3">
+                <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Interactions Total</div>
+                <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.totalInteractions ?? 0}</div>
+              </div>
+              <div className="border border-[#2d2d2d] bg-[#111] p-3">
+                <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Interactions 24h</div>
+                <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.interactions24h ?? 0}</div>
+              </div>
+              <div className="border border-[#2d2d2d] bg-[#111] p-3">
+                <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Unique Opponents</div>
+                <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.uniqueInteractionOpponents ?? 0}</div>
+              </div>
+              <div className="border border-[#2d2d2d] bg-[#111] p-3">
+                <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Unique VODs</div>
+                <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.uniqueInteractionVods ?? 0}</div>
+              </div>
+              <div className="border border-[#2d2d2d] bg-[#111] p-3">
+                <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Match-VOD Links</div>
+                <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.matchVodLinksTotal ?? 0}</div>
+              </div>
+              <div className="border border-[#2d2d2d] bg-[#111] p-3">
+                <div className="text-[10px] uppercase tracking-widest text-[#7f7768]">Links 24h</div>
+                <div className="mt-1 text-xl font-semibold text-[#e2d2af]">{pubgStats?.totals.matchVodLinks24h ?? 0}</div>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 xl:grid-cols-2">
+              <div className="border border-[#1f1f1f] bg-[#0d0d0d] p-3">
+                <h3 className="text-[11px] font-semibold uppercase tracking-widest text-[#c8bda0]">Recent Match Attachments</h3>
+                <div className="mt-2 max-h-72 space-y-2 overflow-y-auto pr-1">
+                  {(pubgStats?.interactionSummary?.recentMatchVodLinks ?? []).map((row) => (
+                    <div key={`${row.linkedAt}-${row.matchId}-${row.videoId}`} className="border border-[#1f1f1f] bg-[#090909] px-2 py-1.5 text-[11px] text-[#b9af95]">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[#e2d2af]">{row.twitchUserName || row.twitchUserLogin}</span>
+                        <span className="text-[#666]">linked</span>
+                        <span className={`uppercase tracking-widest ${row.confidenceTag === "exact_window" ? "text-[#8fa070]" : row.confidenceTag === "inside_vod" ? "text-[#d8b46b]" : "text-[#7f7768]"}`}>{row.confidenceTag}</span>
+                        <span className="text-[#666]">offset {row.vodOffsetSeconds}s</span>
+                        <span className="text-[#666]">delta {row.deltaSeconds}s</span>
+                      </div>
+                      <div className="mt-1 text-[#666]">match {row.matchId} • vod {row.videoId} • {new Date(row.linkedAt).toLocaleString()}</div>
+                    </div>
+                  ))}
+                  {(pubgStats?.interactionSummary?.recentMatchVodLinks.length ?? 0) === 0 && (
+                    <p className="text-xs text-[#555]">No match-VOD links yet.</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="border border-[#1f1f1f] bg-[#0d0d0d] p-3">
+                <h3 className="text-[11px] font-semibold uppercase tracking-widest text-[#c8bda0]">Recent Encounters Saved to VODs</h3>
+                <div className="mt-2 max-h-72 space-y-2 overflow-y-auto pr-1">
+                  {(pubgStats?.interactionSummary?.recentInteractions ?? []).map((row) => (
+                    <div key={`${row.createdAt}-${row.matchId}-${row.counterpartyPubgNameNormalized}-${row.interactionType}`} className="border border-[#1f1f1f] bg-[#090909] px-2 py-1.5 text-[11px] text-[#b9af95]">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[#e2d2af]">{row.interactionTitle}</span>
+                        <span className="text-[#666]">vs</span>
+                        <span className="text-[#8fa070]">{row.counterpartyPubgNameRaw}</span>
+                        <span className="text-[#666]">@ {row.vodOffsetSeconds}s</span>
+                        <span className="uppercase tracking-widest text-[#7f7768]">{row.interactionType}</span>
+                      </div>
+                      <div className="mt-1 text-[#666]">
+                        {row.twitchUserName || row.twitchUserLogin} • {row.mapTag || "unknown map"} • {row.gameModeTag || "unknown mode"}
+                        {row.weapon ? ` • ${row.weapon}` : ""}
+                        {typeof row.distanceMeters === "number" ? ` • ${row.distanceMeters}m` : ""}
+                      </div>
+                    </div>
+                  ))}
+                  {(pubgStats?.interactionSummary?.recentInteractions.length ?? 0) === 0 && (
+                    <p className="text-xs text-[#555]">No saved encounter interactions yet.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 xl:grid-cols-2">
+              <div className="border border-[#1f1f1f] bg-[#0d0d0d] p-3">
+                <h3 className="text-[11px] font-semibold uppercase tracking-widest text-[#c8bda0]">Interaction Types</h3>
+                <div className="mt-2 space-y-1 text-[11px] text-[#b9af95]">
+                  {(pubgStats?.interactionSummary?.interactionTypeBreakdown ?? []).map((row) => (
+                    <div key={row.interactionType} className="flex items-center justify-between border border-[#1f1f1f] bg-[#090909] px-2 py-1">
+                      <span className="uppercase tracking-widest text-[#7f7768]">{row.interactionType}</span>
+                      <span className="text-[#e2d2af]">{row.count}</span>
+                    </div>
+                  ))}
+                  {(pubgStats?.interactionSummary?.interactionTypeBreakdown.length ?? 0) === 0 && (
+                    <p className="text-xs text-[#555]">No interaction breakdown yet.</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="border border-[#1f1f1f] bg-[#0d0d0d] p-3">
+                <h3 className="text-[11px] font-semibold uppercase tracking-widest text-[#c8bda0]">Pipeline Note</h3>
+                <p className="mt-2 text-xs text-[#8e8e8e]">
+                  A user is considered attached to a VOD when a match is linked to a video and telemetry yields a stored interaction row with a VOD offset. If these lists stay empty, the issue is identity coverage rather than parsing.
+                </p>
               </div>
             </div>
           </div>
