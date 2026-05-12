@@ -78,6 +78,13 @@ function toTwitchTimecode(value: string | null | undefined) {
   return `${h}h${m}m${s}s`;
 }
 
+function prettifyEventType(value: string) {
+  return value
+    .replace(/^Log/, "")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .trim() || "Encounter";
+}
+
 async function fetchJsonWithTimeout<T>(url: string, timeoutMs = 12000): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -182,6 +189,10 @@ function mapPubgReportEventsToClips(events: PubgReportStreamEvent[], limit: numb
       ? new Date(event.TimeEvent).toISOString()
       : new Date().toISOString();
     const timecode = toTwitchTimecode(event.TimeDiff);
+    const prettyEventType = prettifyEventType(eventType);
+    const thumbnailUrl = twitchUserId
+      ? `https://static-cdn.jtvnw.net/s3_vods/${twitchUserId}/${videoId}/thumb/thumb0-320x180.jpg`
+      : "/pubg.avif";
 
     const actionText = normalizedPlayer && normalizeForCompare(killer) === normalizedPlayer
       ? `YOU ${eventType} ${victim || "an opponent"}`
@@ -200,10 +211,10 @@ function mapPubgReportEventsToClips(events: PubgReportStreamEvent[], limit: numb
       video_id: videoId,
       game_id: "27971",
       language: "",
-      title: `[pubg.report] ${eventType}`,
+      title: prettyEventType,
       view_count: 0,
       created_at: createdAt,
-      thumbnail_url: "",
+      thumbnail_url: thumbnailUrl,
       duration: 0,
       encounterWith,
       encounterActionText: actionText,

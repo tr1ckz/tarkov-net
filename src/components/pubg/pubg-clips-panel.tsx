@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 type Clip = {
   id: string;
   url: string;
+  video_id?: string;
   title: string;
   creator_name: string;
   broadcaster_name: string;
@@ -103,6 +104,7 @@ export function PubgClipsPanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [clips, setClips] = useState<Clip[]>([]);
+  const [activeClip, setActiveClip] = useState<Clip | null>(null);
   const [submitted, setSubmitted] = useState<{ mode: "encounters" | "streamer"; playerName: string; streamer: string; platform: string } | null>(null);
   const [resultMeta, setResultMeta] = useState<{
     encountersScanned?: number;
@@ -199,6 +201,33 @@ export function PubgClipsPanel() {
       cancelled = true;
     };
   }, [query, submitted]);
+
+  useEffect(() => {
+    if (!activeClip) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [activeClip]);
+
+  const embedUrl = useMemo(() => {
+    if (!activeClip) return "";
+    const videoId = activeClip.video_id;
+    if (!videoId) return "";
+
+    const host = typeof window !== "undefined" ? window.location.hostname : "localhost";
+
+    let timecode = "0h0m0s";
+    try {
+      const parsed = new URL(activeClip.url);
+      timecode = parsed.searchParams.get("t") || timecode;
+    } catch {
+      timecode = "0h0m0s";
+    }
+
+    return `https://player.twitch.tv/?video=v${encodeURIComponent(videoId)}&parent=${encodeURIComponent(host)}&t=${encodeURIComponent(timecode)}`;
+  }, [activeClip]);
 
   function onAccountSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -368,16 +397,19 @@ export function PubgClipsPanel() {
       ) : clips.length ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {clips.map((clip) => (
-            <a
+            <button
               key={clip.id}
-              href={clip.url}
-              target="_blank"
-              rel="noreferrer"
+              type="button"
+              onClick={() => setActiveClip(clip)}
               className="group block overflow-hidden border border-[#2d2d2d] bg-[#111] hover:border-[#f5c842]"
             >
               <img
                 src={clip.thumbnail_url}
                 alt={clip.title}
+                onError={(event) => {
+                  event.currentTarget.onerror = null;
+                  event.currentTarget.src = "/pubg.avif";
+                }}
                 className="h-40 w-full object-cover transition group-hover:scale-[1.03]"
                 loading="lazy"
               />
@@ -418,7 +450,7 @@ export function PubgClipsPanel() {
                   {clip.view_count.toLocaleString()} views · {formatRelativeTime(clip.created_at)}
                 </p>
               </div>
-            </a>
+            </button>
           ))}
         </div>
       ) : (
@@ -429,6 +461,62 @@ export function PubgClipsPanel() {
               Debug: encounters {resultMeta.debug.encountersFound}, clips channels {resultMeta.debug.channelsWithClips}
             </p>
           )}
+        </div>
+      )}
+
+      {activeClip && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="PUBG clip video player"
+          onClick={() => setActiveClip(null)}
+        >
+          <div
+            className="w-full max-w-5xl overflow-hidden border border-[#2d2d2d] bg-[#111]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-[#2d2d2d] px-4 py-3">
+              <p className="text-sm text-[#e2d2af]">{activeClip.title || "PUBG Event"}</p>
+              <button
+                type="button"
+                onClick={() => setActiveClip(null)}
+                className="border border-[#2d2d2d] px-2 py-1 text-xs uppercase tracking-[0.1em] text-[#9a9080] hover:border-[#f5c842] hover:text-[#e2d2af]"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="aspect-video w-full bg-black">
+              {embedUrl ? (
+                <iframe
+                  src={embedUrl}
+                  title={activeClip.title || "PUBG clip"}
+                  className="h-full w-full"
+                  allowFullScreen
+                  allow="autoplay; fullscreen"
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center text-sm text-[#9a9080]">
+                  Unable to load video player for this event.
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between border-t border-[#2d2d2d] px-4 py-3">
+              <p className="text-xs uppercase tracking-[0.1em] text-[#7f7768]">
+                {activeClip.broadcaster_name} · {activeClip.creator_name}
+              </p>
+              <a
+                href={activeClip.url}
+                target="_blank"
+                rel="noreferrer"
+                className="border border-[#5e4d34] bg-[#1a1510] px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-[#e2d2af] hover:border-[#f5c842]"
+              >
+                Open on Twitch
+              </a>
+            </div>
+          </div>
         </div>
       )}
     </section>
