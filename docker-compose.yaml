@@ -13,6 +13,11 @@ services:
       NEXTAUTH_URL: http://YOUR_UNRAID_IP:3000
       NEXTAUTH_SECRET: change-me
       DATABASE_URL: file:/app/data/games.db?connection_limit=1
+      WORKER_LOG_LEVEL: info
+      STARTUP_LOG_LEVEL: info
+      PUBG_CRAWLER_LOG_LEVEL: info
+      MANUAL_PUBG_LOG_LEVEL: info
+      CLEAN_NEXT_LOG_LEVEL: info
       ENABLE_PUBG_CRAWLER: "1"
       TWITCH_CLIENT_ID: change-me
       TWITCH_CLIENT_SECRET: change-me

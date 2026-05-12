@@ -107,3 +107,48 @@ Optional tuning envs:
 - `EVENTSUB_SYNC_INTERVAL_MS` (default `1800000`)
 - `EVENTSUB_SYNC_LIMIT` (default `400`)
 - `EVENTSUB_CREATE_LIMIT_PER_SYNC` (default `80`)
+
+## Worker/Script Logging Levels
+
+All script and worker entrypoints support log levels so you can quickly switch between normal and deep diagnostics.
+
+Supported levels (least to most strict):
+
+- `verbose`
+- `debug`
+- `info`
+- `warn`
+- `error`
+- `silent`
+
+Global controls:
+
+- `WORKER_LOG_LEVEL` applies to worker-style scripts by default.
+- `SCRIPT_LOG_LEVEL` is a generic fallback for scripts.
+- `LOG_LEVEL` is the final fallback.
+
+Per-script overrides:
+
+- `STARTUP_LOG_LEVEL` for `scripts/start-tarkovnet.sh`
+- `PUBG_CRAWLER_LOG_LEVEL` for `scripts/pubg-twitch-crawler.mjs`
+- `MANUAL_PUBG_LOG_LEVEL` for `scripts/manual-pubg-encounter-map.mjs`
+- `CLEAN_NEXT_LOG_LEVEL` for `scripts/clean-next.mjs`
+
+Examples:
+
+```bash
+# High detail for crawler debugging
+PUBG_CRAWLER_LOG_LEVEL=verbose
+
+# Keep startup logs concise
+STARTUP_LOG_LEVEL=warn
+
+# Apply debug level to most workers/scripts
+WORKER_LOG_LEVEL=debug
+```
+
+Manual script also supports a one-off CLI override:
+
+```bash
+node scripts/manual-pubg-encounter-map.mjs --log-level debug --streamer-login some_streamer
+```

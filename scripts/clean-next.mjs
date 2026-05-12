@@ -1,7 +1,11 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { createScriptLogger } from "./logging.mjs";
 
 const TARGETS = [".next", "next-cache", ".next-runtime"];
+const logger = createScriptLogger("clean-next", {
+  envKeys: ["CLEAN_NEXT_LOG_LEVEL"],
+});
 
 async function removeTarget(target) {
   const fullPath = path.join(process.cwd(), target);
@@ -27,8 +31,11 @@ async function removeTarget(target) {
 for (const target of TARGETS) {
   try {
     await removeTarget(target);
-    console.log(`cleaned ${target}`);
+    logger.info("cleaned target", { target });
   } catch (error) {
-    console.warn(`failed to clean ${target}: ${error instanceof Error ? error.message : String(error)}`);
+    logger.warn("failed to clean target", {
+      target,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }

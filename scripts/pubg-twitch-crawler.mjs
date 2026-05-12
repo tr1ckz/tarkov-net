@@ -1,7 +1,11 @@
 import { PrismaClient } from "@prisma/client";
 import stringSimilarity from "string-similarity";
+import { createScriptLogger } from "./logging.mjs";
 
 const prisma = new PrismaClient();
+const logger = createScriptLogger("pubg-twitch-crawler", {
+  envKeys: ["PUBG_CRAWLER_LOG_LEVEL"],
+});
 const DEFAULT_PUBG_GAME_IDS = ["493057", "27971"];
 const INTERVAL_MS = 300000;
 const MAX_RETRIES = 3;
@@ -158,25 +162,27 @@ async function cleanupResolvedIndexBacklog() {
 }
 
 function log(level, message, data = {}) {
-  const payload = {
-    ts: new Date().toISOString(),
-    level,
-    scope: "pubg-twitch-crawler",
-    message,
-    ...data
-  };
+  if (level === "verbose") {
+    logger.verbose(message, data);
+    return;
+  }
+
+  if (level === "debug") {
+    logger.debug(message, data);
+    return;
+  }
 
   if (level === "error") {
-    console.error(JSON.stringify(payload));
+    logger.error(message, data);
     return;
   }
 
   if (level === "warn") {
-    console.warn(JSON.stringify(payload));
+    logger.warn(message, data);
     return;
   }
 
-  console.log(JSON.stringify(payload));
+  logger.info(message, data);
 }
 
 function getCredentials() {
@@ -282,6 +288,8 @@ async function pubgGet(path) {
     throw new Error(`PUBG API rate limited until ${new Date(pubgRateLimitedUntil).toISOString()}`);
   }
 
+  log("verbose", "pubg api request", { path });
+
   const response = await fetch(`https://api.pubg.com${path}`, {
     headers: {
       Authorization: `Bearer ${getPubgApiKey()}`,
@@ -291,6 +299,7 @@ async function pubgGet(path) {
   });
 
   if (!response.ok) {
+    log("debug", "pubg api non-ok response", { path, status: response.status });
     if (response.status === 401) {
       pubgUnauthorizedError = "PUBG API unauthorized (401). Verify PUBG_DEV_API/PUBG_API_KEY in the runtime environment.";
       throw new Error(pubgUnauthorizedError);
@@ -304,6 +313,8 @@ async function pubgGet(path) {
 
     throw new Error(`PUBG API error (${response.status})`);
   }
+
+  log("debug", "pubg api response ok", { path, status: response.status });
 
   return response.json();
 }
@@ -1890,7 +1901,9 @@ if (runOnce) {
     });
 } else {
   runForever().catch((error) => {
-    console.error("[pubg-twitch-crawler] startup failed", error);
+    log("error", "startup failed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
     process.exitCode = 1;
   });
 }

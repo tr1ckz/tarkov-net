@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { createScriptLogger } from "./logging.mjs";
 
 const prisma = new PrismaClient();
 
@@ -13,6 +14,7 @@ function parseArgs(argv) {
     maxCandidates: 120,
     sampleFallback: true,
     sampleShard: "pc-na",
+    logLevel: null,
   };
 
   for (let i = 2; i < argv.length; i += 1) {
@@ -59,6 +61,11 @@ function parseArgs(argv) {
     }
     if (key === "--dry-run") {
       args.dryRun = true;
+    }
+    if (key === "--log-level" && next) {
+      args.logLevel = next;
+      i += 1;
+      continue;
     }
   }
 
@@ -438,6 +445,19 @@ async function mapFromSampleTelemetryForStreamer(streamer, vodRows, args, sample
 
 async function run() {
   const args = parseArgs(process.argv);
+  const logger = createScriptLogger("manual-pubg-encounter-map", {
+    level: args.logLevel,
+    envKeys: ["MANUAL_PUBG_LOG_LEVEL"],
+  });
+
+  logger.info("manual map run started", {
+    dryRun: args.dryRun,
+    streamerLogin: args.streamerLogin,
+    pubgPlayerName: args.pubgPlayerName,
+    shard: args.shard,
+    sampleFallback: args.sampleFallback,
+    matchLimit: args.matchLimit,
+  });
   const { token, clientId } = await getTwitchToken();
 
   let sampleMatchIds = [];
@@ -449,6 +469,7 @@ async function run() {
   }
 
   const candidates = await buildCandidateStreamers(args, token, clientId);
+  logger.debug("candidate streamers resolved", { count: candidates.length });
   if (!candidates.length) {
     console.log(JSON.stringify({ success: false, reason: "no_streamer_candidates" }, null, 2));
     return;
@@ -456,6 +477,11 @@ async function run() {
 
   for (const streamer of candidates) {
     const twitchVideos = await getVideosByUserId(streamer.twitchUserId, token, clientId, 12);
+    logger.verbose("fetched streamer videos", {
+      twitchUserId: streamer.twitchUserId,
+      twitchUserLogin: streamer.userLogin,
+      videoCount: twitchVideos.length,
+    });
     if (!twitchVideos.length) continue;
 
     for (const video of twitchVideos) {
@@ -519,6 +545,14 @@ async function run() {
       resolved = await findPlayerWithMatches(candidateName, preferredShard);
       if (resolved) break;
     }
+
+    logger.debug("identity resolution attempted", {
+      twitchUserId: streamer.twitchUserId,
+      twitchUserLogin: streamer.userLogin,
+      resolved: Boolean(resolved),
+      shard: resolved?.shard ?? null,
+      playerName: resolved?.playerName ?? null,
+    });
 
     if (!resolved) {
       if (!args.sampleFallback) continue;
@@ -704,7 +738,12 @@ async function run() {
 
 run()
   .catch((error) => {
-    console.error("[manual-pubg-encounter-map] failed", error instanceof Error ? error.message : String(error));
+    const logger = createScriptLogger("manual-pubg-encounter-map", {
+      envKeys: ["MANUAL_PUBG_LOG_LEVEL"],
+    });
+    logger.error("manual script failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     process.exitCode = 1;
   })
   .finally(async () => {
