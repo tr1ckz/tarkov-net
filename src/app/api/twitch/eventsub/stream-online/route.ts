@@ -217,7 +217,7 @@ function shouldAllowSparseProbeForWeakIdentity(input: {
   linkSource: string | null;
   pubgPlayerId: string;
 }) {
-  if (input.identitySource === "autolink_identity") return false;
+  if (input.identitySource === "autolink_identity") return true;
   if (input.identitySource === "fallback_identity_link") return true;
   if (isSyntheticPubgPlayerId(input.pubgPlayerId)) return false;
   return Boolean(input.linkSource);
