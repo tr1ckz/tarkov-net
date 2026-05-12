@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type Clip = {
   id: string;
@@ -25,35 +25,17 @@ type Clip = {
 
 type ClipsResponse = {
   clips: Clip[];
-  source: "pubg" | "streamer" | "encounters";
-  streamer?: string;
+  source: "pubg" | "streamer" | "encounters" | string;
   profile?: { playerName: string; shard: string; platform: string };
   encountersScanned?: number;
   lookupNeeded?: boolean;
   debug?: {
     encountersFound: number;
-    directLoginMatches: number;
-    searchChannelMatches: number;
     channelsWithClips: number;
-    vodMoments?: number;
     resolvedShard?: string;
   };
   error?: string;
-  setup?: string;
 };
-
-type PlayerLookupResponse = {
-  found?: boolean;
-  error?: string;
-  setup?: string;
-  profile?: {
-    playerName: string;
-    shard: string;
-    matchCount: number;
-  };
-};
-
-type Mode = "pubg" | "streamer" | "encounters";
 
 async function parseJsonResponse<T>(response: Response): Promise<T> {
   const raw = await response.text();
@@ -112,43 +94,21 @@ function formatRelativeTime(iso: string) {
   return `${days}d ago`;
 }
 
-function normalizeName(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
 export function PubgClipsPanel() {
-  const [mode, setMode] = useState<Mode>("pubg");
-  const [streamer, setStreamer] = useState("");
-  const [pendingStreamer, setPendingStreamer] = useState("");
+  const [activeMode, setActiveMode] = useState<"encounters" | "streamer">("encounters");
   const [playerName, setPlayerName] = useState("");
-  const [pendingPlayerName, setPendingPlayerName] = useState("");
+  const [streamerLogin, setStreamerLogin] = useState("");
   const [platform, setPlatform] = useState("steam");
-  const [pendingPlatform, setPendingPlatform] = useState("steam");
   const [resolvedShard, setResolvedShard] = useState("");
-  const [pendingShardHint, setPendingShardHint] = useState("");
   const [loading, setLoading] = useState(false);
-  const [lookupLoading, setLookupLoading] = useState(false);
-  const [liveLookupLoading, setLiveLookupLoading] = useState(false);
-  const [liveLookupError, setLiveLookupError] = useState<string | null>(null);
-  const [liveLookupProfile, setLiveLookupProfile] = useState<{
-    playerName: string;
-    shard: string;
-    matchCount: number;
-  } | null>(null);
-  const [searchSuggestions, setSearchSuggestions] = useState<Array<{ playerName: string; shard: string }>>([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [setupHint, setSetupHint] = useState<string | null>(null);
   const [clips, setClips] = useState<Clip[]>([]);
+  const [submitted, setSubmitted] = useState<{ mode: "encounters" | "streamer"; playerName: string; streamer: string; platform: string } | null>(null);
   const [resultMeta, setResultMeta] = useState<{
     encountersScanned?: number;
     debug?: {
       encountersFound: number;
-      directLoginMatches: number;
-      searchChannelMatches: number;
       channelsWithClips: number;
-      vodMoments?: number;
       resolvedShard?: string;
     };
   } | null>(null);
@@ -161,23 +121,24 @@ export function PubgClipsPanel() {
       const parsed = JSON.parse(saved) as {
         playerName?: string;
         platform?: string;
-        shard?: string;
+        mode?: "encounters" | "streamer";
+        streamer?: string;
       };
 
       if (parsed.playerName) {
-        setPendingPlayerName(parsed.playerName);
         setPlayerName(parsed.playerName);
-        setMode("encounters");
       }
 
       if (parsed.platform) {
-        setPendingPlatform(parsed.platform);
         setPlatform(parsed.platform);
       }
 
-      if (parsed.shard) {
-        setResolvedShard(parsed.shard);
-        setPendingShardHint(parsed.shard);
+      if (parsed.streamer) {
+        setStreamerLogin(parsed.streamer);
+      }
+
+      if (parsed.mode === "streamer") {
+        setActiveMode("streamer");
       }
     } catch {
       // ignore malformed local cache
@@ -185,28 +146,28 @@ export function PubgClipsPanel() {
   }, []);
 
   const query = useMemo(() => {
+    if (!submitted) return "";
+
     const params = new URLSearchParams();
-    params.set("limit", "24");
-    if (mode === "streamer" && streamer) {
-      params.set("streamer", streamer);
+    params.set("limit", "30");
+    if (submitted.mode === "streamer") {
+      params.set("streamer", submitted.streamer);
     }
-    if (mode === "encounters" && playerName) {
-      params.set("playerName", playerName);
-      params.set("platform", platform);
-      if (resolvedShard && resolvedShard !== "unresolved") {
-        params.set("shard", resolvedShard);
-      }
+    if (submitted.mode === "encounters") {
+      params.set("playerName", submitted.playerName);
+      params.set("platform", submitted.platform);
     }
     return `/api/pubg/clips?${params.toString()}`;
-  }, [mode, playerName, platform, streamer, resolvedShard]);
+  }, [submitted]);
 
   useEffect(() => {
+    if (!query) return;
+
     let cancelled = false;
 
     async function load() {
       setLoading(true);
       setError(null);
-      setSetupHint(null);
       setResultMeta(null);
 
       try {
@@ -216,7 +177,7 @@ export function PubgClipsPanel() {
 
         setClips(payload.clips ?? []);
         setResultMeta({ encountersScanned: payload.encountersScanned, debug: payload.debug });
-        if (mode === "encounters") {
+        if (submitted?.mode === "encounters") {
           const shard = payload.profile?.shard || payload.debug?.resolvedShard || "unresolved";
           setResolvedShard(shard);
         }
@@ -224,7 +185,7 @@ export function PubgClipsPanel() {
         if (cancelled) return;
         setClips([]);
         setError(err instanceof Error ? err.message : "Failed to load clips");
-        if (mode === "encounters") {
+        if (submitted?.mode === "encounters") {
           setResolvedShard("unresolved");
         }
       } finally {
@@ -237,181 +198,60 @@ export function PubgClipsPanel() {
     return () => {
       cancelled = true;
     };
-  }, [query]);
-
-  useEffect(() => {
-    const candidate = pendingPlayerName.trim();
-    if (candidate.length < 3) {
-      setLiveLookupProfile(null);
-      setLiveLookupError(null);
-      setLiveLookupLoading(false);
-      setSearchSuggestions([]);
-      setShowSuggestions(false);
-      setPendingShardHint("");
-      return;
-    }
-
-    // Debounce local player-search suggestions (300ms)
-    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-    searchDebounceRef.current = setTimeout(() => {
-      const params = new URLSearchParams({ q: candidate, platform: pendingPlatform, limit: "8" });
-      fetch(`/api/pubg/player-search?${params.toString()}`, { cache: "no-store" })
-        .then((response) => parseJsonResponse<{ results?: Array<{ playerName: string; shard: string }> }>(response))
-        .then((payload: { results?: Array<{ playerName: string; shard: string }> }) => {
-          setSearchSuggestions(payload.results ?? []);
-          setShowSuggestions((payload.results?.length ?? 0) > 0);
-        })
-        .catch(() => {
-          setSearchSuggestions([]);
-        });
-    }, 300);
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => {
-      setLiveLookupLoading(true);
-      setLiveLookupError(null);
-
-      const params = new URLSearchParams({
-        playerName: candidate,
-        platform: pendingPlatform
-      });
-
-      fetch(`/api/pubg/player-lookup?${params.toString()}`, {
-        cache: "no-store",
-        signal: controller.signal
-      })
-        .then(async (response) => {
-          const payload = await parseJsonResponse<PlayerLookupResponse>(response);
-          if (!response.ok || !payload?.found || !payload.profile) {
-            throw new Error(payload?.error ?? "Player lookup failed");
-          }
-
-          setLiveLookupProfile(payload.profile);
-          setLiveLookupError(null);
-        })
-        .catch((err: unknown) => {
-          if (err instanceof Error && err.name === "AbortError") {
-            return;
-          }
-          setLiveLookupProfile(null);
-          setLiveLookupError(err instanceof Error ? err.message : "Player lookup failed");
-        })
-        .finally(() => {
-          setLiveLookupLoading(false);
-        });
-    }, 500);
-
-    return () => {
-      clearTimeout(timeout);
-      controller.abort();
-      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-    };
-  }, [pendingPlayerName, pendingPlatform]);
-
-  function applyLookupProfile(profile: { playerName: string; shard: string; matchCount: number }) {
-    setPendingPlayerName(profile.playerName);
-    setPlayerName(profile.playerName);
-    setResolvedShard(profile.shard);
-    setPendingShardHint(profile.shard);
-    setPlatform(pendingPlatform);
-    setMode("encounters");
-
-    localStorage.setItem(
-      "pubg-clips-profile",
-      JSON.stringify({
-        playerName: profile.playerName,
-        platform: pendingPlatform,
-        shard: profile.shard
-      })
-    );
-  }
-
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setMode("streamer");
-    setStreamer(pendingStreamer.trim().toLowerCase());
-  }
+  }, [query, submitted]);
 
   function onAccountSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const nextName = pendingPlayerName.trim();
+    const nextName = playerName.trim();
     if (!nextName) return;
 
-    if (
-      liveLookupProfile &&
-      normalizeName(liveLookupProfile.playerName) === normalizeName(nextName)
-    ) {
-      applyLookupProfile(liveLookupProfile);
-      return;
-    }
-
-    setMode("encounters");
-    setPlayerName(nextName);
-    setPlatform(pendingPlatform);
-    const fallbackShard = pendingShardHint || resolvedShard;
-    setResolvedShard(fallbackShard || "");
+    setSubmitted({
+      mode: "encounters",
+      playerName: nextName,
+      streamer: "",
+      platform,
+    });
 
     localStorage.setItem(
       "pubg-clips-profile",
       JSON.stringify({
+        mode: "encounters",
         playerName: nextName,
-        platform: pendingPlatform,
-        shard: fallbackShard || undefined
+        platform,
       })
     );
   }
 
-  async function lookupAccount() {
-    const nextName = pendingPlayerName.trim();
+  function onStreamerSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextName = streamerLogin.trim().toLowerCase();
     if (!nextName) return;
 
-    setLookupLoading(true);
-    setError(null);
-    setSetupHint(null);
+    setSubmitted({
+      mode: "streamer",
+      playerName: "",
+      streamer: nextName,
+      platform,
+    });
 
-    try {
-      const params = new URLSearchParams({
-        playerName: nextName,
-        platform: pendingPlatform
-      });
-      const payload = await fetchJsonWithTimeout<PlayerLookupResponse>(`/api/pubg/player-lookup?${params.toString()}`);
-
-      if (!payload?.found || !payload.profile) {
-        setError(payload?.error ?? "Player lookup failed");
-        setSetupHint(payload?.setup ?? null);
-        return;
-      }
-
-      const profile = payload.profile;
-      setLiveLookupProfile(profile);
-      setLiveLookupError(null);
-      applyLookupProfile(profile);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Player lookup failed");
-      setResolvedShard("unresolved");
-    } finally {
-      setLookupLoading(false);
-    }
-  }
-
-  function loadGlobalPubg() {
-    setMode("pubg");
-    setStreamer("");
-    setPlayerName("");
-    setLiveLookupProfile(null);
-    setLiveLookupError(null);
+    localStorage.setItem(
+      "pubg-clips-profile",
+      JSON.stringify({
+        mode: "streamer",
+        streamer: nextName,
+        platform,
+      })
+    );
   }
 
   function clearFilter() {
-    setPendingStreamer("");
-    setStreamer("");
-    setPendingPlayerName("");
-    setPendingShardHint("");
+    setStreamerLogin("");
     setPlayerName("");
     setResolvedShard("");
-    setMode("pubg");
-    setLiveLookupProfile(null);
-    setLiveLookupError(null);
+    setSubmitted(null);
+    setClips([]);
+    setResultMeta(null);
+    setError(null);
     localStorage.removeItem("pubg-clips-profile");
   }
 
@@ -420,116 +260,76 @@ export function PubgClipsPanel() {
       <div className="border border-[#2d2d2d] bg-[#111] p-3">
         <p className="text-[11px] uppercase tracking-[0.14em] text-[#9a8050]">PUBG Clips Feed</p>
         <p className="mt-2 text-sm text-[#b9ad96]">
-          Enter your PUBG account below to find clips from players you recently fought.
+          pubg.report-only test mode. Enter a PUBG player name or streamer login.
         </p>
 
-        <form onSubmit={onAccountSubmit} className="mt-3 grid gap-2 sm:grid-cols-4">
-          <div className="relative sm:col-span-2">
+        <div className="mt-3 flex gap-2">
+          <button
+            type="button"
+            onClick={() => setActiveMode("encounters")}
+            className={`border px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
+              activeMode === "encounters"
+                ? "border-[#f5c842] bg-[#1a1510] text-[#e2d2af]"
+                : "border-[#2d2d2d] bg-[#111] text-[#9a9080]"
+            }`}
+          >
+            By PUBG Name
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveMode("streamer")}
+            className={`border px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
+              activeMode === "streamer"
+                ? "border-[#f5c842] bg-[#1a1510] text-[#e2d2af]"
+                : "border-[#2d2d2d] bg-[#111] text-[#9a9080]"
+            }`}
+          >
+            By Streamer
+          </button>
+        </div>
+
+        {activeMode === "encounters" ? (
+          <form onSubmit={onAccountSubmit} className="mt-3 grid gap-2 sm:grid-cols-4">
             <input
-              value={pendingPlayerName}
-              onChange={(e) => {
-                setPendingPlayerName(e.target.value);
-                setPendingShardHint("");
-                setShowSuggestions(true);
-              }}
-              onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
-              onFocus={() => searchSuggestions.length > 0 && setShowSuggestions(true)}
+              value={playerName}
+              onChange={(e) => setPlayerName(e.target.value)}
               placeholder="your PUBG username"
+              className="sm:col-span-2 w-full border border-[#2d2d2d] bg-[#0b0b0b] px-3 py-2 text-sm text-[#e2d2af] outline-none focus:border-[#f5c842]"
+            />
+            <select
+              value={platform}
+              onChange={(e) => setPlatform(e.target.value)}
+              className="w-full border border-[#2d2d2d] bg-[#0b0b0b] px-3 py-2 text-sm text-[#e2d2af] outline-none focus:border-[#f5c842]"
+            >
+              <option value="steam">Steam</option>
+              <option value="xbox">Xbox</option>
+              <option value="psn">PSN</option>
+            </select>
+            <button
+              type="submit"
+              className="sm:col-span-4 border border-[#5e4d34] bg-[#1a1510] px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
+            >
+              Find My Encounter Clips
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={onStreamerSubmit} className="mt-3 flex flex-col gap-2 sm:flex-row">
+            <input
+              value={streamerLogin}
+              onChange={(e) => setStreamerLogin(e.target.value)}
+              placeholder="twitch login (example: tgltn)"
               className="w-full border border-[#2d2d2d] bg-[#0b0b0b] px-3 py-2 text-sm text-[#e2d2af] outline-none focus:border-[#f5c842]"
             />
-            {showSuggestions && searchSuggestions.length > 0 && (
-              <ul className="absolute left-0 right-0 top-full z-20 border border-[#3d3d3d] bg-[#0f0f0f] shadow-lg">
-                {searchSuggestions.map((s) => (
-                  <li key={`${s.playerName}:${s.shard}`}>
-                    <button
-                      type="button"
-                      onMouseDown={() => {
-                        setPendingPlayerName(s.playerName);
-                        setPendingShardHint(s.shard);
-                        setResolvedShard(s.shard);
-                        setShowSuggestions(false);
-                      }}
-                      className="w-full px-3 py-2 text-left text-sm text-[#e2d2af] hover:bg-[#1a1a1a] flex justify-between"
-                    >
-                      <span>{s.playerName}</span>
-                      <span className="text-[10px] text-[#7f7768]">{s.shard}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-          <select
-            value={pendingPlatform}
-            onChange={(e) => {
-              const next = e.target.value;
-              setPendingPlatform(next);
-              setPendingShardHint("");
-              setResolvedShard("");
-            }}
-            className="w-full border border-[#2d2d2d] bg-[#0b0b0b] px-3 py-2 text-sm text-[#e2d2af] outline-none focus:border-[#f5c842]"
-          >
-            <option value="steam">Steam</option>
-            <option value="xbox">Xbox</option>
-            <option value="psn">PSN</option>
-          </select>
-          <div className="w-full border border-[#2d2d2d] bg-[#0b0b0b] px-3 py-2 text-xs uppercase tracking-[0.12em] text-[#7f7768]">
-            shard auto-resolve
-          </div>
-          <button
-            type="submit"
-            className="sm:col-span-4 border border-[#5e4d34] bg-[#1a1510] px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
-          >
-            Find My Encounter Clips
-          </button>
-          <button
-            type="button"
-            onClick={lookupAccount}
-            disabled={lookupLoading}
-            className="sm:col-span-4 border border-[#2d2d2d] bg-[#111] px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#9a9080] hover:border-[#666] hover:text-[#e2d2af] disabled:opacity-50"
-          >
-            {lookupLoading ? "Looking up..." : "Lookup Player"}
-          </button>
-        </form>
-
-        {pendingPlayerName.trim().length >= 3 && (
-          <div className="mt-2 text-xs text-[#8c826f]">
-            {liveLookupLoading && <span>Checking case-sensitive PUBG name...</span>}
-            {!liveLookupLoading && liveLookupProfile && (
-              <span>
-                Found: <span className="text-[#e2d2af]">{liveLookupProfile.playerName}</span> on {liveLookupProfile.shard} ({liveLookupProfile.matchCount} matches)
-              </span>
-            )}
-            {!liveLookupLoading && !liveLookupProfile && liveLookupError && (
-              <span className="text-[#c78f8f]">{liveLookupError}</span>
-            )}
-          </div>
+            <button
+              type="submit"
+              className="border border-[#5e4d34] bg-[#1a1510] px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
+            >
+              Load Streamer Events
+            </button>
+          </form>
         )}
 
-        <div className="mt-4 border-t border-[#2a2a2a] pt-3">
-          <p className="text-[11px] uppercase tracking-[0.12em] text-[#7f7768]">Manual Twitch Filter</p>
-          <p className="mt-1 text-xs text-[#7f7768]">Optional fallback if you want one specific streamer.</p>
-
-          <form onSubmit={onSubmit} className="mt-2 flex flex-col gap-2 sm:flex-row">
-          <input
-            value={pendingStreamer}
-            onChange={(e) => setPendingStreamer(e.target.value)}
-            placeholder="twitch login (example: tgltn)"
-            className="w-full border border-[#2d2d2d] bg-[#0b0b0b] px-3 py-2 text-sm text-[#e2d2af] outline-none focus:border-[#f5c842]"
-          />
-          <button
-            type="submit"
-            className="border border-[#5e4d34] bg-[#1a1510] px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
-          >
-            Load
-          </button>
-          <button
-            type="button"
-            onClick={loadGlobalPubg}
-            className="border border-[#2d2d2d] bg-[#111] px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#9a9080] hover:border-[#666] hover:text-[#e2d2af]"
-          >
-            Global PUBG
-          </button>
+        <div className="mt-3">
           <button
             type="button"
             onClick={clearFilter}
@@ -537,13 +337,12 @@ export function PubgClipsPanel() {
           >
             Clear
           </button>
-        </form>
         </div>
       </div>
 
-      {mode === "encounters" && playerName && (
+      {submitted?.mode === "encounters" && submitted.playerName && (
         <div className="border border-[#2d2d2d] bg-[#111] px-3 py-2 text-xs uppercase tracking-[0.12em] text-[#9a9080]">
-          My account: <span className="text-[#e2d2af]">{playerName}</span> · {platform} · {
+          My account: <span className="text-[#e2d2af]">{submitted.playerName}</span> · {submitted.platform} · {
             loading
               ? (resolvedShard && resolvedShard !== "unresolved" ? `${resolvedShard} (refreshing...)` : "resolving...")
               : (resolvedShard || "unresolved")
@@ -557,7 +356,6 @@ export function PubgClipsPanel() {
       {error && (
         <div className="border border-[#5e2a2a] bg-[#1a1010] p-3 text-sm text-[#e6b4b4]">
           <p>{error}</p>
-          {setupHint && <p className="mt-1 text-xs text-[#c78f8f]">{setupHint}</p>}
         </div>
       )}
 
@@ -625,10 +423,10 @@ export function PubgClipsPanel() {
         </div>
       ) : (
         <div className="border border-[#2d2d2d] bg-[#111] p-4 text-sm text-[#9a9080]">
-          No clips found for this filter.
-          {mode === "encounters" && resultMeta?.debug && (
+          {submitted ? "No clips found for this filter." : "Run a search to load pubg.report clips."}
+          {submitted?.mode === "encounters" && resultMeta?.debug && (
             <p className="mt-2 text-xs uppercase tracking-[0.1em] text-[#6f675a]">
-              Debug: encounters {resultMeta.debug.encountersFound}, candidate channels {resultMeta.debug.directLoginMatches}, clips channels {resultMeta.debug.channelsWithClips}, vod moments {resultMeta.debug.vodMoments ?? 0}
+              Debug: encounters {resultMeta.debug.encountersFound}, clips channels {resultMeta.debug.channelsWithClips}
             </p>
           )}
         </div>
