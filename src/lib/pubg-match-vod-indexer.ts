@@ -20,6 +20,8 @@ type StreamerIdentityInput = {
   shard: string;
   pubgPlayerId: string;
   pubgPlayerName: string;
+  identityLinkId?: string | null;
+  identitySource?: string | null;
 };
 
 type MatchIndexRow = {
@@ -64,6 +66,68 @@ function computeEventVodOffset(eventTimestampIso: string, vodStartedAt: Date | n
 
 function normalizeName(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function isSyntheticPubgPlayerId(value: string) {
+  return (
+    value.startsWith("unverified:") ||
+    value.startsWith("login-heuristic:") ||
+    value.startsWith("profile-claim:") ||
+    value.startsWith("autolink:")
+  );
+}
+
+async function promoteIdentityLinkIfNeeded(input: {
+  identityLinkId?: string | null;
+  identitySource?: string | null;
+  resolvedPlayerId: string;
+  resolvedPlayerName: string;
+  resolvedShard: string;
+}) {
+  if (!input.identityLinkId) return;
+
+  const link = await db.pubgStreamerIdentityLink.findUnique({
+    where: { id: input.identityLinkId },
+    select: {
+      id: true,
+      pubgPlayerId: true,
+      source: true,
+      confidenceScore: true,
+      confidenceReasonsJson: true,
+    },
+  });
+  if (!link) return;
+
+  const currentReasons = (() => {
+    if (!link.confidenceReasonsJson) return [] as string[];
+    try {
+      const parsed = JSON.parse(link.confidenceReasonsJson);
+      return Array.isArray(parsed) ? parsed.map((v) => String(v)) : [];
+    } catch {
+      return [] as string[];
+    }
+  })();
+
+  const reasonsSet = new Set<string>([...currentReasons, "validated_by_match_indexer_pubg_api"]);
+  const synthetic = isSyntheticPubgPlayerId(link.pubgPlayerId);
+  const sourceMismatch = link.pubgPlayerId !== input.resolvedPlayerId;
+
+  if (!synthetic && !sourceMismatch && link.source !== "identity_validation_promoted") {
+    return;
+  }
+
+  await db.pubgStreamerIdentityLink.update({
+    where: { id: link.id },
+    data: {
+      pubgPlayerId: input.resolvedPlayerId,
+      pubgPlayerName: input.resolvedPlayerName,
+      shard: input.resolvedShard,
+      source: synthetic ? "identity_validation_promoted" : link.source,
+      confidenceScore: synthetic ? Math.max(link.confidenceScore ?? 0, 95) : link.confidenceScore,
+      confidenceReasonsJson: JSON.stringify(Array.from(reasonsSet)),
+      lastLinkedAt: new Date(),
+    },
+  });
 }
 
 function toDistanceMeters(value: number | undefined) {
@@ -141,19 +205,24 @@ export async function indexStreamerMatchesAndVods(options: {
   const identity = options.identity;
   let activeShard = identity.shard;
   let activePlayerName = identity.pubgPlayerName;
+  let activePlayerId = identity.pubgPlayerId;
+  const syntheticPlayerId = isSyntheticPubgPlayerId(identity.pubgPlayerId);
 
-  let player = await getPlayerWithMatchesById(identity.shard, identity.pubgPlayerId).catch((err) => {
-    console.error("[pubg-match-vod-indexer] getPlayerWithMatchesById failed", {
-      shard: identity.shard,
-      pubgPlayerId: identity.pubgPlayerId,
-      pubgPlayerName: identity.pubgPlayerName,
-      twitchUserId: identity.twitchUserId,
-      error: err instanceof Error ? err.message : String(err),
+  let player = null;
+  if (!syntheticPlayerId) {
+    player = await getPlayerWithMatchesById(identity.shard, identity.pubgPlayerId).catch((err) => {
+      console.error("[pubg-match-vod-indexer] getPlayerWithMatchesById failed", {
+        shard: identity.shard,
+        pubgPlayerId: identity.pubgPlayerId,
+        pubgPlayerName: identity.pubgPlayerName,
+        twitchUserId: identity.twitchUserId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
     });
-    return null;
-  });
+  }
 
-  if (!player) {
+  if (!player && !syntheticPlayerId) {
     const crossShardById = await lookupPlayerByIdAcrossShards({
       playerId: identity.pubgPlayerId,
       platform: identity.platform,
@@ -236,6 +305,23 @@ export async function indexStreamerMatchesAndVods(options: {
     };
   }
 
+  activePlayerId = player.playerId;
+  activePlayerName = player.playerName || activePlayerName;
+
+  await promoteIdentityLinkIfNeeded({
+    identityLinkId: identity.identityLinkId ?? null,
+    identitySource: identity.identitySource ?? null,
+    resolvedPlayerId: activePlayerId,
+    resolvedPlayerName: activePlayerName,
+    resolvedShard: activeShard,
+  }).catch((err) => {
+    console.warn("[pubg-match-vod-indexer] identity promotion failed", {
+      identityLinkId: identity.identityLinkId ?? null,
+      twitchUserId: identity.twitchUserId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+
   const matchIds = player.matchIds.slice(0, maxMatches);
   console.info("[pubg-match-vod-indexer] fetching match summaries", {
     twitchUserId: identity.twitchUserId,
@@ -283,7 +369,7 @@ export async function indexStreamerMatchesAndVods(options: {
         twitchUserName: identity.twitchUserName,
         platform: identity.platform,
         shard: activeShard,
-        pubgPlayerId: identity.pubgPlayerId,
+        pubgPlayerId: activePlayerId,
         pubgPlayerName: activePlayerName,
         matchId: summary.matchId,
         matchCreatedAt: parseIso(summary.createdAt),
@@ -297,7 +383,7 @@ export async function indexStreamerMatchesAndVods(options: {
         twitchUserName: identity.twitchUserName,
         platform: identity.platform,
         shard: activeShard,
-        pubgPlayerId: identity.pubgPlayerId,
+        pubgPlayerId: activePlayerId,
         pubgPlayerName: activePlayerName,
         matchCreatedAt: parseIso(summary.createdAt),
         mapName: summary.mapName,

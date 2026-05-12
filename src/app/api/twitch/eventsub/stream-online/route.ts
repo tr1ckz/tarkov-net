@@ -776,6 +776,8 @@ async function processStreamOnlineNotification(input: {
           shard: selectedIdentity.shard,
           pubgPlayerId: selectedIdentity.pubgPlayerId,
           pubgPlayerName: selectedIdentity.pubgPlayerName,
+          identityLinkId: selectedIdentity.identityLinkId,
+          identitySource: selectedIdentity.source,
         },
         maxMatches: Number(process.env.PUBG_EVENTSUB_MATCH_INDEX_MATCHES ?? "8"),
         maxVods: Number(process.env.PUBG_EVENTSUB_VOD_INDEX_LIMIT ?? "12"),

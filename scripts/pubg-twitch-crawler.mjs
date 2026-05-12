@@ -22,6 +22,7 @@ const INTERACTION_BACKFILL_MATCHES = Math.max(1, Math.min(20, Number(process.env
 const INTERACTION_BACKFILL_VODS = Math.max(1, Math.min(20, Number(process.env.PUBG_INTERACTION_BACKFILL_VODS ?? "12")));
 const BACKLOG_RETRY_MINUTES = Math.max(10, Math.min(720, Number(process.env.PUBG_BACKLOG_RETRY_MINUTES ?? "60")));
 const PUBG_RATE_LIMIT_FALLBACK_MS = Math.max(15000, Math.min(300000, Number(process.env.PUBG_RATE_LIMIT_FALLBACK_MS ?? "60000")));
+const IDENTITY_VALIDATION_BATCH = Math.max(1, Math.min(200, Number(process.env.PUBG_IDENTITY_VALIDATION_BATCH ?? "40")));
 
 let tokenState = null;
 let lastEventSubSyncMs = 0;
@@ -159,6 +160,189 @@ async function cleanupResolvedIndexBacklog() {
     });
     return 0;
   }
+}
+
+function isSyntheticPlayerId(playerId) {
+  return (
+    String(playerId || "").startsWith("unverified:") ||
+    String(playerId || "").startsWith("profile-claim:") ||
+    String(playerId || "").startsWith("login-heuristic:") ||
+    String(playerId || "").startsWith("autolink:")
+  );
+}
+
+function isWeakValidationTarget(link) {
+  return (
+    isSyntheticPlayerId(link.pubgPlayerId) ||
+    link.source === "eventsub_login_heuristic" ||
+    link.source === "eventsub_profile_claim" ||
+    link.source === "eventsub_known_player_unverified" ||
+    link.source === "eventsub_login_heuristic_unverified"
+  );
+}
+
+function parsePlatform(value) {
+  if (value === "steam" || value === "xbox" || value === "psn") return value;
+  return null;
+}
+
+async function processIdentityValidationQueue(limit = IDENTITY_VALIDATION_BATCH) {
+  const now = new Date();
+  const jobs = await prisma.pubgIdentityValidationQueue.findMany({
+    where: {
+      status: "queued",
+      OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
+    },
+    orderBy: [{ queuedAt: "asc" }],
+    take: limit,
+  });
+
+  if (!jobs.length) {
+    return { processed: 0, completed: 0, invalid: 0, errored: 0, retried: 0 };
+  }
+
+  const summary = { processed: jobs.length, completed: 0, invalid: 0, errored: 0, retried: 0 };
+
+  for (const job of jobs) {
+    const attempts = (job.attempts || 0) + 1;
+    await prisma.pubgIdentityValidationQueue.update({
+      where: { id: job.id },
+      data: { status: "processing", attempts, startedAt: new Date(), lastError: null }
+    });
+
+    try {
+      const link = await prisma.pubgStreamerIdentityLink.findUnique({ where: { id: job.identityLinkId } });
+      if (!link) {
+        summary.invalid += 1;
+        await prisma.pubgIdentityValidationQueue.update({
+          where: { id: job.id },
+          data: {
+            status: "invalid",
+            lastError: "identity_link_missing",
+            completedAt: new Date(),
+          }
+        });
+        continue;
+      }
+
+      if (!isWeakValidationTarget(link)) {
+        summary.completed += 1;
+        await prisma.pubgIdentityValidationQueue.update({
+          where: { id: job.id },
+          data: {
+            status: "completed",
+            lastError: "trusted_source_skipped",
+            completedAt: new Date(),
+          }
+        });
+        continue;
+      }
+
+      const platform = parsePlatform(link.platform);
+      if (!platform) {
+        summary.invalid += 1;
+        await prisma.pubgIdentityValidationQueue.update({
+          where: { id: job.id },
+          data: {
+            status: "invalid",
+            lastError: "unsupported_platform",
+            completedAt: new Date(),
+          }
+        });
+        continue;
+      }
+
+      const resolved = await lookupPlayerAcrossShards(link.pubgPlayerName, platform).catch(() => null);
+      if (!resolved) {
+        summary.invalid += 1;
+        await prisma.pubgIdentityValidationQueue.update({
+          where: { id: job.id },
+          data: {
+            status: "invalid",
+            lastError: "player_not_found",
+            completedAt: new Date(),
+          }
+        });
+        continue;
+      }
+
+      const synthetic = isSyntheticPlayerId(link.pubgPlayerId);
+      const idMismatch = !synthetic && resolved.playerId !== link.pubgPlayerId;
+
+      if (idMismatch) {
+        summary.invalid += 1;
+        await prisma.pubgIdentityValidationQueue.update({
+          where: { id: job.id },
+          data: {
+            status: "invalid",
+            lastError: `player_id_mismatch:${link.pubgPlayerId}->${resolved.playerId}`,
+            lastValidatedPubgId: resolved.playerId,
+            lastValidatedPubgName: resolved.playerName,
+            lastValidatedShard: resolved.shard,
+            completedAt: new Date(),
+          }
+        });
+        continue;
+      }
+
+      const currentReasons = (() => {
+        if (!link.confidenceReasonsJson) return [];
+        try {
+          const parsed = JSON.parse(link.confidenceReasonsJson);
+          return Array.isArray(parsed) ? parsed.map((v) => String(v)) : [];
+        } catch {
+          return [];
+        }
+      })();
+      const reasonsSet = new Set([...currentReasons, "validated_by_job_pubg_api"]);
+
+      await prisma.pubgStreamerIdentityLink.update({
+        where: { id: link.id },
+        data: {
+          pubgPlayerId: resolved.playerId,
+          pubgPlayerName: resolved.playerName,
+          shard: resolved.shard,
+          source: synthetic ? "identity_validation_promoted" : link.source,
+          confidenceScore: synthetic ? Math.max(link.confidenceScore || 0, 95) : link.confidenceScore,
+          confidenceReasonsJson: JSON.stringify(Array.from(reasonsSet)),
+          lastLinkedAt: new Date(),
+        }
+      });
+
+      summary.completed += 1;
+      await prisma.pubgIdentityValidationQueue.update({
+        where: { id: job.id },
+        data: {
+          status: "completed",
+          lastError: null,
+          completedAt: new Date(),
+          lastValidatedPubgId: resolved.playerId,
+          lastValidatedPubgName: resolved.playerName,
+          lastValidatedShard: resolved.shard,
+        }
+      });
+    } catch (error) {
+      summary.errored += 1;
+      const message = error instanceof Error ? error.message : String(error);
+      const maxAttempts = Math.max(1, Number(job.maxAttempts || 3));
+      const shouldRetry = attempts < maxAttempts;
+      if (shouldRetry) {
+        summary.retried += 1;
+      }
+
+      await prisma.pubgIdentityValidationQueue.update({
+        where: { id: job.id },
+        data: {
+          status: shouldRetry ? "queued" : "error",
+          lastError: message.slice(0, 500),
+          nextAttemptAt: shouldRetry ? new Date(Date.now() + 5 * 60 * 1000) : null,
+          completedAt: shouldRetry ? null : new Date(),
+        }
+      });
+    }
+  }
+
+  return summary;
 }
 
 function log(level, message, data = {}) {
@@ -1600,6 +1784,13 @@ async function indexStreams() {
     backlogQueued: 0,
     backlogResolved: 0
   };
+  let identityValidationSummary = {
+    processed: 0,
+    completed: 0,
+    invalid: 0,
+    errored: 0,
+    retried: 0
+  };
   let backlogCleaned = 0;
 
   for (const stream of streams) {
@@ -1683,6 +1874,17 @@ async function indexStreams() {
   }
 
   try {
+    identityValidationSummary = await processIdentityValidationQueue();
+    if (identityValidationSummary.processed > 0) {
+      log("info", "identity validation queue processed", identityValidationSummary);
+    }
+  } catch (error) {
+    log("error", "identity validation queue processing failed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+
+  try {
     interactionBackfillSummary = await runInteractionBackfill();
     log("info", "interaction backfill completed", interactionBackfillSummary);
   } catch (error) {
@@ -1732,6 +1934,7 @@ async function indexStreams() {
       eventSubSyncIntervalMs: EVENTSUB_SYNC_INTERVAL_MS,
       profileMapping: profileMappingSummary,
       knownPlayerMapping: knownPlayerMappingSummary,
+      identityValidation: identityValidationSummary,
       interactionBackfill: interactionBackfillSummary,
       backlogCleaned
     }
