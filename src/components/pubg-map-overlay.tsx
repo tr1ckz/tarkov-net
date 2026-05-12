@@ -14,28 +14,68 @@ const DEFAULT_CATEGORY_LABELS: Record<string, string> = {
   "secret-room": "Secret Room",
   "secret-key": "Key Location",
   "vehicle-route": "Vehicle Route",
+  "truck-route": "Truck Route",
+  "pillar-garage": "Pillar Garage",
+  "pillar-market-truck": "Pillar Market Truck",
+  "polar-bear-cave": "Polar Bear Cave",
 };
 
 type MarkerPalette = Record<string, string>;
 type MapTheme = "dark" | "light";
-type MarkerIconKind = "drop" | "room" | "key" | "route" | "diamond";
+type MarkerIconKind = "drop" | "room" | "key" | "route" | "diamond" | "truck" | "garage" | "market" | "cave" | "bear" | "loot" | "danger";
 
 const DEFAULT_MARKER_COLORS: MarkerPalette = {
   "hot-drop": "#e85555",
   "secret-room": "#f5c842",
   "secret-key": "#9fd46a",
   "vehicle-route": "#5599ee",
+  "truck-route": "#5cc0ff",
+  "pillar-garage": "#8f9ba8",
+  "pillar-market-truck": "#d48a35",
+  "polar-bear-cave": "#9eddf4",
 };
 
 const DEFAULT_MARKER_BORDER_WIDTH = 2;
 
 const MARKER_ICON_OPTIONS: Array<{ value: MarkerIconKind; label: string }> = [
+  { value: "truck", label: "Truck" },
+  { value: "garage", label: "Garage" },
+  { value: "market", label: "Market" },
+  { value: "cave", label: "Cave" },
+  { value: "bear", label: "Bear" },
   { value: "drop", label: "Hot Drop" },
   { value: "room", label: "Room" },
   { value: "key", label: "Key" },
   { value: "route", label: "Route" },
+  { value: "loot", label: "Loot" },
+  { value: "danger", label: "Danger" },
   { value: "diamond", label: "Default" },
 ];
+
+type RouteMeta = {
+  routeId: string;
+  order: number;
+  total: number;
+  label: string;
+};
+
+function encodeRouteNote(routeId: string, order: number, total: number, label: string) {
+  return `route:${routeId}|${order}/${total}|${encodeURIComponent(label)}`;
+}
+
+function decodeRouteNote(notes: string): RouteMeta | null {
+  const match = /^route:([^|]+)\|(\d+)\/(\d+)\|(.+)$/.exec(notes.trim());
+  if (!match) return null;
+  const order = Number(match[2]);
+  const total = Number(match[3]);
+  if (!Number.isFinite(order) || !Number.isFinite(total) || order <= 0 || total <= 0) return null;
+  return {
+    routeId: match[1],
+    order,
+    total,
+    label: decodeURIComponent(match[4]),
+  };
+}
 
 function humanizeCategory(type: string) {
   return type
@@ -68,6 +108,11 @@ function fallbackColorForCategory(type: string) {
 
 function defaultIconForCategory(type: string): MarkerIconKind {
   const normalized = type.toLowerCase();
+  if (normalized.includes("truck")) return "truck";
+  if (normalized.includes("garage")) return "garage";
+  if (normalized.includes("market")) return "market";
+  if (normalized.includes("cave")) return "cave";
+  if (normalized.includes("bear")) return "bear";
   if (normalized.includes("secret-room")) return "room";
   if (normalized.includes("secret-key")) return "key";
   if (normalized.includes("vehicle") || normalized.includes("route") || normalized.includes("glider")) return "route";
@@ -107,6 +152,76 @@ function MarkerIcon({ type, icon, className, style }: { type: string; icon?: Mar
         <path d="M12 10V5" />
         <path d="M12 14l-4 3" />
         <path d="M12 14l4 3" />
+      </svg>
+    );
+  }
+
+  if (normalized === "truck") {
+    return (
+      <svg viewBox="0 0 24 24" className={className} style={style} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M3 8h10v8H3z" />
+        <path d="M13 10h4l3 3v3h-7z" />
+        <circle cx="7" cy="18" r="1.5" fill="currentColor" stroke="none" />
+        <circle cx="17" cy="18" r="1.5" fill="currentColor" stroke="none" />
+      </svg>
+    );
+  }
+
+  if (normalized === "garage") {
+    return (
+      <svg viewBox="0 0 24 24" className={className} style={style} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M4 10l8-6 8 6v10H4z" />
+        <path d="M8 20v-6h8v6" />
+      </svg>
+    );
+  }
+
+  if (normalized === "market") {
+    return (
+      <svg viewBox="0 0 24 24" className={className} style={style} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M4 8h16v12H4z" />
+        <path d="M4 8l2-4h12l2 4" />
+        <path d="M9 12h6" />
+      </svg>
+    );
+  }
+
+  if (normalized === "cave") {
+    return (
+      <svg viewBox="0 0 24 24" className={className} style={style} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M3 18c2-7 5-11 9-11s7 4 9 11H3z" />
+        <path d="M10 14h4" />
+      </svg>
+    );
+  }
+
+  if (normalized === "bear") {
+    return (
+      <svg viewBox="0 0 24 24" className={className} style={style} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <circle cx="8" cy="6" r="2" />
+        <circle cx="16" cy="6" r="2" />
+        <circle cx="12" cy="13" r="6" />
+        <circle cx="10" cy="13" r="0.8" fill="currentColor" stroke="none" />
+        <circle cx="14" cy="13" r="0.8" fill="currentColor" stroke="none" />
+      </svg>
+    );
+  }
+
+  if (normalized === "loot") {
+    return (
+      <svg viewBox="0 0 24 24" className={className} style={style} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M5 8h14v12H5z" />
+        <path d="M9 8V6a3 3 0 016 0v2" />
+      </svg>
+    );
+  }
+
+  if (normalized === "danger") {
+    return (
+      <svg viewBox="0 0 24 24" className={className} style={style} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M12 3l9 18H3z" />
+        <path d="M12 9v5" />
+        <circle cx="12" cy="17" r="1" fill="currentColor" stroke="none" />
       </svg>
     );
   }
@@ -215,6 +330,10 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
     "secret-room": true,
     "secret-key": true,
     "vehicle-route": true,
+    "truck-route": true,
+    "pillar-garage": true,
+    "pillar-market-truck": true,
+    "polar-bear-cave": true,
   });
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
   const [adminMode, setAdminMode] = useState(false);
@@ -231,7 +350,12 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
   const [newEntityLabel, setNewEntityLabel] = useState("New Marker");
   const [newEntityType, setNewEntityType] = useState<string>("hot-drop");
   const [newEntityNotes, setNewEntityNotes] = useState("Added in admin editor");
+  const [newCategoryIcon, setNewCategoryIcon] = useState<MarkerIconKind>("diamond");
+  const [iconSearch, setIconSearch] = useState("");
   const [quickAddMode, setQuickAddMode] = useState(false);
+  const [routeDrawMode, setRouteDrawMode] = useState(false);
+  const [routeDraftLabel, setRouteDraftLabel] = useState("Truck Route");
+  const [routeDraftPoints, setRouteDraftPoints] = useState<Array<{ rawX: number; rawY: number }>>([]);
   const [categoryLabels, setCategoryLabels] = useState<Record<string, string>>(DEFAULT_CATEGORY_LABELS);
   const [categoryIcons, setCategoryIcons] = useState<Record<string, MarkerIconKind>>({});
   const [hiddenCategories, setHiddenCategories] = useState<string[]>([]);
@@ -309,6 +433,32 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
   );
 
   const activeMarker = visibleMarkers.find((m) => m.id === activeMarkerId) ?? null;
+
+  const filteredIconOptions = useMemo(() => {
+    const query = iconSearch.trim().toLowerCase();
+    if (!query) return MARKER_ICON_OPTIONS;
+    return MARKER_ICON_OPTIONS.filter((option) => option.label.toLowerCase().includes(query) || option.value.includes(query));
+  }, [iconSearch]);
+
+  const routeLineGroups = useMemo(() => {
+    const grouped = new Map<string, { type: string; points: Array<{ x: number; y: number; order: number }>; label: string }>();
+    for (const marker of visibleMarkers) {
+      const meta = decodeRouteNote(marker.notes);
+      if (!meta) continue;
+      if (!grouped.has(meta.routeId)) {
+        grouped.set(meta.routeId, { type: marker.type, points: [], label: meta.label });
+      }
+      const item = grouped.get(meta.routeId);
+      if (!item) continue;
+      item.points.push({ x: marker.x, y: marker.y, order: meta.order });
+    }
+    return Array.from(grouped.values())
+      .map((entry) => ({
+        ...entry,
+        points: entry.points.sort((a, b) => a.order - b.order),
+      }))
+      .filter((entry) => entry.points.length >= 2);
+  }, [visibleMarkers]);
 
   const categoryKeys = useMemo(() => {
     const keys = new Set<string>([
@@ -712,6 +862,30 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
     addEntityAtRawPoint(capturedPoint.rawX, capturedPoint.rawY);
   }
 
+  function cancelRouteDraft() {
+    setRouteDraftPoints([]);
+    setRouteDrawMode(false);
+  }
+
+  function finalizeRouteDraft() {
+    if (routeDraftPoints.length < 2) return;
+    const routeId = `${map.slug}-${Date.now().toString(36)}`;
+    const routeLabel = routeDraftLabel.trim() || (categoryLabels[newEntityType] ?? "Route");
+    const total = routeDraftPoints.length;
+    const newMarkers: PubgMapMarker[] = routeDraftPoints.map((point, index) => ({
+      id: `route-${routeId}-${index + 1}`,
+      label: `${routeLabel} ${index + 1}`,
+      type: newEntityType,
+      x: point.rawX,
+      y: point.rawY,
+      notes: encodeRouteNote(routeId, index + 1, total, routeLabel),
+    }));
+    const next = [...markersRef.current, ...newMarkers];
+    persistEntities(next);
+    setRouteDraftPoints([]);
+    setRouteDrawMode(false);
+  }
+
   function removeActiveEntity() {
     if (!activeMarkerId) return;
     const next = editableMarkers.filter((m) => m.id !== activeMarkerId);
@@ -822,6 +996,11 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
       if (!captured) return;
       setCapturedPoint(captured);
 
+      if (routeDrawMode) {
+        setRouteDraftPoints((prev) => [...prev, { rawX: captured.rawX, rawY: captured.rawY }]);
+        return;
+      }
+
       if (quickAddMode || e.shiftKey) {
         addEntityAtRawPoint(captured.rawX, captured.rawY);
       }
@@ -832,7 +1011,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
         // ignore clipboard permission failures
       }
     },
-    [adminMode, getPointerCoords, quickAddMode]
+    [adminMode, getPointerCoords, quickAddMode, routeDrawMode]
   );
 
   useEffect(() => {
@@ -854,14 +1033,33 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
       }
 
       if (e.key === "Enter" && capturedPoint) {
+        if (routeDrawMode) return;
         e.preventDefault();
         addEntityAtRawPoint(capturedPoint.rawX, capturedPoint.rawY);
+      }
+
+      if ((e.key === "r" || e.key === "R") && !e.repeat) {
+        e.preventDefault();
+        if (routeDrawMode) {
+          finalizeRouteDraft();
+        } else {
+          if (!newEntityType.includes("route")) {
+            setNewEntityType("truck-route");
+          }
+          setRouteDrawMode(true);
+          setRouteDraftPoints([]);
+        }
+      }
+
+      if (e.key === "Escape" && routeDrawMode) {
+        e.preventDefault();
+        cancelRouteDraft();
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [adminMode, capturedPoint, map.slug, newEntityLabel, newEntityNotes, newEntityType]);
+  }, [adminMode, capturedPoint, map.slug, newEntityLabel, newEntityNotes, newEntityType, routeDrawMode, routeDraftPoints, routeDraftLabel, categoryLabels]);
 
   const resetView = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
 
@@ -894,6 +1092,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
   // marker size inversely scales with zoom so they don't get huge
   const markerSize = Math.max(14, 22 - zoom * 2);
   const markerIconSize = Math.max(8, markerSize - 6);
+  const iconOptionsForUi = filteredIconOptions.length ? filteredIconOptions : MARKER_ICON_OPTIONS;
 
   return (
     <div className="space-y-4">
@@ -1045,6 +1244,51 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
             }}
           />
 
+          <svg className="pointer-events-none absolute inset-0" width="100%" height="100%" aria-hidden>
+            {routeLineGroups.map((group, idx) => {
+              const color = palette[group.type] ?? fallbackColorForCategory(group.type);
+              const points = group.points
+                .map((point) => {
+                  const calibrated = applyCalibration(point.x, point.y, calibration);
+                  const px = renderBox.left + (calibrated.x / 100) * renderBox.width;
+                  const py = renderBox.top + (calibrated.y / 100) * renderBox.height;
+                  return `${px},${py}`;
+                })
+                .join(" ");
+              return (
+                <polyline
+                  key={`route-line-${idx}`}
+                  points={points}
+                  fill="none"
+                  stroke={color}
+                  strokeWidth={Math.max(2, markerBorderWidth)}
+                  strokeDasharray="6 4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity={0.9}
+                />
+              );
+            })}
+            {routeDraftPoints.length >= 2 ? (
+              <polyline
+                points={routeDraftPoints
+                  .map((point) => {
+                    const calibrated = applyCalibration(point.rawX, point.rawY, calibration);
+                    const px = renderBox.left + (calibrated.x / 100) * renderBox.width;
+                    const py = renderBox.top + (calibrated.y / 100) * renderBox.height;
+                    return `${px},${py}`;
+                  })
+                  .join(" ")}
+                fill="none"
+                stroke={palette[newEntityType] ?? fallbackColorForCategory(newEntityType)}
+                strokeWidth={Math.max(2, markerBorderWidth + 1)}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                opacity={0.95}
+              />
+            ) : null}
+          </svg>
+
           {visibleMarkers.map((marker) => {
             const color = palette[marker.type] ?? fallbackColorForCategory(marker.type);
             const isActive = activeMarkerId === marker.id;
@@ -1119,6 +1363,9 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
           </p>
           <p className="mt-1 text-xs text-[#8f826a]">
             Quick Add: {quickAddMode ? "ON" : "OFF"} (press Q). Shift+Click adds one marker instantly.
+          </p>
+          <p className="mt-1 text-xs text-[#8f826a]">
+            Route Draw: {routeDrawMode ? "ON" : "OFF"} (press R). Click to place points, R to finish, Esc to cancel.
           </p>
           <p className="mt-1 text-[11px] uppercase tracking-[0.1em] text-[#8f826a]">
             Save status: {saveStatus}
@@ -1195,6 +1442,27 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
               onClick={() => setQuickAddMode((prev) => !prev)}
               className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
             >Quick Add: {quickAddMode ? "On" : "Off"}</button>
+            <button
+              type="button"
+              onClick={() => {
+                if (routeDrawMode) {
+                  finalizeRouteDraft();
+                } else {
+                  if (!newEntityType.includes("route")) {
+                    setNewEntityType("truck-route");
+                  }
+                  setRouteDraftPoints([]);
+                  setRouteDrawMode(true);
+                }
+              }}
+              className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
+            >{routeDrawMode ? "Finish Route" : "Draw Route"}</button>
+            <button
+              type="button"
+              onClick={cancelRouteDraft}
+              disabled={!routeDrawMode && routeDraftPoints.length === 0}
+              className="border border-[#3a3a3a] bg-[#1a1a1a] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#9a9080] hover:border-[#666] hover:text-white disabled:opacity-50"
+            >Cancel Route</button>
             <button
               type="button"
               onClick={addEntityAtCapturedPoint}
@@ -1281,6 +1549,15 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
                 className="w-full border border-[#3a3426] bg-[#0e0c09] px-2 py-1.5 text-xs text-[#e2d2af]"
                 placeholder="display label"
               />
+              <select
+                value={newCategoryIcon}
+                onChange={(e) => setNewCategoryIcon(e.target.value as MarkerIconKind)}
+                className="w-full border border-[#3a3426] bg-[#0e0c09] px-2 py-1.5 text-xs text-[#e2d2af]"
+              >
+                {iconOptionsForUi.map((option) => (
+                  <option key={`new-icon-${option.value}`} value={option.value}>{option.label}</option>
+                ))}
+              </select>
               <button
                 type="button"
                 onClick={() => {
@@ -1289,18 +1566,28 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
                   const label = (newCategoryLabel || humanizeCategory(key)).trim();
                   const nextLabels = { ...categoryLabels, [key]: label };
                   const nextPalette = { ...palette, [key]: palette[key] ?? fallbackColorForCategory(key) };
-                  const nextIcons = { ...categoryIcons, [key]: categoryIcons[key] ?? defaultIconForCategory(key) };
+                  const nextIcons = { ...categoryIcons, [key]: newCategoryIcon };
                   setNewEntityType(key);
                   setNewCategoryKey("");
                   setNewCategoryLabel("");
+                  setNewCategoryIcon("diamond");
                   setCategoryLabels(nextLabels);
                   setPalette(nextPalette);
                   setCategoryIcons(nextIcons);
                   setHiddenCategories((prev) => prev.filter((entry) => entry !== key));
                   setCategoriesDirty(true);
                 }}
-                className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
+                className="sm:col-span-3 border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
               >Add Category</button>
+            </div>
+            <div className="mt-2 grid gap-2 sm:grid-cols-[1fr,auto]">
+              <input
+                value={iconSearch}
+                onChange={(e) => setIconSearch(e.target.value)}
+                className="w-full border border-[#3a3426] bg-[#0e0c09] px-2 py-1.5 text-xs text-[#e2d2af]"
+                placeholder="Search icon library (truck, cave, market...)"
+              />
+              <span className="self-center text-xs text-[#8f826a]">{iconOptionsForUi.length} icons</span>
             </div>
             <div className="mt-2 space-y-2">
               {categoryKeys.map((type) => (
@@ -1333,7 +1620,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
                     }}
                     className="w-full border border-[#3a3426] bg-[#0e0c09] px-2 py-1.5 text-xs text-[#e2d2af]"
                   >
-                    {MARKER_ICON_OPTIONS.map((option) => (
+                    {iconOptionsForUi.map((option) => (
                       <option key={`${type}-${option.value}`} value={option.value}>{option.label}</option>
                     ))}
                   </select>
@@ -1431,6 +1718,17 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
               placeholder="Entity notes"
             />
           </div>
+          {routeDrawMode ? (
+            <div className="mt-2 grid gap-2 sm:grid-cols-[1fr,auto]">
+              <input
+                value={routeDraftLabel}
+                onChange={(e) => setRouteDraftLabel(e.target.value)}
+                className="w-full border border-[#3a3426] bg-[#0e0c09] px-2 py-1.5 text-xs text-[#e2d2af]"
+                placeholder="Route label (example: Sanhok South Truck Loop)"
+              />
+              <span className="self-center text-xs text-[#8f826a]">{routeDraftPoints.length} points</span>
+            </div>
+          ) : null}
           <div className="mt-2 flex items-center gap-2 text-xs text-[#b8aa90]">
             <span
               className="inline-flex h-6 w-6 items-center justify-center rounded-full"
