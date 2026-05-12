@@ -7,7 +7,9 @@ export const dynamic = "force-dynamic";
 type LegendPayload = {
   legendColors?: Record<string, string> | null;
   categoryLabels?: Record<string, string> | null;
+  categoryIcons?: Record<string, string> | null;
   hiddenCategories?: string[] | null;
+  markerBorderWidth?: number | null;
   mapTheme?: "dark" | "light" | null;
 };
 
@@ -29,14 +31,18 @@ function normalizeLegend(input: unknown): LegendPayload {
   const hasStructuredShape =
     Object.prototype.hasOwnProperty.call(parsed, "legendColors") ||
     Object.prototype.hasOwnProperty.call(parsed, "categoryLabels") ||
+    Object.prototype.hasOwnProperty.call(parsed, "categoryIcons") ||
     Object.prototype.hasOwnProperty.call(parsed, "hiddenCategories") ||
+    Object.prototype.hasOwnProperty.call(parsed, "markerBorderWidth") ||
     Object.prototype.hasOwnProperty.call(parsed, "mapTheme");
 
   if (!hasStructuredShape) {
     return {
       legendColors: parsed as Record<string, string>,
       categoryLabels: {},
+      categoryIcons: {},
       hiddenCategories: [],
+      markerBorderWidth: null,
       mapTheme: null,
     };
   }
@@ -44,9 +50,14 @@ function normalizeLegend(input: unknown): LegendPayload {
   return {
     legendColors: (parsed.legendColors as Record<string, string> | null | undefined) ?? {},
     categoryLabels: (parsed.categoryLabels as Record<string, string> | null | undefined) ?? {},
+    categoryIcons: (parsed.categoryIcons as Record<string, string> | null | undefined) ?? {},
     hiddenCategories: Array.isArray(parsed.hiddenCategories)
       ? parsed.hiddenCategories.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
       : [],
+    markerBorderWidth:
+      typeof parsed.markerBorderWidth === "number" && Number.isFinite(parsed.markerBorderWidth)
+        ? parsed.markerBorderWidth
+        : null,
     mapTheme:
       parsed.mapTheme === "dark" || parsed.mapTheme === "light"
         ? parsed.mapTheme
@@ -70,7 +81,9 @@ export async function GET(_request: Request, context: { params: { slug: string }
       entities: null,
       legendColors: null,
       categoryLabels: null,
+      categoryIcons: null,
       hiddenCategories: null,
+      markerBorderWidth: null,
       mapTheme: null,
       mapImageUrl: null,
     });
@@ -83,7 +96,9 @@ export async function GET(_request: Request, context: { params: { slug: string }
     entities: parseJson(config.entitiesJson, null),
     legendColors: legend.legendColors ?? {},
     categoryLabels: legend.categoryLabels ?? {},
+    categoryIcons: legend.categoryIcons ?? {},
     hiddenCategories: legend.hiddenCategories ?? [],
+    markerBorderWidth: legend.markerBorderWidth ?? null,
     mapTheme: legend.mapTheme ?? null,
     mapImageUrl: config.mapImageUrl ?? null,
   });
@@ -106,7 +121,9 @@ export async function PATCH(request: Request, context: { params: { slug: string 
     entities?: unknown;
     legendColors?: Record<string, string> | null;
     categoryLabels?: Record<string, string> | null;
+    categoryIcons?: Record<string, string> | null;
     hiddenCategories?: string[] | null;
+    markerBorderWidth?: number | null;
     mapTheme?: "dark" | "light" | null;
     mapImageUrl?: string | null;
   } | null;
@@ -121,7 +138,9 @@ export async function PATCH(request: Request, context: { params: { slug: string 
   const shouldUpdateLegend =
     Object.prototype.hasOwnProperty.call(payload, "legendColors") ||
     Object.prototype.hasOwnProperty.call(payload, "categoryLabels") ||
+    Object.prototype.hasOwnProperty.call(payload, "categoryIcons") ||
     Object.prototype.hasOwnProperty.call(payload, "hiddenCategories") ||
+    Object.prototype.hasOwnProperty.call(payload, "markerBorderWidth") ||
     Object.prototype.hasOwnProperty.call(payload, "mapTheme");
 
   const nextLegend: LegendPayload = {
@@ -133,10 +152,20 @@ export async function PATCH(request: Request, context: { params: { slug: string 
       Object.prototype.hasOwnProperty.call(payload, "categoryLabels")
         ? payload.categoryLabels ?? {}
         : existingLegend.categoryLabels ?? {},
+    categoryIcons:
+      Object.prototype.hasOwnProperty.call(payload, "categoryIcons")
+        ? payload.categoryIcons ?? {}
+        : existingLegend.categoryIcons ?? {},
     hiddenCategories:
       Object.prototype.hasOwnProperty.call(payload, "hiddenCategories")
         ? (payload.hiddenCategories ?? []).filter((entry) => typeof entry === "string" && entry.trim().length > 0)
         : existingLegend.hiddenCategories ?? [],
+    markerBorderWidth:
+      Object.prototype.hasOwnProperty.call(payload, "markerBorderWidth")
+        ? (typeof payload.markerBorderWidth === "number" && Number.isFinite(payload.markerBorderWidth)
+            ? payload.markerBorderWidth
+            : null)
+        : existingLegend.markerBorderWidth ?? null,
     mapTheme:
       Object.prototype.hasOwnProperty.call(payload, "mapTheme")
         ? payload.mapTheme ?? null

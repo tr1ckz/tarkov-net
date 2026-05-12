@@ -18,6 +18,7 @@ const DEFAULT_CATEGORY_LABELS: Record<string, string> = {
 
 type MarkerPalette = Record<string, string>;
 type MapTheme = "dark" | "light";
+type MarkerIconKind = "drop" | "room" | "key" | "route" | "diamond";
 
 const DEFAULT_MARKER_COLORS: MarkerPalette = {
   "hot-drop": "#e85555",
@@ -25,6 +26,16 @@ const DEFAULT_MARKER_COLORS: MarkerPalette = {
   "secret-key": "#9fd46a",
   "vehicle-route": "#5599ee",
 };
+
+const DEFAULT_MARKER_BORDER_WIDTH = 2;
+
+const MARKER_ICON_OPTIONS: Array<{ value: MarkerIconKind; label: string }> = [
+  { value: "drop", label: "Hot Drop" },
+  { value: "room", label: "Room" },
+  { value: "key", label: "Key" },
+  { value: "route", label: "Route" },
+  { value: "diamond", label: "Default" },
+];
 
 function humanizeCategory(type: string) {
   return type
@@ -55,10 +66,19 @@ function fallbackColorForCategory(type: string) {
   return `#${normalized.toString(16).padStart(6, "0")}`;
 }
 
-function MarkerIcon({ type, className, style }: { type: string; className?: string; style?: CSSProperties }) {
+function defaultIconForCategory(type: string): MarkerIconKind {
   const normalized = type.toLowerCase();
+  if (normalized.includes("secret-room")) return "room";
+  if (normalized.includes("secret-key")) return "key";
+  if (normalized.includes("vehicle") || normalized.includes("route") || normalized.includes("glider")) return "route";
+  if (normalized.includes("hot") || normalized.includes("drop")) return "drop";
+  return "diamond";
+}
 
-  if (normalized.includes("secret-room")) {
+function MarkerIcon({ type, icon, className, style }: { type: string; icon?: MarkerIconKind; className?: string; style?: CSSProperties }) {
+  const normalized = (icon ?? defaultIconForCategory(type)).toLowerCase();
+
+  if (normalized === "room") {
     return (
       <svg viewBox="0 0 24 24" className={className} style={style} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <path d="M7 3h10v18H7z" />
@@ -68,7 +88,7 @@ function MarkerIcon({ type, className, style }: { type: string; className?: stri
     );
   }
 
-  if (normalized.includes("secret-key")) {
+  if (normalized === "key") {
     return (
       <svg viewBox="0 0 24 24" className={className} style={style} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <circle cx="8" cy="12" r="3" />
@@ -79,7 +99,7 @@ function MarkerIcon({ type, className, style }: { type: string; className?: stri
     );
   }
 
-  if (normalized.includes("vehicle") || normalized.includes("route") || normalized.includes("glider")) {
+  if (normalized === "route") {
     return (
       <svg viewBox="0 0 24 24" className={className} style={style} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <circle cx="12" cy="12" r="7" />
@@ -91,7 +111,7 @@ function MarkerIcon({ type, className, style }: { type: string; className?: stri
     );
   }
 
-  if (normalized.includes("hot") || normalized.includes("drop")) {
+  if (normalized === "drop") {
     return (
       <svg viewBox="0 0 24 24" className={className} style={style} fill="currentColor" stroke="none" aria-hidden>
         <path d="M12 2C9.3 5.6 6.2 8 6.2 12.4A5.8 5.8 0 0012 18.2a5.8 5.8 0 005.8-5.8c0-3.8-2.5-6.1-5.8-10.4zm0 7.3c1.5 1.7 2.5 2.9 2.5 4.3A2.5 2.5 0 019.5 13.6c0-1.3.8-2.4 2.5-4.3z" />
@@ -213,12 +233,14 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
   const [newEntityNotes, setNewEntityNotes] = useState("Added in admin editor");
   const [quickAddMode, setQuickAddMode] = useState(false);
   const [categoryLabels, setCategoryLabels] = useState<Record<string, string>>(DEFAULT_CATEGORY_LABELS);
+  const [categoryIcons, setCategoryIcons] = useState<Record<string, MarkerIconKind>>({});
   const [hiddenCategories, setHiddenCategories] = useState<string[]>([]);
   const [newCategoryKey, setNewCategoryKey] = useState("");
   const [newCategoryLabel, setNewCategoryLabel] = useState("");
   const [categoriesDirty, setCategoriesDirty] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [palette, setPalette] = useState<MarkerPalette>(DEFAULT_MARKER_COLORS);
+  const [markerBorderWidth, setMarkerBorderWidth] = useState(DEFAULT_MARKER_BORDER_WIDTH);
   const [mapTheme, setMapTheme] = useState<MapTheme>("dark");
   const [mapImageUrl, setMapImageUrl] = useState(map.mapImage);
   const [lastLoadedMapUrl, setLastLoadedMapUrl] = useState(map.mapImage);
@@ -291,13 +313,14 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
   const categoryKeys = useMemo(() => {
     const keys = new Set<string>([
       ...Object.keys(categoryLabels),
+      ...Object.keys(categoryIcons),
       ...Object.keys(palette),
       ...editableMarkers.map((m) => m.type),
     ]);
     return Array.from(keys)
       .filter((key) => Boolean(key) && !hiddenCategories.includes(key))
       .sort((a, b) => a.localeCompare(b));
-  }, [categoryLabels, editableMarkers, hiddenCategories, palette]);
+  }, [categoryIcons, categoryLabels, editableMarkers, hiddenCategories, palette]);
 
   useEffect(() => {
     setActiveTypes((prev) => {
@@ -334,6 +357,20 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
       for (const key of categoryKeys) {
         if (!next[key]) {
           next[key] = fallbackColorForCategory(key);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [categoryKeys]);
+
+  useEffect(() => {
+    setCategoryIcons((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const key of categoryKeys) {
+        if (!next[key]) {
+          next[key] = defaultIconForCategory(key);
           changed = true;
         }
       }
@@ -387,8 +424,10 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
     setCategoriesDirty(false);
     setPalette({});
     setCategoryLabels({});
+    setCategoryIcons({});
     setHiddenCategories([]);
     setActiveTypes({});
+    setMarkerBorderWidth(DEFAULT_MARKER_BORDER_WIDTH);
     const storedTheme = localStorage.getItem(`pubg-map-theme-${map.slug}`);
     if (storedTheme === "dark" || storedTheme === "light") {
       setMapTheme(storedTheme);
@@ -409,7 +448,9 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
           entities?: PubgMapMarker[] | null;
           legendColors?: MarkerPalette | null;
           categoryLabels?: Record<string, string> | null;
+          categoryIcons?: Record<string, MarkerIconKind> | null;
           hiddenCategories?: string[] | null;
+          markerBorderWidth?: number | null;
           mapTheme?: MapTheme | null;
           mapImageUrl?: string | null;
         };
@@ -432,8 +473,16 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
           setCategoryLabels((prev) => ({ ...prev, ...payload.categoryLabels }));
         }
 
+        if (payload.categoryIcons) {
+          setCategoryIcons((prev) => ({ ...prev, ...payload.categoryIcons }));
+        }
+
         if (Array.isArray(payload.hiddenCategories)) {
           setHiddenCategories(payload.hiddenCategories.filter(Boolean));
+        }
+
+        if (typeof payload.markerBorderWidth === "number" && Number.isFinite(payload.markerBorderWidth)) {
+          setMarkerBorderWidth(payload.markerBorderWidth);
         }
 
         if (payload.mapTheme === "dark" || payload.mapTheme === "light") {
@@ -473,7 +522,9 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
     entities?: PubgMapMarker[] | null;
     legendColors?: MarkerPalette | null;
     categoryLabels?: Record<string, string> | null;
+    categoryIcons?: Record<string, MarkerIconKind> | null;
     hiddenCategories?: string[] | null;
+    markerBorderWidth?: number | null;
     mapTheme?: MapTheme | null;
     mapImageUrl?: string | null;
   }) {
@@ -496,6 +547,22 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
       setSaveStatus("error");
       return false;
     }
+  }
+
+  function saveAllMarkerSettings() {
+    void saveServerConfig({
+      calibration,
+      entities: editableMarkers,
+      legendColors: palette,
+      categoryLabels,
+      categoryIcons,
+      hiddenCategories,
+      markerBorderWidth,
+      mapTheme,
+      mapImageUrl,
+    }).then((ok) => {
+      if (ok) setCategoriesDirty(false);
+    });
   }
 
   function persistCalibration(nextCalibration: MapCalibration) {
@@ -856,7 +923,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
                   color: active ? color : "#444",
                 }}
               >
-                <MarkerIcon type={type} className="h-[70%] w-[70%]" />
+                <MarkerIcon type={type} icon={categoryIcons[type]} className="h-[70%] w-[70%]" />
               </span>
               {label}
             </button>
@@ -982,6 +1049,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
             const color = palette[marker.type] ?? fallbackColorForCategory(marker.type);
             const isActive = activeMarkerId === marker.id;
             const calibrated = applyCalibration(marker.x, marker.y, calibration);
+            const borderWidth = Math.max(1, markerBorderWidth);
             return (
               <button
                 key={marker.id}
@@ -1022,7 +1090,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
                   justifyContent: "center",
                   overflow: "hidden",
                   background: mapTheme === "dark" ? "rgba(8,8,8,0.16)" : "rgba(255,255,255,0.16)",
-                  border: `2px solid ${color}`,
+                  border: `${borderWidth}px solid ${color}`,
                   boxShadow: isActive
                     ? `0 0 0 2px ${mapTheme === "dark" ? "#fff" : "#101010"}, 0 0 10px 2px ${color}`
                     : `0 0 6px 1px ${color}66`,
@@ -1030,7 +1098,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
                   color,
                 }}
               >
-                <MarkerIcon type={marker.type} className="shrink-0" style={{ width: markerIconSize, height: markerIconSize }} />
+                <MarkerIcon type={marker.type} icon={categoryIcons[marker.type]} className="shrink-0" style={{ width: markerIconSize, height: markerIconSize }} />
               </button>
             );
           })}
@@ -1114,12 +1182,12 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => persistCalibration(calibration)}
+              onClick={saveAllMarkerSettings}
               className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
-            >Save Calibration</button>
+            >Save All Marker Settings</button>
             <button
               type="button"
-              onClick={resetCalibration}
+              onClick={() => setCalibration(getBaseCalibration(map.slug))}
               className="border border-[#3a3a3a] bg-[#1a1a1a] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#9a9080] hover:border-[#666] hover:text-white"
             >Reset Map</button>
             <button
@@ -1146,6 +1214,34 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
             >Reset Entities</button>
           </div>
 
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            <label className="text-xs text-[#b8aa90]">
+              Marker Border Thickness
+              <input
+                type="range"
+                min={1}
+                max={6}
+                step={0.5}
+                value={markerBorderWidth}
+                onChange={(e) => setMarkerBorderWidth(Number(e.target.value))}
+                className="mt-1 w-full"
+              />
+              <span className="text-[11px] text-[#8f826a]">{markerBorderWidth.toFixed(1)}px</span>
+            </label>
+            <div className="flex items-center gap-3 text-xs text-[#b8aa90]">
+              <span>Preview</span>
+              <span
+                className="inline-flex h-7 w-7 items-center justify-center rounded-full"
+                style={{
+                  border: `${Math.max(1, markerBorderWidth)}px solid ${palette[newEntityType] ?? fallbackColorForCategory(newEntityType)}`,
+                  color: palette[newEntityType] ?? fallbackColorForCategory(newEntityType),
+                }}
+              >
+                <MarkerIcon type={newEntityType} icon={categoryIcons[newEntityType]} className="h-4 w-4" />
+              </span>
+            </div>
+          </div>
+
           <div className="mt-4 border-t border-[#2a2418] pt-3">
             <p className="text-[11px] uppercase tracking-[0.1em] text-[#8f826a]">Legend/Icon Color Groups</p>
             <div className="mt-2 grid gap-2 sm:grid-cols-2">
@@ -1162,11 +1258,6 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
               ))}
             </div>
             <div className="mt-2 flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => persistPalette(palette)}
-                className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
-              >Save Colors</button>
               <button
                 type="button"
                 onClick={resetPaletteToDefaults}
@@ -1198,11 +1289,13 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
                   const label = (newCategoryLabel || humanizeCategory(key)).trim();
                   const nextLabels = { ...categoryLabels, [key]: label };
                   const nextPalette = { ...palette, [key]: palette[key] ?? fallbackColorForCategory(key) };
+                  const nextIcons = { ...categoryIcons, [key]: categoryIcons[key] ?? defaultIconForCategory(key) };
                   setNewEntityType(key);
                   setNewCategoryKey("");
                   setNewCategoryLabel("");
                   setCategoryLabels(nextLabels);
                   setPalette(nextPalette);
+                  setCategoryIcons(nextIcons);
                   setHiddenCategories((prev) => prev.filter((entry) => entry !== key));
                   setCategoriesDirty(true);
                 }}
@@ -1211,8 +1304,19 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
             </div>
             <div className="mt-2 space-y-2">
               {categoryKeys.map((type) => (
-                <div key={`category-row-${type}`} className="grid gap-2 sm:grid-cols-[1fr,1fr,auto,auto] items-center">
-                  <div className="text-xs text-[#8f826a]">{type}</div>
+                <div key={`category-row-${type}`} className="grid gap-2 sm:grid-cols-[auto,1fr,220px,auto] items-center">
+                  <div className="flex items-center gap-2 text-xs text-[#8f826a]">
+                    <span
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-full"
+                      style={{
+                        border: `${Math.max(1, markerBorderWidth)}px solid ${palette[type] ?? fallbackColorForCategory(type)}`,
+                        color: palette[type] ?? fallbackColorForCategory(type),
+                      }}
+                    >
+                      <MarkerIcon type={type} icon={categoryIcons[type]} className="h-3.5 w-3.5" />
+                    </span>
+                    <span>{type}</span>
+                  </div>
                   <input
                     value={categoryLabels[type] ?? humanizeCategory(type)}
                     onChange={(e) => {
@@ -1221,6 +1325,18 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
                     }}
                     className="w-full border border-[#3a3426] bg-[#0e0c09] px-2 py-1.5 text-xs text-[#e2d2af]"
                   />
+                  <select
+                    value={categoryIcons[type] ?? defaultIconForCategory(type)}
+                    onChange={(e) => {
+                      setCategoryIcons((prev) => ({ ...prev, [type]: e.target.value as MarkerIconKind }));
+                      setCategoriesDirty(true);
+                    }}
+                    className="w-full border border-[#3a3426] bg-[#0e0c09] px-2 py-1.5 text-xs text-[#e2d2af]"
+                  >
+                    {MARKER_ICON_OPTIONS.map((option) => (
+                      <option key={`${type}-${option.value}`} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
                   <button
                     type="button"
                     onClick={() => {
@@ -1228,8 +1344,11 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
                       delete nextLabels[type];
                       const nextPalette = { ...palette };
                       delete nextPalette[type];
+                      const nextIcons = { ...categoryIcons };
+                      delete nextIcons[type];
                       setCategoryLabels(nextLabels);
                       setPalette(nextPalette);
+                      setCategoryIcons(nextIcons);
                       setHiddenCategories((prev) => (prev.includes(type) ? prev : [...prev, type]));
                       setCategoriesDirty(true);
 
@@ -1242,21 +1361,8 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
                     }}
                     className="border border-[#5e2a2a] bg-[#1a1010] px-2 py-1.5 text-[11px] uppercase tracking-[0.12em] text-[#e3b8b8] hover:border-[#d36a6a]"
                   >Remove</button>
-                  <button
-                    type="button"
-                    onClick={() => setNewEntityType(type)}
-                    className="border border-[#3a3a3a] bg-[#1a1a1a] px-2 py-1.5 text-[11px] uppercase tracking-[0.12em] text-[#c8bda0] hover:border-[#666]"
-                  >Use</button>
                 </div>
               ))}
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={saveCategoryConfiguration}
-                  disabled={!categoriesDirty}
-                  className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842] disabled:opacity-50"
-                >Save Categories</button>
-              </div>
             </div>
           </div>
 
@@ -1275,38 +1381,30 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
             <div className="mt-2 flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={saveMapImageOverride}
-                className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
-              >Save Map Image</button>
-              <button
-                type="button"
                 onClick={() => {
                   const next = guessHighResVariant(mapImageUrl || map.mapImage);
                   setMapImageUrl(next);
-                  void saveServerConfig({ mapImageUrl: next });
                 }}
                 className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
               >Try High-Res Variant</button>
               <button
                 type="button"
-                onClick={() => applyKnownMapResolution("hq")}
+                onClick={() => setMapImageUrl(getKnownResolutionVariant(map.slug, "hq"))}
                 className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
               >Use Known HQ</button>
               <button
                 type="button"
-                onClick={() => applyKnownMapResolution("low")}
+                onClick={() => setMapImageUrl(getKnownResolutionVariant(map.slug, "low"))}
                 className="border border-[#3a3a3a] bg-[#1a1a1a] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#9a9080] hover:border-[#666] hover:text-white"
               >Use Known Low</button>
               <button
                 type="button"
-                onClick={resetMapImageOverride}
+                onClick={() => {
+                  setMapImageUrl(map.mapImage);
+                  setLastLoadedMapUrl(map.mapImage);
+                }}
                 className="border border-[#3a3a3a] bg-[#1a1a1a] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#9a9080] hover:border-[#666] hover:text-white"
               >Reset Map Image</button>
-              <button
-                type="button"
-                onClick={() => persistMapTheme(mapTheme)}
-                className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
-              >Save Theme</button>
             </div>
           </div>
 
@@ -1333,14 +1431,20 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
               placeholder="Entity notes"
             />
           </div>
-
-          {capturedPoint && (
-            <p className="mt-3 text-xs text-[#b8aa90]">
-              Captured raw ({capturedPoint.rawX}, {capturedPoint.rawY}) · rendered ({capturedPoint.calibratedX}, {capturedPoint.calibratedY})
-            </p>
-          )}
+          <div className="mt-2 flex items-center gap-2 text-xs text-[#b8aa90]">
+            <span
+              className="inline-flex h-6 w-6 items-center justify-center rounded-full"
+              style={{
+                border: `${Math.max(1, markerBorderWidth)}px solid ${palette[newEntityType] ?? fallbackColorForCategory(newEntityType)}`,
+                color: palette[newEntityType] ?? fallbackColorForCategory(newEntityType),
+              }}
+            >
+              <MarkerIcon type={newEntityType} icon={categoryIcons[newEntityType]} className="h-3.5 w-3.5" />
+            </span>
+            <span>{categoryLabels[newEntityType] ?? humanizeCategory(newEntityType)}</span>
+          </div>
           <p className="mt-2 text-xs text-[#8f826a]">
-            Admin entity controls: click map to set capture point, Add Entity At Click, drag circles to move, select then Delete Selected.
+            Admin entity controls: click map to set capture point, shift-click for instant add, drag circles to move, select then Delete Selected.
           </p>
         </div>
       )}
@@ -1359,7 +1463,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
                 color: palette[activeMarker.type] ?? fallbackColorForCategory(activeMarker.type)
               }}
             >
-              <MarkerIcon type={activeMarker.type} className="h-[70%] w-[70%]" />
+              <MarkerIcon type={activeMarker.type} icon={categoryIcons[activeMarker.type]} className="h-[70%] w-[70%]" />
             </span>
               <p className="text-sm font-semibold uppercase tracking-[0.08em] text-[#e2d2af]">
                 {activeMarker.label}
