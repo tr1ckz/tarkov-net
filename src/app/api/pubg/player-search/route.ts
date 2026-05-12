@@ -1,48 +1,25 @@
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+﻿import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const q = searchParams.get("q")?.trim() ?? "";
-  const requestedPlatform = searchParams.get("platform")?.trim().toLowerCase() ?? "steam";
-  const platform = requestedPlatform === "xbox" || requestedPlatform === "psn" ? requestedPlatform : "steam";
-  const limit = Math.max(1, Math.min(20, Number(searchParams.get("limit") ?? "10")));
-
-  if (q.length < 2) {
-    return NextResponse.json({ results: [] });
-  }
-
-  const lower = q.toLowerCase();
-
-  // Case-insensitive LIKE search against the local player index
-  const rows = await prisma.pubgKnownPlayer.findMany({
-    where: {
-      playerNameLower: { contains: lower },
-      platform
+function disabled(method: string) {
+  return NextResponse.json(
+    {
+      ok: false,
+      disabled: true,
+      mode: "pubg_report_only",
+      routeStatus: "disabled",
+      method,
+      message: "This route is disabled in pubg.report-only mode.",
     },
-    select: {
-      playerName: true,
-      platform: true,
-      shard: true,
-      seenCount: true,
-      lastSeenAt: true
-    },
-    orderBy: [
-      { seenCount: "desc" },
-      { lastSeenAt: "desc" }
-    ],
-    take: limit
-  });
+    { status: 410 }
+  );
+}
 
-  return NextResponse.json({
-    results: rows.map((r) => ({
-      playerName: r.playerName,
-      platform: r.platform,
-      shard: r.shard,
-      seenCount: r.seenCount
-    })),
-    indexSize: await prisma.pubgKnownPlayer.count({ where: { platform } })
-  });
+export async function GET() {
+  return disabled("GET");
+}
+
+export async function POST() {
+  return disabled("POST");
 }
