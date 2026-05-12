@@ -108,6 +108,12 @@ model CacheState {
   updatedAt        DateTime  @updatedAt
 }
 
+model RuntimeSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
 model CachedRaidIntel {
   id                  String   @id @default(cuid())
   gameMode            String   @unique

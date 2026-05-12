@@ -7,6 +7,13 @@ const LEVEL_RANK = {
   silent: 100,
 };
 
+const DB_CACHE_TTL_MS = 60_000;
+const runtimeSettingsCache = {
+  expiresAt: 0,
+  values: {},
+  inflight: null,
+};
+
 function normalizeLevel(raw, fallback = "info") {
   const value = String(raw ?? "").trim().toLowerCase();
   if (value === "warning") return "warn";
@@ -23,6 +30,51 @@ function sanitizeScopeForEnv(scope) {
     .replace(/^_+|_+$/g, "");
 }
 
+async function fetchRuntimeSettingsFromDb(keys) {
+  try {
+    const { PrismaClient } = await import("@prisma/client");
+    const prisma = new PrismaClient();
+    try {
+      const rows = await prisma.runtimeSetting.findMany({
+        where: {
+          key: { in: keys },
+        },
+        select: {
+          key: true,
+          value: true,
+        },
+      });
+
+      const map = {};
+      for (const row of rows) {
+        map[row.key] = row.value;
+      }
+      return map;
+    } finally {
+      await prisma.$disconnect();
+    }
+  } catch {
+    return {};
+  }
+}
+
+function refreshRuntimeSettings(keys) {
+  if (runtimeSettingsCache.inflight) {
+    return runtimeSettingsCache.inflight;
+  }
+
+  runtimeSettingsCache.inflight = fetchRuntimeSettingsFromDb(keys)
+    .then((values) => {
+      runtimeSettingsCache.values = values;
+      runtimeSettingsCache.expiresAt = Date.now() + DB_CACHE_TTL_MS;
+    })
+    .finally(() => {
+      runtimeSettingsCache.inflight = null;
+    });
+
+  return runtimeSettingsCache.inflight;
+}
+
 export function resolveScriptLogLevel(scope, options = {}) {
   const fallback = normalizeLevel(options.defaultLevel ?? "info", "info");
   const extraEnvKeys = Array.isArray(options.envKeys) ? options.envKeys : [];
@@ -34,6 +86,17 @@ export function resolveScriptLogLevel(scope, options = {}) {
     "SCRIPT_LOG_LEVEL",
     "LOG_LEVEL",
   ];
+
+  if (Date.now() > runtimeSettingsCache.expiresAt) {
+    void refreshRuntimeSettings(envKeys);
+  }
+
+  for (const key of envKeys) {
+    const runtimeValue = runtimeSettingsCache.values[key];
+    if (runtimeValue) {
+      return normalizeLevel(runtimeValue, fallback);
+    }
+  }
 
   for (const key of envKeys) {
     const value = process.env[key];

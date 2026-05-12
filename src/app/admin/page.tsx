@@ -207,6 +207,23 @@ type TwitchIndexStatusResponse = {
   }>;
 };
 
+type RuntimeSettingRow = {
+  key: string;
+  value: string;
+  updatedAt?: string;
+};
+
+const LOG_LEVEL_OPTIONS = ["verbose", "debug", "info", "warn", "error", "silent"] as const;
+const LOG_LEVEL_KEYS = [
+  "WORKER_LOG_LEVEL",
+  "PUBG_CRAWLER_LOG_LEVEL",
+  "STARTUP_LOG_LEVEL",
+  "MANUAL_PUBG_LOG_LEVEL",
+  "CLEAN_NEXT_LOG_LEVEL",
+  "SCRIPT_LOG_LEVEL",
+  "LOG_LEVEL",
+] as const;
+
 export default function AdminPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -233,6 +250,10 @@ export default function AdminPage() {
   const [liveTailPlayer, setLiveTailPlayer] = useState("");
   const [indexStatus, setIndexStatus] = useState<TwitchIndexStatusResponse | null>(null);
   const [indexStatusError, setIndexStatusError] = useState<string | null>(null);
+  const [runtimeSettings, setRuntimeSettings] = useState<RuntimeSettingRow[]>([]);
+  const [runtimeSettingsLoading, setRuntimeSettingsLoading] = useState(false);
+  const [runtimeSettingsSaving, setRuntimeSettingsSaving] = useState(false);
+  const [runtimeSettingsMessage, setRuntimeSettingsMessage] = useState<string | null>(null);
   const [queryInitialized, setQueryInitialized] = useState(false);
 
   const isAdmin = (session?.user as { role?: string })?.role === "ADMIN";
@@ -252,11 +273,13 @@ export default function AdminPage() {
     Promise.all([
       fetch("/api/admin/users").then((r) => r.json()),
       fetch("/api/admin/invite").then((r) => r.json()),
-      fetch("/api/admin/pubg-linking").then((r) => r.json())
-    ]).then(([u, inv, stats]) => {
+      fetch("/api/admin/pubg-linking").then((r) => r.json()),
+      fetch("/api/admin/runtime-settings").then((r) => r.json())
+    ]).then(([u, inv, stats, runtime]) => {
       setUsers(u);
       setInvites(inv);
       setPubgStats(stats);
+      setRuntimeSettings(runtime?.settings ?? []);
       setLoading(false);
     });
   }, [isAdmin]);
@@ -437,6 +460,56 @@ export default function AdminPage() {
     } finally {
       setRefreshingPubg(false);
     }
+  }
+
+  async function saveRuntimeSettings() {
+    setRuntimeSettingsSaving(true);
+    setRuntimeSettingsMessage(null);
+    try {
+      const response = await fetch("/api/admin/runtime-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          settings: runtimeSettings.map((row) => ({ key: row.key, value: row.value })),
+        }),
+      });
+
+      const payload = await response.json();
+      if (!response.ok) {
+        setRuntimeSettingsMessage(payload?.error ?? "Failed to save runtime settings");
+        return;
+      }
+
+      setRuntimeSettings(payload?.settings ?? runtimeSettings);
+      setRuntimeSettingsMessage("Runtime logging settings saved.");
+    } catch (error) {
+      setRuntimeSettingsMessage(error instanceof Error ? error.message : "Failed to save runtime settings");
+    } finally {
+      setRuntimeSettingsSaving(false);
+    }
+  }
+
+  async function reloadRuntimeSettings() {
+    setRuntimeSettingsLoading(true);
+    setRuntimeSettingsMessage(null);
+    try {
+      const payload = await fetch("/api/admin/runtime-settings", { cache: "no-store" }).then((r) => r.json());
+      setRuntimeSettings(payload?.settings ?? []);
+    } catch (error) {
+      setRuntimeSettingsMessage(error instanceof Error ? error.message : "Failed to reload runtime settings");
+    } finally {
+      setRuntimeSettingsLoading(false);
+    }
+  }
+
+  function changeRuntimeSetting(key: string, value: string) {
+    setRuntimeSettings((prev) => {
+      const found = prev.find((row) => row.key === key);
+      if (found) {
+        return prev.map((row) => (row.key === key ? { ...row, value } : row));
+      }
+      return [...prev, { key, value }];
+    });
   }
 
   async function runClipsProbe() {
@@ -773,6 +846,52 @@ export default function AdminPage() {
           </div>
 
           {probeMessage && <p className="text-xs text-[#c8bda0]">{probeMessage}</p>}
+          <div className="border border-[#2d2d2d] bg-[#111] p-3">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-xs font-semibold uppercase tracking-widest text-[#c8bda0]">Runtime Worker Logging</h2>
+              <div className="flex gap-2">
+                <button
+                  onClick={reloadRuntimeSettings}
+                  disabled={runtimeSettingsLoading}
+                  className="border border-[#2d2d2d] bg-[#111] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-[#c8bda0] hover:border-[#666] hover:text-[#e2d2af] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {runtimeSettingsLoading ? "Reloading..." : "Reload"}
+                </button>
+                <button
+                  onClick={saveRuntimeSettings}
+                  disabled={runtimeSettingsSaving}
+                  className="border border-[#49533a] bg-[#1a1f14] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-[#e2d2af] hover:bg-[#222a1a] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {runtimeSettingsSaving ? "Saving..." : "Save Settings"}
+                </button>
+              </div>
+            </div>
+            <p className="mt-2 text-[11px] text-[#7f7768]">
+              These values are stored in the database and picked up by workers/scripts automatically. They override env defaults.
+            </p>
+            <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {LOG_LEVEL_KEYS.map((key) => {
+                const current = runtimeSettings.find((row) => row.key === key)?.value ?? "info";
+                return (
+                  <label key={key} className="flex items-center justify-between gap-2 border border-[#1f1f1f] bg-[#0d0d0d] px-2 py-2 text-[11px] text-[#b9af95]">
+                    <span className="uppercase tracking-widest text-[#7f7768]">{key}</span>
+                    <select
+                      value={current}
+                      onChange={(event) => changeRuntimeSetting(key, event.target.value)}
+                      className="border border-[#2d2d2d] bg-[#111] px-2 py-1 text-[11px] text-[#e2d2af] focus:border-[#666] focus:outline-none"
+                    >
+                      {LOG_LEVEL_OPTIONS.map((level) => (
+                        <option key={level} value={level}>
+                          {level}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                );
+              })}
+            </div>
+            {runtimeSettingsMessage && <p className="mt-2 text-xs text-[#c8bda0]">{runtimeSettingsMessage}</p>}
+          </div>
           {(pubgStats?.totals.totalRuns ?? 0) === 0 && (
             <p className="text-xs text-[#a58f62]">
               No runs recorded yet. Use "Run Clips Probe" to force one and verify logging wiring.
