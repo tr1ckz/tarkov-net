@@ -23,6 +23,7 @@ const INTERACTION_BACKFILL_VODS = Math.max(1, Math.min(20, Number(process.env.PU
 const BACKLOG_RETRY_MINUTES = Math.max(10, Math.min(720, Number(process.env.PUBG_BACKLOG_RETRY_MINUTES ?? "60")));
 const PUBG_RATE_LIMIT_FALLBACK_MS = Math.max(15000, Math.min(300000, Number(process.env.PUBG_RATE_LIMIT_FALLBACK_MS ?? "60000")));
 const IDENTITY_VALIDATION_BATCH = Math.max(1, Math.min(500, Number(process.env.PUBG_IDENTITY_VALIDATION_BATCH ?? "120")));
+const IDENTITY_VALIDATION_NOT_FOUND_RETRY_LIMIT = Math.max(1, Math.min(10, Number(process.env.PUBG_IDENTITY_VALIDATION_NOT_FOUND_RETRY_LIMIT ?? "4")));
 
 let tokenState = null;
 let lastEventSubSyncMs = 0;
@@ -186,6 +187,36 @@ function parsePlatform(value) {
   return null;
 }
 
+async function resolveIdentityValidationCandidate(link, platform) {
+  const candidateNames = Array.from(
+    new Set([
+      String(link.pubgPlayerName || "").trim(),
+      stripGamingPrefix(String(link.pubgPlayerName || "").trim())
+    ].filter(Boolean))
+  );
+
+  for (const candidateName of candidateNames) {
+    if (link.shard) {
+      const preferred = await getPlayerWithMatches(link.shard, candidateName).catch(() => null);
+      if (preferred) {
+        return {
+          shard: link.shard,
+          playerId: preferred.playerId,
+          playerName: preferred.playerName,
+          matchCount: preferred.matchIds.length
+        };
+      }
+    }
+
+    const crossShard = await lookupPlayerAcrossShards(candidateName, platform).catch(() => null);
+    if (crossShard) {
+      return crossShard;
+    }
+  }
+
+  return null;
+}
+
 async function processIdentityValidationQueue(limit = IDENTITY_VALIDATION_BATCH) {
   const now = new Date();
 
@@ -272,15 +303,23 @@ async function processIdentityValidationQueue(limit = IDENTITY_VALIDATION_BATCH)
         continue;
       }
 
-      const resolved = await lookupPlayerAcrossShards(link.pubgPlayerName, platform).catch(() => null);
+      const resolved = await resolveIdentityValidationCandidate(link, platform);
       if (!resolved) {
-        summary.invalid += 1;
+        const notFoundShouldRetry = attempts < IDENTITY_VALIDATION_NOT_FOUND_RETRY_LIMIT;
+        if (notFoundShouldRetry) {
+          summary.retried += 1;
+        } else {
+          summary.invalid += 1;
+        }
+
+        const retryDelayMinutes = Math.min(60, 5 * Math.max(1, attempts));
         await prisma.pubgIdentityValidationQueue.update({
           where: { id: job.id },
           data: {
-            status: "invalid",
-            lastError: "player_not_found",
-            completedAt: new Date(),
+            status: notFoundShouldRetry ? "queued" : "invalid",
+            lastError: notFoundShouldRetry ? "player_not_found_retrying" : "player_not_found",
+            nextAttemptAt: notFoundShouldRetry ? new Date(Date.now() + retryDelayMinutes * 60 * 1000) : null,
+            completedAt: notFoundShouldRetry ? null : new Date(),
           }
         });
         continue;
@@ -1342,6 +1381,17 @@ function buildVodMomentDedupeKey(input) {
   ].join(":");
 }
 
+function getBacklogRetryMinutes(reason) {
+  const normalized = String(reason || "").toLowerCase();
+  if (normalized.startsWith("no_recent_matches_available_yet")) {
+    return Math.min(BACKLOG_RETRY_MINUTES, 20);
+  }
+  if (normalized.startsWith("no_match_summaries_resolved_yet")) {
+    return Math.min(BACKLOG_RETRY_MINUTES, 30);
+  }
+  return BACKLOG_RETRY_MINUTES;
+}
+
 async function runInteractionBackfill() {
   if (!INTERACTION_BACKFILL_ENABLED) {
     return {
@@ -1406,23 +1456,28 @@ async function runInteractionBackfill() {
     }
   }
 
-  const retryCutoff = new Date(Date.now() - BACKLOG_RETRY_MINUTES * 60 * 1000);
-  const prioritizedBacklog = await prisma.pubgIndexBacklog.findMany({
-    where: {
-      status: "pending",
-      OR: [
-        { lastAttemptAt: null },
-        { lastAttemptAt: { lt: retryCutoff } }
-      ]
-    },
+  const pendingBacklog = await prisma.pubgIndexBacklog.findMany({
+    where: { status: "pending" },
     orderBy: [{ attempts: "asc" }, { lastSeenAt: "desc" }],
-    take: INTERACTION_BACKFILL_STREAMERS,
+    take: INTERACTION_BACKFILL_STREAMERS * 4,
     select: {
       twitchUserId: true,
       twitchUserLogin: true,
-      twitchUserName: true
+      twitchUserName: true,
+      reason: true,
+      lastAttemptAt: true,
     }
   });
+
+  const nowMs = Date.now();
+  const prioritizedBacklog = pendingBacklog
+    .filter((row) => {
+      if (!row.lastAttemptAt) return true;
+      const retryMinutes = getBacklogRetryMinutes(row.reason);
+      const elapsedMs = nowMs - new Date(row.lastAttemptAt).getTime();
+      return elapsedMs >= retryMinutes * 60 * 1000;
+    })
+    .slice(0, INTERACTION_BACKFILL_STREAMERS);
 
   const prioritizedIds = new Set(prioritizedBacklog.map((row) => row.twitchUserId));
   const prioritizedRows = prioritizedBacklog.map((row) => {

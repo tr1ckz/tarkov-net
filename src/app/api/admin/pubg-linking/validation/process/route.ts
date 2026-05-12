@@ -10,6 +10,7 @@ import {
 } from "@/lib/pubg-api";
 
 export const dynamic = "force-dynamic";
+const IDENTITY_VALIDATION_NOT_FOUND_RETRY_LIMIT = 4;
 
 function requireAdmin(session: Session | null) {
   if (!session?.user || (session.user as { role?: string }).role !== "ADMIN") {
@@ -20,6 +21,41 @@ function requireAdmin(session: Session | null) {
 
 function parsePlatform(value: string): PubgPlatform | null {
   if (value === "steam" || value === "xbox" || value === "psn") return value;
+  return null;
+}
+
+function stripGamingPrefix(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/^(ttv|tv|yt|youtube|twitch|tt|live|stream|gaming|gamer|plays|official)[\s._-]*/g, "")
+    .replace(/[\s._-]*(ttv|tv|yt|youtube|twitch|tt|live|stream|gaming|gamer|plays|official|tv)$/g, "")
+    .replace(/\d+$/, "");
+}
+
+async function resolveIdentityValidationCandidate(input: {
+  pubgPlayerName: string;
+  shard: string;
+  platform: PubgPlatform;
+}) {
+  const candidateNames = Array.from(
+    new Set([
+      String(input.pubgPlayerName || "").trim(),
+      stripGamingPrefix(String(input.pubgPlayerName || "").trim())
+    ].filter(Boolean))
+  );
+
+  for (const candidateName of candidateNames) {
+    const resolved = await lookupPlayerAcrossShards({
+      playerName: candidateName,
+      preferredShard: input.shard,
+      platform: input.platform,
+    }).catch(() => null);
+
+    if (resolved) {
+      return resolved;
+    }
+  }
+
   return null;
 }
 
@@ -143,21 +179,29 @@ export async function POST(request: Request) {
           continue;
         }
 
-        const resolved = await lookupPlayerAcrossShards({
-          playerName: link.pubgPlayerName,
-          preferredShard: link.shard,
+        const resolved = await resolveIdentityValidationCandidate({
+          pubgPlayerName: link.pubgPlayerName,
+          shard: link.shard,
           platform,
-        }).catch(() => null);
+        });
 
         if (!resolved) {
-          invalid += 1;
-          results.push({ queueId: job.id, identityLinkId: job.identityLinkId, result: "invalid", reason: "player_not_found" });
+          const notFoundShouldRetry = attempts < IDENTITY_VALIDATION_NOT_FOUND_RETRY_LIMIT;
+          if (notFoundShouldRetry) {
+            results.push({ queueId: job.id, identityLinkId: job.identityLinkId, result: "queued", reason: "player_not_found_retrying" });
+          } else {
+            invalid += 1;
+            results.push({ queueId: job.id, identityLinkId: job.identityLinkId, result: "invalid", reason: "player_not_found" });
+          }
+
+          const retryDelayMinutes = Math.min(60, 5 * Math.max(1, attempts));
           await prisma.pubgIdentityValidationQueue.update({
             where: { id: job.id },
             data: {
-              status: "invalid",
-              lastError: "player_not_found",
-              completedAt: new Date(),
+              status: notFoundShouldRetry ? "queued" : "invalid",
+              lastError: notFoundShouldRetry ? "player_not_found_retrying" : "player_not_found",
+              nextAttemptAt: notFoundShouldRetry ? new Date(Date.now() + retryDelayMinutes * 60 * 1000) : null,
+              completedAt: notFoundShouldRetry ? null : new Date(),
             }
           });
           continue;

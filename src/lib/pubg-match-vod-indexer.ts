@@ -667,9 +667,19 @@ export async function indexStreamerMatchesAndVods(options: {
     matchErrors,
   });
 
+  const noRecentMatches = matchIds.length === 0;
+  const noResolvedSummaries = matchIds.length > 0 && matchRows.length === 0;
+  const reason = noRecentMatches
+    ? "no_recent_matches_available_yet"
+    : noResolvedSummaries && matchErrors > 0
+      ? "match_summary_fetch_failed"
+      : noResolvedSummaries
+        ? "no_match_summaries_resolved_yet"
+        : "ok";
+
   return {
-    indexed: true,
-    reason: "ok",
+    indexed: reason === "ok",
+    reason,
     matchesScanned: matchIds.length,
     matchesIndexed: matchRows.length,
     vodsIndexed: vodRows.length,
