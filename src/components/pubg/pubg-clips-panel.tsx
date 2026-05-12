@@ -38,6 +38,32 @@ type ClipsResponse = {
   error?: string;
 };
 
+const RECENT_PLAYERS_COOKIE = "pubg_recent_players";
+const MAX_RECENT_PLAYERS = 5;
+
+function readRecentPlayersCookie(): string[] {
+  if (typeof document === "undefined") return [];
+  const entry = document.cookie
+    .split("; ")
+    .find((row) => row.startsWith(`${RECENT_PLAYERS_COOKIE}=`));
+  if (!entry) return [];
+
+  try {
+    const raw = decodeURIComponent(entry.split("=")[1] ?? "[]");
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return Array.from(new Set(parsed.map((value) => String(value).trim()).filter(Boolean))).slice(0, MAX_RECENT_PLAYERS);
+  } catch {
+    return [];
+  }
+}
+
+function writeRecentPlayersCookie(players: string[]) {
+  if (typeof document === "undefined") return;
+  const payload = encodeURIComponent(JSON.stringify(players.slice(0, MAX_RECENT_PLAYERS)));
+  document.cookie = `${RECENT_PLAYERS_COOKIE}=${payload}; Max-Age=31536000; Path=/; SameSite=Lax`;
+}
+
 async function parseJsonResponse<T>(response: Response): Promise<T> {
   const raw = await response.text();
   const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
@@ -105,6 +131,7 @@ export function PubgClipsPanel() {
   const [error, setError] = useState<string | null>(null);
   const [clips, setClips] = useState<Clip[]>([]);
   const [activeClip, setActiveClip] = useState<Clip | null>(null);
+  const [recentPlayers, setRecentPlayers] = useState<string[]>([]);
   const [submitted, setSubmitted] = useState<{ mode: "encounters" | "streamer"; playerName: string; streamer: string; platform: string } | null>(null);
   const [resultMeta, setResultMeta] = useState<{
     encountersScanned?: number;
@@ -145,6 +172,8 @@ export function PubgClipsPanel() {
     } catch {
       // ignore malformed local cache
     }
+
+    setRecentPlayers(readRecentPlayersCookie());
   }, []);
 
   const query = useMemo(() => {
@@ -234,6 +263,11 @@ export function PubgClipsPanel() {
     const nextName = playerName.trim();
     if (!nextName) return;
 
+    const nextRecentPlayers = [nextName, ...recentPlayers.filter((name) => name.toLowerCase() !== nextName.toLowerCase())]
+      .slice(0, MAX_RECENT_PLAYERS);
+    setRecentPlayers(nextRecentPlayers);
+    writeRecentPlayersCookie(nextRecentPlayers);
+
     setSubmitted({
       mode: "encounters",
       playerName: nextName,
@@ -246,6 +280,28 @@ export function PubgClipsPanel() {
       JSON.stringify({
         mode: "encounters",
         playerName: nextName,
+        platform,
+      })
+    );
+  }
+
+  function runRecentPlayer(name: string) {
+    const nextRecentPlayers = [name, ...recentPlayers.filter((entry) => entry.toLowerCase() !== name.toLowerCase())]
+      .slice(0, MAX_RECENT_PLAYERS);
+    setRecentPlayers(nextRecentPlayers);
+    writeRecentPlayersCookie(nextRecentPlayers);
+    setPlayerName(name);
+    setSubmitted({
+      mode: "encounters",
+      playerName: name,
+      streamer: "",
+      platform,
+    });
+    localStorage.setItem(
+      "pubg-clips-profile",
+      JSON.stringify({
+        mode: "encounters",
+        playerName: name,
         platform,
       })
     );
@@ -323,8 +379,14 @@ export function PubgClipsPanel() {
               value={playerName}
               onChange={(e) => setPlayerName(e.target.value)}
               placeholder="your PUBG username"
+              list="pubg-player-history"
               className="sm:col-span-2 w-full border border-[#2d2d2d] bg-[#0b0b0b] px-3 py-2 text-sm text-[#e2d2af] outline-none focus:border-[#f5c842]"
             />
+            <datalist id="pubg-player-history">
+              {recentPlayers.map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
             <select
               value={platform}
               onChange={(e) => setPlatform(e.target.value)}
@@ -340,6 +402,24 @@ export function PubgClipsPanel() {
             >
               Find My Encounter Clips
             </button>
+
+            {recentPlayers.length > 0 && (
+              <div className="sm:col-span-4">
+                <p className="mb-2 text-[11px] uppercase tracking-[0.12em] text-[#7f7768]">Recent local searches</p>
+                <div className="flex flex-wrap gap-2">
+                  {recentPlayers.map((name) => (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => runRecentPlayer(name)}
+                      className="border border-[#2d2d2d] bg-[#0f0f0f] px-2 py-1 text-xs text-[#b9ad96] hover:border-[#f5c842] hover:text-[#e2d2af]"
+                    >
+                      {name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </form>
         ) : (
           <form onSubmit={onStreamerSubmit} className="mt-3 flex flex-col gap-2 sm:flex-row">
