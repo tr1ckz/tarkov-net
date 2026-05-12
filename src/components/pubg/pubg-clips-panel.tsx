@@ -24,7 +24,16 @@ type Clip = {
   sourceType?: "vod" | "clip";
   matchupText?: string;
   summaryText?: string;
-  eventTone?: "kill" | "knocked" | "death" | "knocked_by" | "neutral";
+  eventTone?:
+    | "streamer_kill"
+    | "streamer_knock"
+    | "streamer_death"
+    | "streamer_knocked_by"
+    | "teammate_kill"
+    | "teammate_knock"
+    | "teammate_death"
+    | "teammate_knocked_by"
+    | "neutral";
   eventLabel?: string;
   opponentName?: string;
   subjectName?: string;
@@ -130,33 +139,61 @@ function formatRelativeTime(iso: string) {
 
 function toneClasses(tone?: Clip["eventTone"]) {
   switch (tone) {
-    case "kill":
+    case "streamer_kill":
       return {
-        shell: "border-emerald-700/70 bg-emerald-950/35",
+        shell: "border-emerald-700/75 bg-emerald-950/35",
         title: "text-emerald-300",
-        badge: "border-emerald-700/70 bg-emerald-950/70 text-emerald-200",
+        badge: "border-emerald-700/75 bg-emerald-950/65 text-emerald-100",
         name: "text-emerald-200",
       };
-    case "knocked":
+    case "streamer_knock":
       return {
-        shell: "border-lime-700/70 bg-lime-950/35",
-        title: "text-lime-300",
-        badge: "border-lime-700/70 bg-lime-950/70 text-lime-200",
-        name: "text-lime-200",
+        shell: "border-green-700/75 bg-green-950/30",
+        title: "text-green-300",
+        badge: "border-green-700/75 bg-green-950/65 text-green-100",
+        name: "text-green-200",
       };
-    case "death":
+    case "streamer_death":
       return {
-        shell: "border-red-700/70 bg-red-950/35",
+        shell: "border-red-700/75 bg-red-950/35",
         title: "text-red-300",
-        badge: "border-red-700/70 bg-red-950/70 text-red-200",
+        badge: "border-red-700/75 bg-red-950/65 text-red-100",
         name: "text-red-200",
       };
-    case "knocked_by":
+    case "streamer_knocked_by":
       return {
-        shell: "border-rose-700/70 bg-rose-950/35",
+        shell: "border-rose-700/75 bg-rose-950/35",
         title: "text-rose-300",
-        badge: "border-rose-700/70 bg-rose-950/70 text-rose-200",
+        badge: "border-rose-700/75 bg-rose-950/65 text-rose-100",
         name: "text-rose-200",
+      };
+    case "teammate_kill":
+      return {
+        shell: "border-cyan-700/75 bg-cyan-950/30",
+        title: "text-cyan-300",
+        badge: "border-cyan-700/75 bg-cyan-950/65 text-cyan-100",
+        name: "text-cyan-200",
+      };
+    case "teammate_knock":
+      return {
+        shell: "border-teal-700/75 bg-teal-950/30",
+        title: "text-teal-300",
+        badge: "border-teal-700/75 bg-teal-950/65 text-teal-100",
+        name: "text-teal-200",
+      };
+    case "teammate_death":
+      return {
+        shell: "border-orange-700/75 bg-orange-950/30",
+        title: "text-orange-300",
+        badge: "border-orange-700/75 bg-orange-950/65 text-orange-100",
+        name: "text-orange-200",
+      };
+    case "teammate_knocked_by":
+      return {
+        shell: "border-amber-700/75 bg-amber-950/30",
+        title: "text-amber-300",
+        badge: "border-amber-700/75 bg-amber-950/65 text-amber-100",
+        name: "text-amber-200",
       };
     default:
       return {

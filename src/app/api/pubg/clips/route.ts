@@ -27,7 +27,16 @@ type PubgReportStreamEvent = {
   Mode?: string;
 };
 
-type ClipTone = "kill" | "knocked" | "death" | "knocked_by" | "neutral";
+type ClipTone =
+  | "streamer_kill"
+  | "streamer_knock"
+  | "streamer_death"
+  | "streamer_knocked_by"
+  | "teammate_kill"
+  | "teammate_knock"
+  | "teammate_death"
+  | "teammate_knocked_by"
+  | "neutral";
 
 type ClipRole = "subject" | "target";
 
@@ -91,11 +100,15 @@ function toTwitchTimecode(value: string | null | undefined) {
 }
 
 function prettifyEventType(value: string) {
+  const normalized = value.trim();
+  if (/teammate/i.test(normalized) && /(groggy|knock)/i.test(normalized)) return "Teammate Knocked Down";
+  if (/teammate/i.test(normalized) && /(kill|death)/i.test(normalized)) return "Teammate Eliminated";
+  if (/(groggy|knock)/i.test(normalized)) return "Player Knocked Down";
+  if (/(kill|death)/i.test(normalized)) return "Player Eliminated";
+
   return value
-    .replace(/^LogPlayerKillV2$/, "Player Killed")
-    .replace(/^LogPlayerKill$/, "Player Killed")
-    .replace(/^LogPlayerMakeGroggy$/, "Player Knocked Down")
     .replace(/^Log/, "")
+    .replace(/Groggy/gi, "Knocked Down")
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .trim() || "Player Event";
 }
@@ -115,8 +128,11 @@ function buildActionState(options: {
   const victim = normalizeForCompare(options.victim);
   const focusInKiller = Boolean(focus) && focus === killer;
   const focusInVictim = Boolean(focus) && focus === victim;
-  const isKill = options.eventType === "LogPlayerKill" || options.eventType === "LogPlayerKillV2";
-  const isGroggy = options.eventType === "LogPlayerMakeGroggy";
+  const normalizedType = options.eventType.toLowerCase();
+  const isTeammateEvent = normalizedType.includes("teammate");
+  const isKnock = normalizedType.includes("groggy") || normalizedType.includes("knock");
+  const isKill = normalizedType.includes("kill") || normalizedType.includes("death");
+  const opponentRole = isTeammateEvent ? "Teammate" : "Streamer";
 
   const opponentName = focusInKiller
     ? prettyName(options.victim)
@@ -131,45 +147,45 @@ function buildActionState(options: {
   let subjectName = prettyName(options.killer);
   let targetName = prettyName(options.victim);
 
-  if (isKill) {
-    eventLabel = "Player Killed";
+  if (isKill && !isKnock) {
+    eventLabel = `${opponentRole} Eliminated`;
     if (focusInKiller) {
-      tone = "kill";
+      tone = isTeammateEvent ? "teammate_kill" : "streamer_kill";
       subjectName = prettyName(options.focusName);
       targetName = opponentName;
-      summaryText = `${prettyName(options.focusName)} killed ${opponentName}`;
+      summaryText = `You killed ${opponentRole}`;
       matchupText = `${prettyName(options.focusName)} vs ${opponentName}`;
     } else if (focusInVictim) {
-      tone = "death";
+      tone = isTeammateEvent ? "teammate_death" : "streamer_death";
       subjectName = prettyName(options.killer);
       targetName = prettyName(options.focusName);
-      summaryText = `${prettyName(options.killer)} killed ${prettyName(options.focusName)}`;
+      summaryText = `Killed by ${opponentRole}`;
       matchupText = `${prettyName(options.killer)} vs ${prettyName(options.focusName)}`;
     }
   }
 
-  if (isGroggy) {
-    eventLabel = "Player Knocked Down";
+  if (isKnock) {
+    eventLabel = `${opponentRole} Knocked Down`;
     if (focusInKiller) {
-      tone = "knocked";
+      tone = isTeammateEvent ? "teammate_knock" : "streamer_knock";
       subjectName = prettyName(options.focusName);
       targetName = opponentName;
-      summaryText = `${prettyName(options.focusName)} knocked down ${opponentName}`;
+      summaryText = `You knocked down ${opponentRole}`;
       matchupText = `${prettyName(options.focusName)} vs ${opponentName}`;
     } else if (focusInVictim) {
-      tone = "knocked_by";
+      tone = isTeammateEvent ? "teammate_knocked_by" : "streamer_knocked_by";
       subjectName = prettyName(options.killer);
       targetName = prettyName(options.focusName);
-      summaryText = `${prettyName(options.killer)} knocked down ${prettyName(options.focusName)}`;
+      summaryText = `Knocked down by ${opponentRole}`;
       matchupText = `${prettyName(options.killer)} vs ${prettyName(options.focusName)}`;
     }
   }
 
   if (!focusInKiller && !focusInVictim) {
-    summaryText = isKill
-      ? `${prettyName(options.killer)} killed ${prettyName(options.victim)}`
-      : isGroggy
-        ? `${prettyName(options.killer)} knocked down ${prettyName(options.victim)}`
+    summaryText = isKnock
+      ? `${prettyName(options.killer)} knocked down ${prettyName(options.victim)}`
+      : isKill
+        ? `${prettyName(options.killer)} eliminated ${prettyName(options.victim)}`
         : `${prettyName(options.killer)} vs ${prettyName(options.victim)}`;
     matchupText = `${prettyName(options.killer)} vs ${prettyName(options.victim)}`;
   }
