@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, useCallback, useEffect } from "react";
+import { useMemo, useRef, useState, useCallback, useEffect, type CSSProperties } from "react";
 import type { PubgMapIntel, PubgMapMarker } from "@/lib/pubg-data";
 import { pubgImportedMarkersBySlug } from "@/lib/pubg-map-pois";
 
@@ -55,12 +55,12 @@ function fallbackColorForCategory(type: string) {
   return `#${normalized.toString(16).padStart(6, "0")}`;
 }
 
-function MarkerIcon({ type, className }: { type: string; className?: string }) {
+function MarkerIcon({ type, className, style }: { type: string; className?: string; style?: CSSProperties }) {
   const normalized = type.toLowerCase();
 
   if (normalized.includes("secret-room")) {
     return (
-      <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <svg viewBox="0 0 24 24" className={className} style={style} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <path d="M7 3h10v18H7z" />
         <path d="M10 7h4" />
         <circle cx="13" cy="13" r="1" fill="currentColor" stroke="none" />
@@ -70,7 +70,7 @@ function MarkerIcon({ type, className }: { type: string; className?: string }) {
 
   if (normalized.includes("secret-key")) {
     return (
-      <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <svg viewBox="0 0 24 24" className={className} style={style} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <circle cx="8" cy="12" r="3" />
         <path d="M11 12h8" />
         <path d="M16 12v3" />
@@ -81,7 +81,7 @@ function MarkerIcon({ type, className }: { type: string; className?: string }) {
 
   if (normalized.includes("vehicle") || normalized.includes("route") || normalized.includes("glider")) {
     return (
-      <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <svg viewBox="0 0 24 24" className={className} style={style} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <circle cx="12" cy="12" r="7" />
         <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
         <path d="M12 10V5" />
@@ -93,14 +93,14 @@ function MarkerIcon({ type, className }: { type: string; className?: string }) {
 
   if (normalized.includes("hot") || normalized.includes("drop")) {
     return (
-      <svg viewBox="0 0 24 24" className={className} fill="currentColor" stroke="none" aria-hidden>
+      <svg viewBox="0 0 24 24" className={className} style={style} fill="currentColor" stroke="none" aria-hidden>
         <path d="M12 2C9.3 5.6 6.2 8 6.2 12.4A5.8 5.8 0 0012 18.2a5.8 5.8 0 005.8-5.8c0-3.8-2.5-6.1-5.8-10.4zm0 7.3c1.5 1.7 2.5 2.9 2.5 4.3A2.5 2.5 0 019.5 13.6c0-1.3.8-2.4 2.5-4.3z" />
       </svg>
     );
   }
 
   return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <svg viewBox="0 0 24 24" className={className} style={style} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="M12 3l6 6-6 12L6 9z" fill="currentColor" stroke="none" />
     </svg>
   );
@@ -722,6 +722,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
 
   // marker size inversely scales with zoom so they don't get huge
   const markerSize = Math.max(14, 22 - zoom * 2);
+  const markerIconSize = Math.max(8, markerSize - 6);
 
   return (
     <div className="space-y-4">
@@ -905,6 +906,10 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
                   width: markerSize,
                   height: markerSize,
                   transform: `translate(-50%, -50%) ${isActive ? "scale(1.35)" : ""}`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  overflow: "hidden",
                   background: mapTheme === "dark" ? "rgba(8,8,8,0.16)" : "rgba(255,255,255,0.16)",
                   border: `2px solid ${color}`,
                   boxShadow: isActive
@@ -914,7 +919,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
                   color,
                 }}
               >
-                <MarkerIcon type={marker.type} className="h-[62%] w-[62%]" />
+                <MarkerIcon type={marker.type} className="shrink-0" style={{ width: markerIconSize, height: markerIconSize }} />
               </button>
             );
           })}
