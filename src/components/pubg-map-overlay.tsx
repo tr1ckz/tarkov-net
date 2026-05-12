@@ -301,31 +301,43 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
 
   useEffect(() => {
     setActiveTypes((prev) => {
+      let changed = false;
       const next = { ...prev };
       for (const key of categoryKeys) {
-        if (typeof next[key] === "undefined") next[key] = true;
+        if (typeof next[key] === "undefined") {
+          next[key] = true;
+          changed = true;
+        }
       }
-      return next;
+      return changed ? next : prev;
     });
   }, [categoryKeys]);
 
   useEffect(() => {
     setCategoryLabels((prev) => {
+      let changed = false;
       const next = { ...prev };
       for (const key of categoryKeys) {
-        if (!next[key]) next[key] = DEFAULT_CATEGORY_LABELS[key] ?? humanizeCategory(key);
+        if (!next[key]) {
+          next[key] = DEFAULT_CATEGORY_LABELS[key] ?? humanizeCategory(key);
+          changed = true;
+        }
       }
-      return next;
+      return changed ? next : prev;
     });
   }, [categoryKeys]);
 
   useEffect(() => {
     setPalette((prev) => {
+      let changed = false;
       const next = { ...prev };
       for (const key of categoryKeys) {
-        if (!next[key]) next[key] = fallbackColorForCategory(key);
+        if (!next[key]) {
+          next[key] = fallbackColorForCategory(key);
+          changed = true;
+        }
       }
-      return next;
+      return changed ? next : prev;
     });
   }, [categoryKeys]);
 
@@ -335,7 +347,18 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
     const width = el.clientWidth;
     const height = el.clientHeight;
     if (width <= 0 || height <= 0) return;
-    setRenderBox(computeRenderBox(width, height, imageRatio));
+    const next = computeRenderBox(width, height, imageRatio);
+    setRenderBox((prev) => {
+      if (
+        prev.left === next.left &&
+        prev.top === next.top &&
+        prev.width === next.width &&
+        prev.height === next.height
+      ) {
+        return prev;
+      }
+      return next;
+    });
   }, [imageRatio]);
 
   useEffect(() => {
