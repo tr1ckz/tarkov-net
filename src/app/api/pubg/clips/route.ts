@@ -41,6 +41,9 @@ function parseBoundedInt(raw: string | null, fallback: number, min: number, max:
 }
 
 function platformFromShard(shard: string): "steam" | "xbox" | "psn" | null {
+  if (shard === "steam" || shard === "xbox" || shard === "psn") {
+    return shard;
+  }
   if (shard.startsWith("pc-")) return "steam";
   if (shard.startsWith("xbox-")) return "xbox";
   if (shard.startsWith("psn-")) return "psn";
@@ -118,14 +121,16 @@ async function resolvePubgReportAccount(input: {
         if (!id || !shard || !playerName || !platform) return null;
         return { id, shard, playerName, platform };
       })
-      .filter((row): row is { id: string; shard: string; playerName: string; platform: "steam" | "xbox" | "psn" } => Boolean(row))
-      .filter((row) => row.platform === input.platform);
+      .filter((row): row is { id: string; shard: string; playerName: string; platform: "steam" | "xbox" | "psn" } => Boolean(row));
 
     if (!supported.length) continue;
 
+    const platformScoped = supported.filter((row) => row.platform === input.platform);
+    const pool = platformScoped.length ? platformScoped : supported;
+
     const normalizedQuery = normalizeForCompare(query);
-    const exact = supported.find((row) => normalizeForCompare(row.playerName) === normalizedQuery);
-    return exact ?? supported[0];
+    const exact = pool.find((row) => normalizeForCompare(row.playerName) === normalizedQuery);
+    return exact ?? pool[0];
   }
 
   return null;
