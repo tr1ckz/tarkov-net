@@ -232,8 +232,9 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
   const dragStart = useRef({ mx: 0, my: 0, px: 0, py: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
   const markerNodeRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-  // Track final drag position without forcing React re-renders on every mouse move.
-  const draggedMarkerCoords = useRef<{ rawX: number; rawY: number } | null>(null);
+  const draggedMarkerRawX = useRef<number | null>(null);
+  const draggedMarkerRawY = useRef<number | null>(null);
+  const dragPaintFrameId = useRef<number | null>(null);
 
   const mergedMarkers = useMemo(() => {
     const existingSecretKeys = new Set(
@@ -653,14 +654,22 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
       const coords = getPointerCoords(e.clientX, e.clientY);
       if (!coords) return;
       movedMarkerDuringDrag.current = true;
-      draggedMarkerCoords.current = { rawX: coords.rawX, rawY: coords.rawY };
+      draggedMarkerRawX.current = coords.rawX;
+      draggedMarkerRawY.current = coords.rawY;
 
-      const markerId = draggingMarkerId.current;
-      const node = markerNodeRefs.current[markerId];
-      if (node) {
-        const calibrated = applyCalibration(coords.rawX, coords.rawY, calibration);
-        node.style.left = `${renderBox.left + (calibrated.x / 100) * renderBox.width}px`;
-        node.style.top = `${renderBox.top + (calibrated.y / 100) * renderBox.height}px`;
+      if (dragPaintFrameId.current === null) {
+        dragPaintFrameId.current = window.requestAnimationFrame(() => {
+          dragPaintFrameId.current = null;
+          const markerId = draggingMarkerId.current;
+          const rawX = draggedMarkerRawX.current;
+          const rawY = draggedMarkerRawY.current;
+          if (!markerId || rawX === null || rawY === null) return;
+          const node = markerNodeRefs.current[markerId];
+          if (!node) return;
+          const calibrated = applyCalibration(rawX, rawY, calibration);
+          node.style.left = `${renderBox.left + (calibrated.x / 100) * renderBox.width}px`;
+          node.style.top = `${renderBox.top + (calibrated.y / 100) * renderBox.height}px`;
+        });
       }
       return;
     }
@@ -675,19 +684,26 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
   const onMouseUp = useCallback(() => {
     dragging.current = false;
 
+    if (dragPaintFrameId.current !== null) {
+      window.cancelAnimationFrame(dragPaintFrameId.current);
+      dragPaintFrameId.current = null;
+    }
+
     if (adminMode && draggingMarkerId.current) {
       const moved = movedMarkerDuringDrag.current;
       const markerId = draggingMarkerId.current;
-      const coords = draggedMarkerCoords.current;
+      const rawX = draggedMarkerRawX.current;
+      const rawY = draggedMarkerRawY.current;
 
       draggingMarkerId.current = null;
       movedMarkerDuringDrag.current = false;
-      draggedMarkerCoords.current = null;
+      draggedMarkerRawX.current = null;
+      draggedMarkerRawY.current = null;
 
-      if (moved && coords) {
+      if (moved && rawX !== null && rawY !== null) {
         const nextMarkers = markersRef.current.map((marker) =>
           marker.id === markerId
-            ? { ...marker, x: coords.rawX, y: coords.rawY }
+            ? { ...marker, x: rawX, y: rawY }
             : marker
         );
         setEditableMarkers(nextMarkers);
@@ -722,7 +738,12 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
     if (!el) return;
     const handler = (e: WheelEvent) => e.preventDefault();
     el.addEventListener("wheel", handler, { passive: false });
-    return () => el.removeEventListener("wheel", handler);
+    return () => {
+      el.removeEventListener("wheel", handler);
+      if (dragPaintFrameId.current !== null) {
+        window.cancelAnimationFrame(dragPaintFrameId.current);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -923,7 +944,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
                   setActiveMarkerId(isActive ? null : marker.id);
                 }}
                 title={marker.label}
-                className="absolute rounded-full transition-transform hover:scale-125"
+                className={adminMode ? "absolute rounded-full" : "absolute rounded-full transition-transform hover:scale-125"}
                 style={{
                   left: `${renderBox.left + (calibrated.x / 100) * renderBox.width}px`,
                   top: `${renderBox.top + (calibrated.y / 100) * renderBox.height}px`,
