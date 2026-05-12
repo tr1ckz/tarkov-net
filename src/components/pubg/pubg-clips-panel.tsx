@@ -27,6 +27,8 @@ type Clip = {
   eventTone?: "kill" | "knocked" | "death" | "knocked_by" | "neutral";
   eventLabel?: string;
   opponentName?: string;
+  subjectName?: string;
+  targetName?: string;
 };
 
 type ClipsResponse = {
@@ -190,6 +192,11 @@ function decorateSummaryText(text: string, submitted: { mode: "encounters" | "st
   if (!focus) return text;
   const replacement = displayFocusLabel(submitted);
   return text.replace(new RegExp(`\\b${escapeRegExp(focus)}\\b`, "gi"), replacement);
+}
+
+function formatParticipantName(name: string | undefined, submitted: { mode: "encounters" | "streamer"; playerName: string; streamer: string } | null) {
+  if (!name) return "Unknown";
+  return labelFromName(name, submitted);
 }
 
 export function PubgClipsPanel() {
@@ -585,7 +592,7 @@ export function PubgClipsPanel() {
                   {clip.eventLabel || clip.title || "Player Event"}
                 </p>
                 <p className={`mt-2 text-[12px] font-medium uppercase tracking-[0.14em] ${classes.name}`}>
-                  {labelFromName(clip.matchupText?.split(" vs ")[0] || clip.broadcaster_name, submitted)} vs {labelFromName(clip.matchupText?.split(" vs ")[1] || clip.creator_name, submitted)}
+                  {formatParticipantName(clip.subjectName || clip.broadcaster_name, submitted)} vs {formatParticipantName(clip.targetName || clip.creator_name, submitted)}
                 </p>
                 {clip.summaryText && (
                   <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[#d6b376]">
@@ -644,10 +651,8 @@ export function PubgClipsPanel() {
           >
             {(() => {
               const classes = toneClasses(activeClip.eventTone);
-              const focusName = displayFocusLabel(submitted);
-              const matchupParts = (activeClip.matchupText ?? "").split(" vs ");
-              const leftName = labelFromName(matchupParts[0] || activeClip.broadcaster_name, submitted);
-              const rightName = labelFromName(matchupParts[1] || activeClip.creator_name, submitted);
+              const leftName = formatParticipantName(activeClip.subjectName || activeClip.broadcaster_name, submitted);
+              const rightName = formatParticipantName(activeClip.targetName || activeClip.creator_name, submitted);
               const summaryText = activeClip.summaryText ? decorateSummaryText(activeClip.summaryText, submitted) : "";
 
               return (
@@ -693,7 +698,7 @@ export function PubgClipsPanel() {
 
             <div className="flex items-center justify-between border-t border-[#2d2d2d] px-4 py-3">
               <p className={`text-xs uppercase tracking-[0.1em] ${classes.name}`}>
-                {focusName} vs {rightName}
+                {leftName} vs {rightName}
               </p>
               <div className="flex gap-2">
                 <button

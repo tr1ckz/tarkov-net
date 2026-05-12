@@ -29,6 +29,8 @@ type PubgReportStreamEvent = {
 
 type ClipTone = "kill" | "knocked" | "death" | "knocked_by" | "neutral";
 
+type ClipRole = "subject" | "target";
+
 type TwitchVideosPayload = {
   data?: Array<{
     id?: string;
@@ -126,15 +128,21 @@ function buildActionState(options: {
   let eventLabel = prettifyEventType(options.eventType);
   let summaryText = `${prettyName(options.killer)} vs ${prettyName(options.victim)}`;
   let matchupText = `${prettyName(options.killer)} vs ${prettyName(options.victim)}`;
+  let subjectName = prettyName(options.killer);
+  let targetName = prettyName(options.victim);
 
   if (isKill) {
     eventLabel = "Player Killed";
     if (focusInKiller) {
       tone = "kill";
+      subjectName = prettyName(options.focusName);
+      targetName = opponentName;
       summaryText = `${prettyName(options.focusName)} killed ${opponentName}`;
       matchupText = `${prettyName(options.focusName)} vs ${opponentName}`;
     } else if (focusInVictim) {
       tone = "death";
+      subjectName = prettyName(options.killer);
+      targetName = prettyName(options.focusName);
       summaryText = `${prettyName(options.killer)} killed ${prettyName(options.focusName)}`;
       matchupText = `${prettyName(options.killer)} vs ${prettyName(options.focusName)}`;
     }
@@ -144,10 +152,14 @@ function buildActionState(options: {
     eventLabel = "Player Knocked Down";
     if (focusInKiller) {
       tone = "knocked";
+      subjectName = prettyName(options.focusName);
+      targetName = opponentName;
       summaryText = `${prettyName(options.focusName)} knocked down ${opponentName}`;
       matchupText = `${prettyName(options.focusName)} vs ${opponentName}`;
     } else if (focusInVictim) {
       tone = "knocked_by";
+      subjectName = prettyName(options.killer);
+      targetName = prettyName(options.focusName);
       summaryText = `${prettyName(options.killer)} knocked down ${prettyName(options.focusName)}`;
       matchupText = `${prettyName(options.killer)} vs ${prettyName(options.focusName)}`;
     }
@@ -168,6 +180,8 @@ function buildActionState(options: {
     summaryText,
     matchupText,
     opponentName,
+    subjectName,
+    targetName,
   };
 }
 
@@ -358,6 +372,8 @@ function mapPubgReportEventsToClips(
       eventTone: actionState.tone,
       eventLabel: actionState.eventLabel,
       opponentName: actionState.opponentName,
+      subjectName: actionState.subjectName,
+      targetName: actionState.targetName,
       encounterWeapon: event.DamageCauser ? String(event.DamageCauser) : null,
       encounterDistanceMeters: event.Distance ? Number(event.Distance) : null,
       mapTag: event.Map ? String(event.Map) : null,
