@@ -253,6 +253,7 @@ export function PubgClipsPanel() {
   const [copiedClipId, setCopiedClipId] = useState<string | null>(null);
   const [recentPlayers, setRecentPlayers] = useState<string[]>([]);
   const [submitted, setSubmitted] = useState<{ mode: "encounters" | "streamer"; playerName: string; streamer: string; platform: string } | null>(null);
+  const [urlStateReady, setUrlStateReady] = useState(false);
   const [resultMeta, setResultMeta] = useState<{
     encountersScanned?: number;
     debug?: {
@@ -303,6 +304,7 @@ export function PubgClipsPanel() {
         streamer: "",
         platform: urlPlatform,
       });
+      setUrlStateReady(true);
       return;
     }
 
@@ -318,6 +320,7 @@ export function PubgClipsPanel() {
       }
       setActiveMode("streamer");
       if (urlPlatform) setPlatform(urlPlatform);
+      setUrlStateReady(true);
       return;
     }
 
@@ -350,7 +353,14 @@ export function PubgClipsPanel() {
     } catch {
       // ignore malformed local cache
     }
+
+    setUrlStateReady(true);
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!urlStateReady) return;
+    updateUrlFromSubmission(submitted);
+  }, [submitted, urlStateReady]);
 
   const query = useMemo(() => {
     if (!submitted) return "";
@@ -454,12 +464,6 @@ export function PubgClipsPanel() {
       streamer: "",
       platform,
     });
-    updateUrlFromSubmission({
-      mode: "encounters",
-      playerName: nextName,
-      streamer: "",
-      platform,
-    });
 
     localStorage.setItem(
       "pubg-clips-profile",
@@ -478,12 +482,6 @@ export function PubgClipsPanel() {
     writeRecentPlayersCookie(nextRecentPlayers);
     setPlayerName(name);
     setSubmitted({
-      mode: "encounters",
-      playerName: name,
-      streamer: "",
-      platform,
-    });
-    updateUrlFromSubmission({
       mode: "encounters",
       playerName: name,
       streamer: "",
@@ -510,12 +508,6 @@ export function PubgClipsPanel() {
       streamer: nextName,
       platform,
     });
-    updateUrlFromSubmission({
-      mode: "streamer",
-      playerName: "",
-      streamer: nextName,
-      platform,
-    });
 
     localStorage.setItem(
       "pubg-clips-profile",
@@ -536,7 +528,6 @@ export function PubgClipsPanel() {
     setResultMeta(null);
     setError(null);
     localStorage.removeItem("pubg-clips-profile");
-    updateUrlFromSubmission(null);
   }
 
   async function copyClipLink() {

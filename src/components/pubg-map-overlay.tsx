@@ -277,8 +277,8 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
   }, [map.markers, map.secretRooms, map.slug]);
 
   const visibleMarkers = useMemo(
-    () => editableMarkers.filter((m) => activeTypes[m.type]),
-    [editableMarkers, activeTypes]
+    () => editableMarkers.filter((m) => !hiddenCategories.includes(m.type) && activeTypes[m.type]),
+    [editableMarkers, activeTypes, hiddenCategories]
   );
 
   const activeMarker = visibleMarkers.find((m) => m.id === activeMarkerId) ?? null;
