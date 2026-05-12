@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 type Clip = {
   id: string;
@@ -237,6 +238,9 @@ function formatParticipantName(name: string | undefined, submitted: { mode: "enc
 }
 
 export function PubgClipsPanel() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [activeMode, setActiveMode] = useState<"encounters" | "streamer">("encounters");
   const [playerName, setPlayerName] = useState("");
   const [streamerLogin, setStreamerLogin] = useState("");
@@ -258,7 +262,59 @@ export function PubgClipsPanel() {
     };
   } | null>(null);
 
+  function updateUrlFromSubmission(nextSubmitted: { mode: "encounters" | "streamer"; playerName: string; streamer: string; platform: string } | null) {
+    const params = new URLSearchParams();
+
+    if (nextSubmitted) {
+      params.set("mode", nextSubmitted.mode);
+      if (nextSubmitted.mode === "encounters") {
+        params.set("playerName", nextSubmitted.playerName);
+        params.set("platform", nextSubmitted.platform);
+      } else {
+        params.set("streamer", nextSubmitted.streamer);
+      }
+    }
+
+    const queryString = params.toString();
+    router.replace(queryString ? `${pathname}?${queryString}` : pathname, { scroll: false });
+  }
+
   useEffect(() => {
+    setRecentPlayers(readRecentPlayersCookie());
+
+    const urlMode = searchParams.get("mode")?.trim();
+    const urlPlayerName = searchParams.get("playerName")?.trim() ?? "";
+    const urlStreamer = searchParams.get("streamer")?.trim().toLowerCase() ?? "";
+    const urlPlatform = searchParams.get("platform")?.trim().toLowerCase() || "steam";
+
+    if (urlPlayerName) {
+      setActiveMode("encounters");
+      setPlayerName(urlPlayerName);
+      setPlatform(urlPlatform);
+      setSubmitted({
+        mode: "encounters",
+        playerName: urlPlayerName,
+        streamer: "",
+        platform: urlPlatform,
+      });
+      return;
+    }
+
+    if (urlStreamer || urlMode === "streamer") {
+      if (urlStreamer) {
+        setStreamerLogin(urlStreamer);
+        setSubmitted({
+          mode: "streamer",
+          playerName: "",
+          streamer: urlStreamer,
+          platform: urlPlatform,
+        });
+      }
+      setActiveMode("streamer");
+      if (urlPlatform) setPlatform(urlPlatform);
+      return;
+    }
+
     const saved = localStorage.getItem("pubg-clips-profile");
     if (!saved) return;
 
@@ -288,9 +344,7 @@ export function PubgClipsPanel() {
     } catch {
       // ignore malformed local cache
     }
-
-    setRecentPlayers(readRecentPlayersCookie());
-  }, []);
+  }, [searchParams]);
 
   const query = useMemo(() => {
     if (!submitted) return "";
@@ -394,6 +448,12 @@ export function PubgClipsPanel() {
       streamer: "",
       platform,
     });
+    updateUrlFromSubmission({
+      mode: "encounters",
+      playerName: nextName,
+      streamer: "",
+      platform,
+    });
 
     localStorage.setItem(
       "pubg-clips-profile",
@@ -412,6 +472,12 @@ export function PubgClipsPanel() {
     writeRecentPlayersCookie(nextRecentPlayers);
     setPlayerName(name);
     setSubmitted({
+      mode: "encounters",
+      playerName: name,
+      streamer: "",
+      platform,
+    });
+    updateUrlFromSubmission({
       mode: "encounters",
       playerName: name,
       streamer: "",
@@ -438,6 +504,12 @@ export function PubgClipsPanel() {
       streamer: nextName,
       platform,
     });
+    updateUrlFromSubmission({
+      mode: "streamer",
+      playerName: "",
+      streamer: nextName,
+      platform,
+    });
 
     localStorage.setItem(
       "pubg-clips-profile",
@@ -458,6 +530,7 @@ export function PubgClipsPanel() {
     setResultMeta(null);
     setError(null);
     localStorage.removeItem("pubg-clips-profile");
+    updateUrlFromSubmission(null);
   }
 
   async function copyClipLink() {
@@ -631,9 +704,6 @@ export function PubgClipsPanel() {
                 <p className={`mt-2 text-[11px] uppercase tracking-[0.16em] ${classes.name}`}>
                   {formatParticipantName(clip.subjectName || clip.broadcaster_name, submitted)} vs {formatParticipantName(clip.targetName || clip.creator_name, submitted)}
                 </p>
-                <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[#d6b376]">
-                  {clip.eventLabel || clip.title || "Player Event"}
-                </p>
                 {clip.sourceType && (
                   <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[#6f675a]">
                     Source: {clip.sourceType === "vod" ? "VOD Moment" : "Clip"}
@@ -652,9 +722,7 @@ export function PubgClipsPanel() {
                     {typeof clip.encounterDistanceMeters === "number" ? ` · Distance: ${clip.encounterDistanceMeters}m` : ""}
                   </p>
                 )}
-                <p className="mt-1 text-[11px] text-[#7f7768]">
-                  {clip.view_count.toLocaleString()} views · {formatRelativeTime(clip.created_at)}
-                </p>
+                <p className="mt-1 text-[11px] text-[#7f7768]">{formatRelativeTime(clip.created_at)}</p>
               </div>
             </button>
               );
@@ -699,9 +767,6 @@ export function PubgClipsPanel() {
                 </p>
                 <p className="mt-1 text-[11px] uppercase tracking-[0.16em] text-[#b9ad96]">
                   {leftName} vs {rightName}
-                </p>
-                <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[#d6b376]">
-                  {activeClip.eventLabel || activeClip.title || "Player Event"}
                 </p>
               </div>
               <button

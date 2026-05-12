@@ -798,14 +798,8 @@ export default function AdminPage() {
           <p className="text-[10px] uppercase tracking-widest text-[#555]">Auto-refresh: stats 15s, jobs 10s, log tail 5s while this tab is open.</p>
 
           <a
-            href="/admin/pubg-api-metrics"
-            className="inline-block rounded border border-[#c8a96e]/40 bg-[#1a1508] px-3 py-1.5 text-xs font-medium text-[#c8a96e] hover:border-[#c8a96e]"
-          >
-            View PUBG API Call Metrics →
-          </a>
-          <a
             href="/admin/pubg-discovery"
-            className="ml-2 inline-block rounded border border-[#4f6f43]/40 bg-[#11180f] px-3 py-1.5 text-xs font-medium text-[#96c089] hover:border-[#96c089]"
+            className="inline-block rounded border border-[#4f6f43]/40 bg-[#11180f] px-3 py-1.5 text-xs font-medium text-[#96c089] hover:border-[#96c089]"
           >
             View PUBG Discovery Dashboard →
           </a>
