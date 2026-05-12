@@ -27,6 +27,8 @@ type PubgReportStreamEvent = {
   Mode?: string;
 };
 
+type ClipTone = "kill" | "knocked" | "death" | "knocked_by" | "neutral";
+
 type TwitchVideosPayload = {
   data?: Array<{
     id?: string;
@@ -88,9 +90,85 @@ function toTwitchTimecode(value: string | null | undefined) {
 
 function prettifyEventType(value: string) {
   return value
+    .replace(/^LogPlayerKillV2$/, "Player Killed")
+    .replace(/^LogPlayerKill$/, "Player Killed")
+    .replace(/^LogPlayerMakeGroggy$/, "Player Knocked Down")
     .replace(/^Log/, "")
     .replace(/([a-z])([A-Z])/g, "$1 $2")
-    .trim() || "Encounter";
+    .trim() || "Player Event";
+}
+
+function prettyName(value: string) {
+  return value.trim() || "Unknown";
+}
+
+function buildActionState(options: {
+  focusName: string;
+  killer: string;
+  victim: string;
+  eventType: string;
+}) {
+  const focus = normalizeForCompare(options.focusName);
+  const killer = normalizeForCompare(options.killer);
+  const victim = normalizeForCompare(options.victim);
+  const focusInKiller = Boolean(focus) && focus === killer;
+  const focusInVictim = Boolean(focus) && focus === victim;
+  const isKill = options.eventType === "LogPlayerKill" || options.eventType === "LogPlayerKillV2";
+  const isGroggy = options.eventType === "LogPlayerMakeGroggy";
+
+  const opponentName = focusInKiller
+    ? prettyName(options.victim)
+    : focusInVictim
+      ? prettyName(options.killer)
+      : prettyName(options.victim || options.killer);
+
+  let tone: ClipTone = "neutral";
+  let eventLabel = prettifyEventType(options.eventType);
+  let summaryText = `${prettyName(options.killer)} vs ${prettyName(options.victim)}`;
+  let matchupText = `${prettyName(options.killer)} vs ${prettyName(options.victim)}`;
+
+  if (isKill) {
+    eventLabel = "Player Killed";
+    if (focusInKiller) {
+      tone = "kill";
+      summaryText = `${prettyName(options.focusName)} killed ${opponentName}`;
+      matchupText = `${prettyName(options.focusName)} vs ${opponentName}`;
+    } else if (focusInVictim) {
+      tone = "death";
+      summaryText = `${prettyName(options.killer)} killed ${prettyName(options.focusName)}`;
+      matchupText = `${prettyName(options.killer)} vs ${prettyName(options.focusName)}`;
+    }
+  }
+
+  if (isGroggy) {
+    eventLabel = "Player Knocked Down";
+    if (focusInKiller) {
+      tone = "knocked";
+      summaryText = `${prettyName(options.focusName)} knocked down ${opponentName}`;
+      matchupText = `${prettyName(options.focusName)} vs ${opponentName}`;
+    } else if (focusInVictim) {
+      tone = "knocked_by";
+      summaryText = `${prettyName(options.killer)} knocked down ${prettyName(options.focusName)}`;
+      matchupText = `${prettyName(options.killer)} vs ${prettyName(options.focusName)}`;
+    }
+  }
+
+  if (!focusInKiller && !focusInVictim) {
+    summaryText = isKill
+      ? `${prettyName(options.killer)} killed ${prettyName(options.victim)}`
+      : isGroggy
+        ? `${prettyName(options.killer)} knocked down ${prettyName(options.victim)}`
+        : `${prettyName(options.killer)} vs ${prettyName(options.victim)}`;
+    matchupText = `${prettyName(options.killer)} vs ${prettyName(options.victim)}`;
+  }
+
+  return {
+    tone,
+    eventLabel,
+    summaryText,
+    matchupText,
+    opponentName,
+  };
 }
 
 async function fetchJsonWithTimeout<T>(url: string, timeoutMs = 12000): Promise<T> {
@@ -244,22 +322,20 @@ function mapPubgReportEventsToClips(
     const killer = String(event.Killer || "").trim();
     const victim = String(event.Victim || "").trim();
     const eventType = String(event.Event || "encounter").trim();
-    const encounterWith = victim || killer || playerName || "Unknown";
     const createdAt = event.TimeEvent && !Number.isNaN(Date.parse(event.TimeEvent))
       ? new Date(event.TimeEvent).toISOString()
       : new Date().toISOString();
     const timecode = toTwitchTimecode(event.TimeDiff);
-    const prettyEventType = prettifyEventType(eventType);
     const fallbackThumbnailUrl = twitchUserId
       ? `https://static-cdn.jtvnw.net/s3_vods/${twitchUserId}/${videoId}/thumb/thumb0-320x180.jpg`
       : "/pubg.avif";
     const thumbnailUrl = thumbnailByVideoId.get(videoId) || fallbackThumbnailUrl;
-
-    const actionText = normalizedPlayer && normalizeForCompare(killer) === normalizedPlayer
-      ? `YOU ${eventType} ${victim || "an opponent"}`
-      : normalizedPlayer && normalizeForCompare(victim) === normalizedPlayer
-        ? `${killer || "Opponent"} ${eventType} YOU`
-        : `${killer || "Player"} ${eventType} ${victim || "opponent"}`;
+    const actionState = buildActionState({
+      focusName: playerName || "",
+      killer,
+      victim,
+      eventType,
+    });
 
     rows.push({
       id: `pubg-report-${eventId}`,
@@ -272,14 +348,16 @@ function mapPubgReportEventsToClips(
       video_id: videoId,
       game_id: "27971",
       language: "",
-      title: prettyEventType,
+      title: actionState.eventLabel,
       view_count: 0,
       created_at: createdAt,
       thumbnail_url: thumbnailUrl,
       duration: 0,
-      encounterWith,
-      encounterActionText: actionText,
-      encounterActionType: eventType || "encounter",
+      matchupText: actionState.matchupText,
+      summaryText: actionState.summaryText,
+      eventTone: actionState.tone,
+      eventLabel: actionState.eventLabel,
+      opponentName: actionState.opponentName,
       encounterWeapon: event.DamageCauser ? String(event.DamageCauser) : null,
       encounterDistanceMeters: event.Distance ? Number(event.Distance) : null,
       mapTag: event.Map ? String(event.Map) : null,

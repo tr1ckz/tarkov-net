@@ -22,6 +22,11 @@ type Clip = {
   teamSizeModeTag?: string | null;
   povTag?: string | null;
   sourceType?: "vod" | "clip";
+  matchupText?: string;
+  summaryText?: string;
+  eventTone?: "kill" | "knocked" | "death" | "knocked_by" | "neutral";
+  eventLabel?: string;
+  opponentName?: string;
 };
 
 type ClipsResponse = {
@@ -121,6 +126,72 @@ function formatRelativeTime(iso: string) {
   return `${days}d ago`;
 }
 
+function toneClasses(tone?: Clip["eventTone"]) {
+  switch (tone) {
+    case "kill":
+      return {
+        shell: "border-emerald-700/70 bg-emerald-950/35",
+        title: "text-emerald-300",
+        badge: "border-emerald-700/70 bg-emerald-950/70 text-emerald-200",
+        name: "text-emerald-200",
+      };
+    case "knocked":
+      return {
+        shell: "border-lime-700/70 bg-lime-950/35",
+        title: "text-lime-300",
+        badge: "border-lime-700/70 bg-lime-950/70 text-lime-200",
+        name: "text-lime-200",
+      };
+    case "death":
+      return {
+        shell: "border-red-700/70 bg-red-950/35",
+        title: "text-red-300",
+        badge: "border-red-700/70 bg-red-950/70 text-red-200",
+        name: "text-red-200",
+      };
+    case "knocked_by":
+      return {
+        shell: "border-rose-700/70 bg-rose-950/35",
+        title: "text-rose-300",
+        badge: "border-rose-700/70 bg-rose-950/70 text-rose-200",
+        name: "text-rose-200",
+      };
+    default:
+      return {
+        shell: "border-[#2d2d2d] bg-[#111]",
+        title: "text-[#e2d2af]",
+        badge: "border-[#2d2d2d] bg-[#0f0f0f] text-[#9a9080]",
+        name: "text-[#e2d2af]",
+      };
+  }
+}
+
+function displayFocusLabel(submitted: { mode: "encounters" | "streamer"; playerName: string; streamer: string } | null) {
+  if (!submitted) return "Player";
+  return submitted.mode === "streamer" ? submitted.streamer || "Streamer" : "You";
+}
+
+function labelFromName(name: string, submitted: { mode: "encounters" | "streamer"; playerName: string; streamer: string } | null) {
+  if (!submitted) return name;
+  const focus = submitted.mode === "streamer" ? submitted.streamer : submitted.playerName;
+  if (focus && name.toLowerCase() === focus.toLowerCase()) {
+    return displayFocusLabel(submitted);
+  }
+  return name;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function decorateSummaryText(text: string, submitted: { mode: "encounters" | "streamer"; playerName: string; streamer: string } | null) {
+  if (!submitted) return text;
+  const focus = submitted.mode === "streamer" ? submitted.streamer : submitted.playerName;
+  if (!focus) return text;
+  const replacement = displayFocusLabel(submitted);
+  return text.replace(new RegExp(`\\b${escapeRegExp(focus)}\\b`, "gi"), replacement);
+}
+
 export function PubgClipsPanel() {
   const [activeMode, setActiveMode] = useState<"encounters" | "streamer">("encounters");
   const [playerName, setPlayerName] = useState("");
@@ -131,6 +202,7 @@ export function PubgClipsPanel() {
   const [error, setError] = useState<string | null>(null);
   const [clips, setClips] = useState<Clip[]>([]);
   const [activeClip, setActiveClip] = useState<Clip | null>(null);
+  const [copiedClipId, setCopiedClipId] = useState<string | null>(null);
   const [recentPlayers, setRecentPlayers] = useState<string[]>([]);
   const [submitted, setSubmitted] = useState<{ mode: "encounters" | "streamer"; playerName: string; streamer: string; platform: string } | null>(null);
   const [resultMeta, setResultMeta] = useState<{
@@ -240,6 +312,10 @@ export function PubgClipsPanel() {
     };
   }, [activeClip]);
 
+  useEffect(() => {
+    setCopiedClipId(null);
+  }, [activeClip]);
+
   const embedUrl = useMemo(() => {
     if (!activeClip) return "";
     const videoId = activeClip.video_id;
@@ -338,6 +414,17 @@ export function PubgClipsPanel() {
     setResultMeta(null);
     setError(null);
     localStorage.removeItem("pubg-clips-profile");
+  }
+
+  async function copyClipLink() {
+    if (!activeClip) return;
+
+    try {
+      await navigator.clipboard.writeText(activeClip.url);
+      setCopiedClipId(activeClip.id);
+    } catch {
+      setError("Could not copy the link in this browser.");
+    }
   }
 
   return (
@@ -474,11 +561,14 @@ export function PubgClipsPanel() {
       ) : clips.length ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {clips.map((clip) => (
+            (() => {
+              const classes = toneClasses(clip.eventTone);
+              return (
             <button
               key={clip.id}
               type="button"
               onClick={() => setActiveClip(clip)}
-              className="group block overflow-hidden border border-[#2d2d2d] bg-[#111] hover:border-[#f5c842]"
+              className={`group block overflow-hidden border transition hover:scale-[1.01] hover:border-[#f5c842] ${classes.shell}`}
             >
               <img
                 src={clip.thumbnail_url}
@@ -491,18 +581,15 @@ export function PubgClipsPanel() {
                 loading="lazy"
               />
               <div className="p-3">
-                <p className="line-clamp-2 text-sm text-[#e2d2af]">{clip.title || "Untitled clip"}</p>
-                <p className="mt-2 text-[11px] uppercase tracking-[0.12em] text-[#9a9080]">
-                  {clip.broadcaster_name} · {clip.creator_name}
+                <p className={`line-clamp-2 text-sm font-semibold uppercase tracking-[0.12em] ${classes.title}`}>
+                  {clip.eventLabel || clip.title || "Player Event"}
                 </p>
-                {clip.encounterWith && (
-                  <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[#c59a54]">
-                    Encounter: {clip.encounterWith}
-                  </p>
-                )}
-                {clip.encounterActionText && (
+                <p className={`mt-2 text-[12px] font-medium uppercase tracking-[0.14em] ${classes.name}`}>
+                  {labelFromName(clip.matchupText?.split(" vs ")[0] || clip.broadcaster_name, submitted)} vs {labelFromName(clip.matchupText?.split(" vs ")[1] || clip.creator_name, submitted)}
+                </p>
+                {clip.summaryText && (
                   <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[#d6b376]">
-                    Event: {clip.encounterActionText}
+                    {decorateSummaryText(clip.summaryText, submitted)}
                   </p>
                 )}
                 {clip.sourceType && (
@@ -528,6 +615,8 @@ export function PubgClipsPanel() {
                 </p>
               </div>
             </button>
+              );
+            })()
           ))}
         </div>
       ) : (
@@ -553,8 +642,30 @@ export function PubgClipsPanel() {
             className="w-full max-w-5xl overflow-hidden border border-[#2d2d2d] bg-[#111]"
             onClick={(event) => event.stopPropagation()}
           >
+            {(() => {
+              const classes = toneClasses(activeClip.eventTone);
+              const focusName = displayFocusLabel(submitted);
+              const matchupParts = (activeClip.matchupText ?? "").split(" vs ");
+              const leftName = labelFromName(matchupParts[0] || activeClip.broadcaster_name, submitted);
+              const rightName = labelFromName(matchupParts[1] || activeClip.creator_name, submitted);
+              const summaryText = activeClip.summaryText ? decorateSummaryText(activeClip.summaryText, submitted) : "";
+
+              return (
+            <>
             <div className="flex items-center justify-between border-b border-[#2d2d2d] px-4 py-3">
-              <p className="text-sm text-[#e2d2af]">{activeClip.title || "PUBG Event"}</p>
+              <div>
+                <p className={`text-sm font-semibold uppercase tracking-[0.12em] ${classes.title}`}>
+                  {activeClip.eventLabel || activeClip.title || "Player Event"}
+                </p>
+                <p className="mt-1 text-[12px] uppercase tracking-[0.12em] text-[#b9ad96]">
+                  {leftName} vs {rightName}
+                </p>
+                {summaryText && (
+                  <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[#d6b376]">
+                    {summaryText}
+                  </p>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => setActiveClip(null)}
@@ -581,18 +692,30 @@ export function PubgClipsPanel() {
             </div>
 
             <div className="flex items-center justify-between border-t border-[#2d2d2d] px-4 py-3">
-              <p className="text-xs uppercase tracking-[0.1em] text-[#7f7768]">
-                {activeClip.broadcaster_name} · {activeClip.creator_name}
+              <p className={`text-xs uppercase tracking-[0.1em] ${classes.name}`}>
+                {focusName} vs {rightName}
               </p>
-              <a
-                href={activeClip.url}
-                target="_blank"
-                rel="noreferrer"
-                className="border border-[#5e4d34] bg-[#1a1510] px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-[#e2d2af] hover:border-[#f5c842]"
-              >
-                Open on Twitch
-              </a>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={copyClipLink}
+                  className="border border-[#2d2d2d] px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-[#b9ad96] hover:border-[#f5c842] hover:text-[#e2d2af]"
+                >
+                  {copiedClipId === activeClip.id ? "Copied" : "Copy link"}
+                </button>
+                <a
+                  href={activeClip.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="border border-[#5e4d34] bg-[#1a1510] px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-[#e2d2af] hover:border-[#f5c842]"
+                >
+                  Open on Twitch
+                </a>
+              </div>
             </div>
+            </>
+              );
+            })()}
           </div>
         </div>
       )}
