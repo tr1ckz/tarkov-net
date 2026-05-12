@@ -22,7 +22,7 @@ const INTERACTION_BACKFILL_MATCHES = Math.max(1, Math.min(20, Number(process.env
 const INTERACTION_BACKFILL_VODS = Math.max(1, Math.min(20, Number(process.env.PUBG_INTERACTION_BACKFILL_VODS ?? "12")));
 const BACKLOG_RETRY_MINUTES = Math.max(10, Math.min(720, Number(process.env.PUBG_BACKLOG_RETRY_MINUTES ?? "60")));
 const PUBG_RATE_LIMIT_FALLBACK_MS = Math.max(15000, Math.min(300000, Number(process.env.PUBG_RATE_LIMIT_FALLBACK_MS ?? "60000")));
-const IDENTITY_VALIDATION_BATCH = Math.max(1, Math.min(200, Number(process.env.PUBG_IDENTITY_VALIDATION_BATCH ?? "40")));
+const IDENTITY_VALIDATION_BATCH = Math.max(1, Math.min(500, Number(process.env.PUBG_IDENTITY_VALIDATION_BATCH ?? "120")));
 
 let tokenState = null;
 let lastEventSubSyncMs = 0;
@@ -188,20 +188,46 @@ function parsePlatform(value) {
 
 async function processIdentityValidationQueue(limit = IDENTITY_VALIDATION_BATCH) {
   const now = new Date();
-  const jobs = await prisma.pubgIdentityValidationQueue.findMany({
-    where: {
-      status: "queued",
-      OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
-    },
-    orderBy: [{ queuedAt: "asc" }],
-    take: limit,
-  });
+
+  // Drop queued jobs referencing deleted identity links so they never clog processing again.
+  const orphanedDeleted = Number(
+    await prisma.$executeRaw`
+      DELETE FROM "PubgIdentityValidationQueue"
+      WHERE status = 'queued'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM "PubgStreamerIdentityLink" l
+          WHERE l.id = "PubgIdentityValidationQueue"."identityLinkId"
+        )
+    `
+  );
+
+  const queuedRows = await prisma.$queryRaw`
+    SELECT q.id
+    FROM "PubgIdentityValidationQueue" q
+    INNER JOIN "PubgStreamerIdentityLink" l ON l.id = q."identityLinkId"
+    WHERE q.status = 'queued'
+      AND (q."nextAttemptAt" IS NULL OR q."nextAttemptAt" <= ${now})
+    ORDER BY q."queuedAt" ASC
+    LIMIT ${limit}
+  `;
+
+  const jobIds = Array.isArray(queuedRows)
+    ? queuedRows.map((row) => String(row.id || "")).filter(Boolean)
+    : [];
+
+  const jobs = jobIds.length
+    ? await prisma.pubgIdentityValidationQueue.findMany({
+        where: { id: { in: jobIds } },
+        orderBy: [{ queuedAt: "asc" }],
+      })
+    : [];
 
   if (!jobs.length) {
-    return { processed: 0, completed: 0, invalid: 0, errored: 0, retried: 0 };
+    return { processed: 0, completed: 0, invalid: 0, errored: 0, retried: 0, orphanedDeleted };
   }
 
-  const summary = { processed: jobs.length, completed: 0, invalid: 0, errored: 0, retried: 0 };
+  const summary = { processed: jobs.length, completed: 0, invalid: 0, errored: 0, retried: 0, orphanedDeleted };
 
   for (const job of jobs) {
     const attempts = (job.attempts || 0) + 1;
@@ -213,15 +239,9 @@ async function processIdentityValidationQueue(limit = IDENTITY_VALIDATION_BATCH)
     try {
       const link = await prisma.pubgStreamerIdentityLink.findUnique({ where: { id: job.identityLinkId } });
       if (!link) {
-        summary.invalid += 1;
-        await prisma.pubgIdentityValidationQueue.update({
-          where: { id: job.id },
-          data: {
-            status: "invalid",
-            lastError: "identity_link_missing",
-            completedAt: new Date(),
-          }
-        });
+        // This should be rare due to join prefilter; hard-delete to prevent queue churn.
+        await prisma.pubgIdentityValidationQueue.deleteMany({ where: { id: job.id } });
+        summary.orphanedDeleted += 1;
         continue;
       }
 

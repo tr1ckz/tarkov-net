@@ -57,17 +57,39 @@ export async function POST(request: Request) {
   const limit = clampLimit(body?.limit ?? 40);
   const now = new Date();
 
-  const jobs = await prisma.pubgIdentityValidationQueue.findMany({
-    where: {
-      status: "queued",
-      OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
-    },
-    orderBy: [{ queuedAt: "asc" }],
-    take: limit,
-  });
+  const orphanedDeleted = Number(
+    await prisma.$executeRaw`
+      DELETE FROM "PubgIdentityValidationQueue"
+      WHERE status = 'queued'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM "PubgStreamerIdentityLink" l
+          WHERE l.id = "PubgIdentityValidationQueue"."identityLinkId"
+        )
+    `
+  );
+
+  const queuedRows = (await prisma.$queryRaw`
+    SELECT q.id
+    FROM "PubgIdentityValidationQueue" q
+    INNER JOIN "PubgStreamerIdentityLink" l ON l.id = q."identityLinkId"
+    WHERE q.status = 'queued'
+      AND (q."nextAttemptAt" IS NULL OR q."nextAttemptAt" <= ${now})
+    ORDER BY q."queuedAt" ASC
+    LIMIT ${limit}
+  `) as Array<{ id: string }>;
+
+  const jobIds = queuedRows.map((row) => row.id).filter(Boolean);
+
+  const jobs = jobIds.length
+    ? await prisma.pubgIdentityValidationQueue.findMany({
+        where: { id: { in: jobIds } },
+        orderBy: [{ queuedAt: "asc" }],
+      })
+    : [];
 
   if (!jobs.length) {
-    return NextResponse.json({ ok: true, processed: 0, completed: 0, invalid: 0, errored: 0, message: "No queued jobs" });
+    return NextResponse.json({ ok: true, processed: 0, completed: 0, invalid: 0, errored: 0, orphanedDeleted, message: "No queued jobs" });
   }
 
   let completed = 0;
@@ -87,16 +109,8 @@ export async function POST(request: Request) {
       try {
         const link = await prisma.pubgStreamerIdentityLink.findUnique({ where: { id: job.identityLinkId } });
         if (!link) {
-          invalid += 1;
-          results.push({ queueId: job.id, identityLinkId: job.identityLinkId, result: "invalid", reason: "identity_link_missing" });
-          await prisma.pubgIdentityValidationQueue.update({
-            where: { id: job.id },
-            data: {
-              status: "invalid",
-              lastError: "identity_link_missing",
-              completedAt: new Date(),
-            }
-          });
+          results.push({ queueId: job.id, identityLinkId: job.identityLinkId, result: "deleted", reason: "identity_link_missing" });
+          await prisma.pubgIdentityValidationQueue.deleteMany({ where: { id: job.id } });
           continue;
         }
 
@@ -245,6 +259,7 @@ export async function POST(request: Request) {
         completed,
         invalid,
         errored,
+        orphanedDeleted,
         triggeredBy: adminEmail,
         results,
       })
@@ -257,6 +272,7 @@ export async function POST(request: Request) {
     completed,
     invalid,
     errored,
+    orphanedDeleted,
     results,
   });
 }
