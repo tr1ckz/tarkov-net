@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 type PubgReportSearchRow = {
   id?: string;
   shard?: string;
+  nickname?: string;
   name?: string;
   playerName?: string;
 };
@@ -116,7 +117,7 @@ async function resolvePubgReportAccount(input: {
       .map((row) => {
         const id = String(row.id || "").trim();
         const shard = String(row.shard || "").trim();
-        const playerName = String(row.name || row.playerName || "").trim();
+        const playerName = String(row.nickname || row.name || row.playerName || "").trim();
         const platform = platformFromShard(shard);
         if (!id || !shard || !playerName || !platform) return null;
         return { id, shard, playerName, platform };
