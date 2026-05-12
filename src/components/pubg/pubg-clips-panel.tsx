@@ -276,7 +276,13 @@ export function PubgClipsPanel() {
     }
 
     const queryString = params.toString();
-    router.replace(queryString ? `${pathname}?${queryString}` : pathname, { scroll: false });
+    const nextUrl = queryString ? `${pathname}?${queryString}` : pathname;
+
+    if (typeof window !== "undefined") {
+      window.history.replaceState(window.history.state, "", nextUrl);
+    }
+
+    router.replace(nextUrl, { scroll: false });
   }
 
   useEffect(() => {
