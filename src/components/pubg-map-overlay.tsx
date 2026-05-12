@@ -349,6 +349,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
   const [editableMarkers, setEditableMarkers] = useState<PubgMapMarker[]>([]);
   const [newEntityLabel, setNewEntityLabel] = useState("New Marker");
   const [newEntityType, setNewEntityType] = useState<string>("hot-drop");
+  const [quickAddType, setQuickAddType] = useState<string>("hot-drop");
   const [newEntityNotes, setNewEntityNotes] = useState("Added in admin editor");
   const [newCategoryIcon, setNewCategoryIcon] = useState<MarkerIconKind>("diamond");
   const [iconSearch, setIconSearch] = useState("");
@@ -527,6 +528,13 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
       return changed ? next : prev;
     });
   }, [categoryKeys]);
+
+  useEffect(() => {
+    if (categoryKeys.length === 0) return;
+    if (!categoryKeys.includes(quickAddType)) {
+      setQuickAddType(categoryKeys[0]);
+    }
+  }, [categoryKeys, quickAddType]);
 
   const recomputeRenderBox = useCallback(() => {
     const el = containerRef.current;
@@ -843,11 +851,12 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
     [calibration, pan.x, pan.y, renderBox.height, renderBox.left, renderBox.top, renderBox.width, zoom]
   );
 
-  function addEntityAtRawPoint(rawX: number, rawY: number) {
+  function addEntityAtRawPoint(rawX: number, rawY: number, typeOverride?: string) {
+    const markerType = typeOverride ?? newEntityType;
     const nextEntity: PubgMapMarker = {
       id: `admin-${map.slug}-${Date.now().toString(36)}`,
       label: newEntityLabel.trim() || "New Marker",
-      type: newEntityType,
+      type: markerType,
       x: rawX,
       y: rawY,
       notes: newEntityNotes.trim() || "Added in admin editor",
@@ -1002,7 +1011,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
       }
 
       if (quickAddMode || e.shiftKey) {
-        addEntityAtRawPoint(captured.rawX, captured.rawY);
+        addEntityAtRawPoint(captured.rawX, captured.rawY, quickAddType);
       }
 
       try {
@@ -1011,7 +1020,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
         // ignore clipboard permission failures
       }
     },
-    [adminMode, getPointerCoords, quickAddMode, routeDrawMode]
+    [adminMode, getPointerCoords, quickAddMode, quickAddType, routeDrawMode]
   );
 
   useEffect(() => {
@@ -1442,6 +1451,16 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
               onClick={() => setQuickAddMode((prev) => !prev)}
               className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
             >Quick Add: {quickAddMode ? "On" : "Off"}</button>
+            <select
+              value={quickAddType}
+              onChange={(e) => setQuickAddType(e.target.value)}
+              className="border border-[#3a3426] bg-[#0e0c09] px-2 py-1.5 text-xs text-[#e2d2af]"
+              title="Category used by Quick Add"
+            >
+              {categoryKeys.map((type) => (
+                <option key={`quick-${type}`} value={type}>{categoryLabels[type] ?? humanizeCategory(type)}</option>
+              ))}
+            </select>
             <button
               type="button"
               onClick={() => {
