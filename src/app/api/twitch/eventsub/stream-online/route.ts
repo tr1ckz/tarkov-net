@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { verifyTwitchEventSubSignature } from "@/lib/twitch";
 import { autoLinkPubgStreamerIdentity } from "@/lib/pubg-streamer-linking";
 import { indexStreamerMatchesAndVods } from "@/lib/pubg-match-vod-indexer";
+import { resolvePubgReportIdentityForStreamer } from "@/lib/pubg-report";
 import {
   clearPubgCallContext,
   indexSeenPlayersFromRecentMatches,
@@ -190,6 +191,7 @@ const WEAK_IDENTITY_LINK_SOURCES = new Set<string>([
   "eventsub_profile_claim",
   "eventsub_known_player_unverified",
   "eventsub_login_heuristic_unverified",
+  "eventsub_pubg_report_unverified",
 ]);
 
 function isSyntheticPubgPlayerId(value: string) {
@@ -306,6 +308,55 @@ async function enqueueIdentityValidationJob(identityLinkId: string, reason: stri
     });
     return "error" as const;
   }
+}
+
+async function upsertPubgReportIdentityLink(input: {
+  twitchUserId: string;
+  twitchUserLogin: string;
+  twitchUserName: string;
+  platform: PubgPlatform;
+  shard: string;
+  pubgPlayerId: string;
+  pubgPlayerName: string;
+  query: string;
+}) {
+  const reasons = ["pubg_report_search_match", `pubg_report_query:${input.query}`];
+
+  return db.pubgStreamerIdentityLink.upsert({
+    where: {
+      twitchUserId_platform: {
+        twitchUserId: input.twitchUserId,
+        platform: input.platform,
+      }
+    },
+    create: {
+      twitchUserId: input.twitchUserId,
+      twitchUserLogin: input.twitchUserLogin,
+      twitchUserName: input.twitchUserName,
+      platform: input.platform,
+      shard: input.shard,
+      pubgPlayerId: input.pubgPlayerId,
+      pubgPlayerName: input.pubgPlayerName,
+      pubgNameNormalized: normalizeForCompare(input.pubgPlayerName),
+      confidenceScore: 82,
+      confidenceReasonsJson: JSON.stringify(reasons),
+      source: "eventsub_pubg_report_unverified",
+      firstLinkedAt: new Date(),
+      lastLinkedAt: new Date(),
+    },
+    update: {
+      twitchUserLogin: input.twitchUserLogin,
+      twitchUserName: input.twitchUserName,
+      shard: input.shard,
+      pubgPlayerId: input.pubgPlayerId,
+      pubgPlayerName: input.pubgPlayerName,
+      pubgNameNormalized: normalizeForCompare(input.pubgPlayerName),
+      confidenceScore: { set: 82 },
+      confidenceReasonsJson: JSON.stringify(reasons),
+      source: "eventsub_pubg_report_unverified",
+      lastLinkedAt: new Date(),
+    }
+  });
 }
 
 const recentMatchIndexAttempts = new Map<string, number>();
@@ -576,6 +627,33 @@ async function processStreamOnlineNotification(input: {
           orderBy: { lastLinkedAt: "desc" }
         });
 
+    const pubgReportResolvedIdentity = (!realIdentityLink && !strongFallbackIdentityLink)
+      ? await resolvePubgReportIdentityForStreamer({
+          twitchUserLogin,
+          twitchUserName,
+        }).catch(() => null)
+      : null;
+
+    const pubgReportIdentityLink = pubgReportResolvedIdentity
+      ? await upsertPubgReportIdentityLink({
+          twitchUserId,
+          twitchUserLogin,
+          twitchUserName,
+          platform: pubgReportResolvedIdentity.platform,
+          shard: pubgReportResolvedIdentity.shard,
+          pubgPlayerId: pubgReportResolvedIdentity.pubgPlayerId,
+          pubgPlayerName: pubgReportResolvedIdentity.pubgPlayerName,
+          query: pubgReportResolvedIdentity.query,
+        }).catch((error: unknown) => {
+          console.warn("[twitch-eventsub] failed to upsert pubg.report identity fallback", {
+            broadcasterId: twitchUserId,
+            broadcasterLogin: twitchUserLogin,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return null;
+        })
+      : null;
+
     const looseAutoLinkIdentity = getLooseIdentityForMatchIndexing(autoLink);
 
     const selectedIdentity = realIdentityLink
@@ -598,6 +676,16 @@ async function processStreamOnlineNotification(input: {
             pubgPlayerId: strongFallbackIdentityLink.pubgPlayerId,
             pubgPlayerName: strongFallbackIdentityLink.pubgPlayerName,
           }
+        : pubgReportIdentityLink
+          ? {
+              source: "fallback_identity_link" as const,
+              identityLinkId: pubgReportIdentityLink.id,
+              linkSource: pubgReportIdentityLink.source,
+              platform: pubgReportIdentityLink.platform as PubgPlatform,
+              shard: pubgReportIdentityLink.shard,
+              pubgPlayerId: pubgReportIdentityLink.pubgPlayerId,
+              pubgPlayerName: pubgReportIdentityLink.pubgPlayerName,
+            }
         : looseAutoLinkIdentity
           ? {
               source: "autolink_identity" as const,
