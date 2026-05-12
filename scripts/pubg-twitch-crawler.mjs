@@ -16,10 +16,13 @@ const INTERACTION_BACKFILL_ENABLED = (process.env.PUBG_INTERACTION_BACKFILL_ENAB
 const INTERACTION_BACKFILL_STREAMERS = Math.max(1, Math.min(200, Number(process.env.PUBG_INTERACTION_BACKFILL_STREAMERS ?? "30")));
 const INTERACTION_BACKFILL_MATCHES = Math.max(1, Math.min(20, Number(process.env.PUBG_INTERACTION_BACKFILL_MATCHES ?? "6")));
 const INTERACTION_BACKFILL_VODS = Math.max(1, Math.min(20, Number(process.env.PUBG_INTERACTION_BACKFILL_VODS ?? "12")));
+const BACKLOG_RETRY_MINUTES = Math.max(10, Math.min(720, Number(process.env.PUBG_BACKLOG_RETRY_MINUTES ?? "60")));
+const PUBG_RATE_LIMIT_FALLBACK_MS = Math.max(15000, Math.min(300000, Number(process.env.PUBG_RATE_LIMIT_FALLBACK_MS ?? "60000")));
 
 let tokenState = null;
 let lastEventSubSyncMs = 0;
 let pubgUnauthorizedError = null;
+let pubgRateLimitedUntil = 0;
 
 function getPubgGameIds() {
   const configured = process.env.PUBG_TWITCH_GAME_IDS
@@ -55,6 +58,39 @@ async function writeCrawlerRunLog(input) {
 
 async function upsertIndexBacklogCandidate(input) {
   try {
+    const existing = await prisma.pubgIndexBacklog.findUnique({
+      where: { twitchUserId: input.twitchUserId },
+      select: {
+        attempts: true,
+        reason: true,
+        lastAttemptAt: true,
+        status: true
+      }
+    });
+
+    const now = Date.now();
+    const lastAttemptMs = existing?.lastAttemptAt ? new Date(existing.lastAttemptAt).getTime() : 0;
+    const shouldIncrementAttempts = !existing?.lastAttemptAt || now - lastAttemptMs >= BACKLOG_RETRY_MINUTES * 60_000;
+
+    const updateData = {
+      twitchUserLogin: input.twitchUserLogin,
+      twitchUserName: input.twitchUserName,
+      status: "pending",
+      reason: input.reason,
+      lastSeenAt: new Date(),
+      lastAttemptAt: new Date(),
+      platformHint: input.platformHint ?? null,
+      shardHint: input.shardHint ?? null,
+      pubgPlayerNameHint: input.pubgPlayerNameHint ?? null,
+      identityLinkId: input.identityLinkId ?? null,
+      resolvedAt: null,
+      resolutionNote: null
+    };
+
+    if (shouldIncrementAttempts) {
+      updateData.attempts = { increment: 1 };
+    }
+
     await prisma.pubgIndexBacklog.upsert({
       where: { twitchUserId: input.twitchUserId },
       create: {
@@ -71,21 +107,7 @@ async function upsertIndexBacklogCandidate(input) {
         pubgPlayerNameHint: input.pubgPlayerNameHint ?? null,
         identityLinkId: input.identityLinkId ?? null
       },
-      update: {
-        twitchUserLogin: input.twitchUserLogin,
-        twitchUserName: input.twitchUserName,
-        status: "pending",
-        reason: input.reason,
-        attempts: { increment: 1 },
-        lastSeenAt: new Date(),
-        lastAttemptAt: new Date(),
-        platformHint: input.platformHint ?? null,
-        shardHint: input.shardHint ?? null,
-        pubgPlayerNameHint: input.pubgPlayerNameHint ?? null,
-        identityLinkId: input.identityLinkId ?? null,
-        resolvedAt: null,
-        resolutionNote: null
-      }
+      update: updateData
     });
   } catch (error) {
     log("warn", "failed to upsert index backlog candidate", {
@@ -237,9 +259,27 @@ function getPubgApiKey() {
   return apiKey;
 }
 
+function getPubgRateLimitBackoffMs(response) {
+  const retryAfterRaw = Number(response.headers.get("retry-after") ?? "0");
+  if (Number.isFinite(retryAfterRaw) && retryAfterRaw > 0) {
+    return Math.max(1000, Math.min(retryAfterRaw * 1000, 300000));
+  }
+  return PUBG_RATE_LIMIT_FALLBACK_MS;
+}
+
+function isPubgRateLimitError(error) {
+  if (!error) return false;
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("PUBG API error (429)") || message.includes("PUBG API rate limited");
+}
+
 async function pubgGet(path) {
   if (pubgUnauthorizedError) {
     throw new Error(pubgUnauthorizedError);
+  }
+
+  if (pubgRateLimitedUntil > Date.now()) {
+    throw new Error(`PUBG API rate limited until ${new Date(pubgRateLimitedUntil).toISOString()}`);
   }
 
   const response = await fetch(`https://api.pubg.com${path}`, {
@@ -254,6 +294,12 @@ async function pubgGet(path) {
     if (response.status === 401) {
       pubgUnauthorizedError = "PUBG API unauthorized (401). Verify PUBG_DEV_API/PUBG_API_KEY in the runtime environment.";
       throw new Error(pubgUnauthorizedError);
+    }
+
+    if (response.status === 429) {
+      const backoffMs = getPubgRateLimitBackoffMs(response);
+      pubgRateLimitedUntil = Date.now() + backoffMs;
+      throw new Error(`PUBG API error (429) rate_limited_backoff_ms=${backoffMs}`);
     }
 
     throw new Error(`PUBG API error (${response.status})`);
@@ -1093,7 +1139,8 @@ async function runInteractionBackfill() {
       vodMomentsPersisted: 0,
       errors: 0,
       backlogQueued: 0,
-      backlogResolved: 0
+      backlogResolved: 0,
+      rateLimitedSkips: 0
     };
   }
 
@@ -1107,7 +1154,8 @@ async function runInteractionBackfill() {
     vodMomentsPersisted: 0,
     errors: 0,
     backlogQueued: 0,
-    backlogResolved: 0
+    backlogResolved: 0,
+    rateLimitedSkips: 0
   };
 
   const recentVods = await prisma.pubgStreamerVod.findMany({
@@ -1143,7 +1191,41 @@ async function runInteractionBackfill() {
     }
   }
 
-  const streamerRows = Array.from(byStreamer.values()).slice(0, INTERACTION_BACKFILL_STREAMERS);
+  const retryCutoff = new Date(Date.now() - BACKLOG_RETRY_MINUTES * 60 * 1000);
+  const prioritizedBacklog = await prisma.pubgIndexBacklog.findMany({
+    where: {
+      status: "pending",
+      OR: [
+        { lastAttemptAt: null },
+        { lastAttemptAt: { lt: retryCutoff } }
+      ]
+    },
+    orderBy: [{ attempts: "asc" }, { lastSeenAt: "desc" }],
+    take: INTERACTION_BACKFILL_STREAMERS,
+    select: {
+      twitchUserId: true,
+      twitchUserLogin: true,
+      twitchUserName: true
+    }
+  });
+
+  const prioritizedIds = new Set(prioritizedBacklog.map((row) => row.twitchUserId));
+  const prioritizedRows = prioritizedBacklog.map((row) => {
+    const existing = byStreamer.get(row.twitchUserId);
+    if (existing) return existing;
+    return {
+      twitchUserId: row.twitchUserId,
+      twitchUserLogin: row.twitchUserLogin,
+      twitchUserName: row.twitchUserName,
+      vods: []
+    };
+  });
+
+  const fallbackRows = Array.from(byStreamer.values()).filter(
+    (row) => !prioritizedIds.has(row.twitchUserId)
+  );
+
+  const streamerRows = [...prioritizedRows, ...fallbackRows].slice(0, INTERACTION_BACKFILL_STREAMERS);
 
   for (const streamer of streamerRows) {
     summary.streamersScanned += 1;
@@ -1190,8 +1272,12 @@ async function runInteractionBackfill() {
       summary.streamersWithIdentity += 1;
 
       let resolved = null;
+      let rateLimited = false;
       for (const link of identityLinks) {
-        const direct = await getPlayerWithMatchesById(link.shard, link.pubgPlayerId).catch(() => null);
+        const direct = await getPlayerWithMatchesById(link.shard, link.pubgPlayerId).catch((error) => {
+          if (isPubgRateLimitError(error)) rateLimited = true;
+          return null;
+        });
         if (direct && direct.matchIds.length > 0) {
           resolved = {
             platform: link.platform,
@@ -1203,9 +1289,15 @@ async function runInteractionBackfill() {
           break;
         }
 
-        const cross = await lookupPlayerByIdAcrossShards(link.pubgPlayerId, link.platform, link.shard).catch(() => null);
+        const cross = await lookupPlayerByIdAcrossShards(link.pubgPlayerId, link.platform, link.shard).catch((error) => {
+          if (isPubgRateLimitError(error)) rateLimited = true;
+          return null;
+        });
         if (cross && cross.matchCount > 0) {
-          const playerWithMatches = await getPlayerWithMatchesById(cross.shard, link.pubgPlayerId).catch(() => null);
+          const playerWithMatches = await getPlayerWithMatchesById(cross.shard, link.pubgPlayerId).catch((error) => {
+            if (isPubgRateLimitError(error)) rateLimited = true;
+            return null;
+          });
           if (playerWithMatches && playerWithMatches.matchIds.length > 0) {
             resolved = {
               platform: link.platform,
@@ -1218,9 +1310,15 @@ async function runInteractionBackfill() {
           }
         }
 
-        const byNameCross = await lookupPlayerAcrossShards(link.pubgPlayerName, link.platform).catch(() => null);
+        const byNameCross = await lookupPlayerAcrossShards(link.pubgPlayerName, link.platform).catch((error) => {
+          if (isPubgRateLimitError(error)) rateLimited = true;
+          return null;
+        });
         if (byNameCross && byNameCross.matchCount > 0) {
-          const playerWithMatches = await getPlayerWithMatches(byNameCross.shard, byNameCross.playerName).catch(() => null);
+          const playerWithMatches = await getPlayerWithMatches(byNameCross.shard, byNameCross.playerName).catch((error) => {
+            if (isPubgRateLimitError(error)) rateLimited = true;
+            return null;
+          });
           if (playerWithMatches && playerWithMatches.matchIds.length > 0) {
             resolved = {
               platform: link.platform,
@@ -1232,20 +1330,31 @@ async function runInteractionBackfill() {
             break;
           }
         }
+
+        if (rateLimited) {
+          break;
+        }
       }
 
       if (!resolved || !resolved.matchIds.length) {
         const topLink = identityLinks[0];
+        const reason = rateLimited
+          ? "pubg_rate_limited_backfill"
+          : "no_matches_for_resolved_identity";
         await upsertIndexBacklogCandidate({
           twitchUserId: streamer.twitchUserId,
           twitchUserLogin: streamer.twitchUserLogin,
           twitchUserName: streamer.twitchUserName,
-          reason: "no_matches_for_resolved_identity",
+          reason,
           platformHint: topLink?.platform ?? null,
           shardHint: topLink?.shard ?? null,
           pubgPlayerNameHint: topLink?.pubgPlayerName ?? null
         });
         summary.backlogQueued += 1;
+        if (rateLimited) {
+          summary.rateLimitedSkips += 1;
+          break;
+        }
         continue;
       }
       summary.streamersWithMatches += 1;
