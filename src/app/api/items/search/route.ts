@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getDashboardItemsFromLive } from "@/lib/market-cache";
+import { getDashboardItemsFromLive, triggerBackgroundRefresh } from "@/lib/market-cache";
 import { GameMode } from "@/types/tarkov";
 
 function parseMode(value: string | null): GameMode {
@@ -12,6 +12,9 @@ export async function GET(request: Request) {
   const query = searchParams.get("q")?.trim() ?? "";
   const normalizedQuery = query.toLowerCase();
   const mode = parseMode(searchParams.get("mode"));
+
+  // Keep market cache warm for suggestion queries so users don't need to visit dashboard pages.
+  triggerBackgroundRefresh(mode);
 
   if (query.length < 2) {
     return NextResponse.json({ items: [] });
