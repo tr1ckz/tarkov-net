@@ -211,6 +211,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
   const [newEntityLabel, setNewEntityLabel] = useState("New Marker");
   const [newEntityType, setNewEntityType] = useState<string>("hot-drop");
   const [newEntityNotes, setNewEntityNotes] = useState("Added in admin editor");
+  const [quickAddMode, setQuickAddMode] = useState(false);
   const [categoryLabels, setCategoryLabels] = useState<Record<string, string>>(DEFAULT_CATEGORY_LABELS);
   const [hiddenCategories, setHiddenCategories] = useState<string[]>([]);
   const [newCategoryKey, setNewCategoryKey] = useState("");
@@ -347,7 +348,13 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
     const urlAdmin = params.get("admin") === "1";
     const savedAdmin = localStorage.getItem("pubg-map-admin-enabled") === "1";
     setAdminMode(urlAdmin || savedAdmin);
+    setQuickAddMode(localStorage.getItem("pubg-map-admin-quick-add") === "1");
   }, [isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    localStorage.setItem("pubg-map-admin-quick-add", quickAddMode ? "1" : "0");
+  }, [isAdmin, quickAddMode]);
 
   useEffect(() => {
     setCalibration(getBaseCalibration(map.slug));
@@ -596,19 +603,23 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
     [calibration, pan.x, pan.y, renderBox.height, renderBox.left, renderBox.top, renderBox.width, zoom]
   );
 
-  function addEntityAtCapturedPoint() {
-    if (!capturedPoint) return;
+  function addEntityAtRawPoint(rawX: number, rawY: number) {
     const nextEntity: PubgMapMarker = {
       id: `admin-${map.slug}-${Date.now().toString(36)}`,
       label: newEntityLabel.trim() || "New Marker",
       type: newEntityType,
-      x: capturedPoint.rawX,
-      y: capturedPoint.rawY,
+      x: rawX,
+      y: rawY,
       notes: newEntityNotes.trim() || "Added in admin editor",
     };
-    const next = [...editableMarkers, nextEntity];
+    const next = [...markersRef.current, nextEntity];
     persistEntities(next);
     setActiveMarkerId(nextEntity.id);
+  }
+
+  function addEntityAtCapturedPoint() {
+    if (!capturedPoint) return;
+    addEntityAtRawPoint(capturedPoint.rawX, capturedPoint.rawY);
   }
 
   function removeActiveEntity() {
@@ -721,14 +732,46 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
       if (!captured) return;
       setCapturedPoint(captured);
 
+      if (quickAddMode || e.shiftKey) {
+        addEntityAtRawPoint(captured.rawX, captured.rawY);
+      }
+
       try {
         await navigator.clipboard.writeText(JSON.stringify(captured));
       } catch {
         // ignore clipboard permission failures
       }
     },
-    [adminMode, getPointerCoords]
+    [adminMode, getPointerCoords, quickAddMode]
   );
+
+  useEffect(() => {
+    if (!adminMode) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable) {
+          return;
+        }
+      }
+
+      if ((e.key === "q" || e.key === "Q") && !e.repeat) {
+        e.preventDefault();
+        setQuickAddMode((prev) => !prev);
+        return;
+      }
+
+      if (e.key === "Enter" && capturedPoint) {
+        e.preventDefault();
+        addEntityAtRawPoint(capturedPoint.rawX, capturedPoint.rawY);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [adminMode, capturedPoint, map.slug, newEntityLabel, newEntityNotes, newEntityType]);
 
   const resetView = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
 
@@ -983,6 +1026,9 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
           <p className="mt-1 text-xs text-[#a69475]">
             Tune calibration for {map.name}. Click anywhere on map to capture coordinates (copied to clipboard).
           </p>
+          <p className="mt-1 text-xs text-[#8f826a]">
+            Quick Add: {quickAddMode ? "ON" : "OFF"} (press Q). Shift+Click adds one marker instantly.
+          </p>
           <p className="mt-1 text-[11px] uppercase tracking-[0.1em] text-[#8f826a]">
             Save status: {saveStatus}
           </p>
@@ -1055,10 +1101,15 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
             >Reset Map</button>
             <button
               type="button"
+              onClick={() => setQuickAddMode((prev) => !prev)}
+              className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842]"
+            >Quick Add: {quickAddMode ? "On" : "Off"}</button>
+            <button
+              type="button"
               onClick={addEntityAtCapturedPoint}
               disabled={!capturedPoint}
               className="border border-[#6d5834] bg-[#20180e] px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#e2d2af] hover:border-[#f5c842] disabled:opacity-50"
-            >Add Entity At Click</button>
+            >Add Entity At Click (Enter)</button>
             <button
               type="button"
               onClick={removeActiveEntity}
