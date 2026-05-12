@@ -588,17 +588,15 @@ export function PubgClipsPanel() {
                 loading="lazy"
               />
               <div className="p-3">
-                <p className={`line-clamp-2 text-sm font-semibold uppercase tracking-[0.12em] ${classes.title}`}>
-                  {clip.eventLabel || clip.title || "Player Event"}
+                <p className={`line-clamp-2 text-sm font-semibold tracking-[0.02em] ${classes.title}`}>
+                  {clip.summaryText ? decorateSummaryText(clip.summaryText, submitted) : (clip.eventLabel || clip.title || "Player Event")}
                 </p>
-                <p className={`mt-2 text-[12px] font-medium uppercase tracking-[0.14em] ${classes.name}`}>
+                <p className={`mt-2 text-[11px] uppercase tracking-[0.16em] ${classes.name}`}>
                   {formatParticipantName(clip.subjectName || clip.broadcaster_name, submitted)} vs {formatParticipantName(clip.targetName || clip.creator_name, submitted)}
                 </p>
-                {clip.summaryText && (
-                  <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[#d6b376]">
-                    {decorateSummaryText(clip.summaryText, submitted)}
-                  </p>
-                )}
+                <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[#d6b376]">
+                  {clip.eventLabel || clip.title || "Player Event"}
+                </p>
                 {clip.sourceType && (
                   <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[#6f675a]">
                     Source: {clip.sourceType === "vod" ? "VOD Moment" : "Clip"}
@@ -659,17 +657,15 @@ export function PubgClipsPanel() {
             <>
             <div className="flex items-center justify-between border-b border-[#2d2d2d] px-4 py-3">
               <div>
-                <p className={`text-sm font-semibold uppercase tracking-[0.12em] ${classes.title}`}>
-                  {activeClip.eventLabel || activeClip.title || "Player Event"}
+                <p className={`text-sm font-semibold tracking-[0.02em] ${classes.title}`}>
+                  {summaryText || activeClip.eventLabel || activeClip.title || "Player Event"}
                 </p>
-                <p className="mt-1 text-[12px] uppercase tracking-[0.12em] text-[#b9ad96]">
+                <p className="mt-1 text-[11px] uppercase tracking-[0.16em] text-[#b9ad96]">
                   {leftName} vs {rightName}
                 </p>
-                {summaryText && (
-                  <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[#d6b376]">
-                    {summaryText}
-                  </p>
-                )}
+                <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[#d6b376]">
+                  {activeClip.eventLabel || activeClip.title || "Player Event"}
+                </p>
               </div>
               <button
                 type="button"
