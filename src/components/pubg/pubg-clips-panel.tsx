@@ -344,9 +344,6 @@ export function PubgClipsPanel() {
     <section className="space-y-4">
       <div className="border border-[#2d2d2d] bg-[#111] p-3">
         <p className="text-[11px] uppercase tracking-[0.14em] text-[#9a8050]">PUBG Clips Feed</p>
-        <p className="mt-2 text-sm text-[#b9ad96]">
-          pubg.report-only test mode. Enter a PUBG player name or streamer login.
-        </p>
 
         <div className="mt-3 flex gap-2">
           <button

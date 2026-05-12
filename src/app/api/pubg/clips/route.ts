@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getTwitchAppToken } from "@/lib/twitch";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,13 @@ type PubgReportStreamEvent = {
   MatchID?: string;
   Map?: string;
   Mode?: string;
+};
+
+type TwitchVideosPayload = {
+  data?: Array<{
+    id?: string;
+    thumbnail_url?: string;
+  }>;
 };
 
 function normalizeForCompare(value: string) {
@@ -102,6 +110,53 @@ async function fetchJsonWithTimeout<T>(url: string, timeoutMs = 12000): Promise<
   }
 }
 
+async function fetchTwitchVideoThumbnailMap(videoIds: string[]) {
+  const ids = Array.from(new Set(videoIds.map((id) => id.trim()).filter(Boolean))).slice(0, 100);
+  if (!ids.length) return new Map<string, string>();
+
+  try {
+    const { token, clientId } = await getTwitchAppToken();
+    const params = new URLSearchParams();
+    for (const id of ids) {
+      params.append("id", id);
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+
+    try {
+      const response = await fetch(`https://api.twitch.tv/helix/videos?${params.toString()}`, {
+        cache: "no-store",
+        signal: controller.signal,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Client-Id": clientId,
+        },
+      });
+
+      if (!response.ok) {
+        return new Map<string, string>();
+      }
+
+      const payload = (await response.json()) as TwitchVideosPayload;
+      const out = new Map<string, string>();
+
+      for (const row of payload.data ?? []) {
+        const id = String(row.id || "").trim();
+        const thumbnail = String(row.thumbnail_url || "").trim();
+        if (!id || !thumbnail) continue;
+        out.set(id, thumbnail.replace("%{width}x%{height}", "640x360"));
+      }
+
+      return out;
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch {
+    return new Map<string, string>();
+  }
+}
+
 async function resolvePubgReportAccount(input: {
   query: string;
   platform: "steam" | "xbox" | "psn";
@@ -166,7 +221,12 @@ function flattenStreamEvents(payload: unknown): PubgReportStreamEvent[] {
   return out;
 }
 
-function mapPubgReportEventsToClips(events: PubgReportStreamEvent[], limit: number, playerName?: string) {
+function mapPubgReportEventsToClips(
+  events: PubgReportStreamEvent[],
+  limit: number,
+  playerName: string | undefined,
+  thumbnailByVideoId: Map<string, string>
+) {
   const dedupe = new Set<string>();
   const rows: Array<Record<string, unknown>> = [];
   const normalizedPlayer = normalizeForCompare(playerName || "");
@@ -190,9 +250,10 @@ function mapPubgReportEventsToClips(events: PubgReportStreamEvent[], limit: numb
       : new Date().toISOString();
     const timecode = toTwitchTimecode(event.TimeDiff);
     const prettyEventType = prettifyEventType(eventType);
-    const thumbnailUrl = twitchUserId
+    const fallbackThumbnailUrl = twitchUserId
       ? `https://static-cdn.jtvnw.net/s3_vods/${twitchUserId}/${videoId}/thumb/thumb0-320x180.jpg`
       : "/pubg.avif";
+    const thumbnailUrl = thumbnailByVideoId.get(videoId) || fallbackThumbnailUrl;
 
     const actionText = normalizedPlayer && normalizeForCompare(killer) === normalizedPlayer
       ? `YOU ${eventType} ${victim || "an opponent"}`
@@ -275,7 +336,12 @@ export async function GET(request: Request) {
       `https://api.pubg.report/v1/players/${encodeURIComponent(account.id)}/streams`
     );
     const events = flattenStreamEvents(streamsPayload);
-    const clips = mapPubgReportEventsToClips(events, limit, playerName || account.playerName);
+    const videoIds = events
+      .map((event) => String(event.VideoID || "").trim())
+      .map((id) => (id.startsWith("v") ? id.slice(1) : id))
+      .filter(Boolean);
+    const thumbnailByVideoId = await fetchTwitchVideoThumbnailMap(videoIds);
+    const clips = mapPubgReportEventsToClips(events, limit, playerName || account.playerName, thumbnailByVideoId);
 
     return NextResponse.json({
       clips,
