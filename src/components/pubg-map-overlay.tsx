@@ -231,6 +231,9 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
   const markersRef = useRef<PubgMapMarker[]>([]);
   const dragStart = useRef({ mx: 0, my: 0, px: 0, py: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
+  const markerNodeRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  // Track final drag position without forcing React re-renders on every mouse move.
+  const draggedMarkerCoords = useRef<{ rawX: number; rawY: number } | null>(null);
 
   const mergedMarkers = useMemo(() => {
     const existingSecretKeys = new Set(
@@ -650,13 +653,15 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
       const coords = getPointerCoords(e.clientX, e.clientY);
       if (!coords) return;
       movedMarkerDuringDrag.current = true;
-      setEditableMarkers((prev) =>
-        prev.map((marker) =>
-          marker.id === draggingMarkerId.current
-            ? { ...marker, x: coords.rawX, y: coords.rawY }
-            : marker
-        )
-      );
+      draggedMarkerCoords.current = { rawX: coords.rawX, rawY: coords.rawY };
+
+      const markerId = draggingMarkerId.current;
+      const node = markerNodeRefs.current[markerId];
+      if (node) {
+        const calibrated = applyCalibration(coords.rawX, coords.rawY, calibration);
+        node.style.left = `${renderBox.left + (calibrated.x / 100) * renderBox.width}px`;
+        node.style.top = `${renderBox.top + (calibrated.y / 100) * renderBox.height}px`;
+      }
       return;
     }
 
@@ -665,16 +670,28 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
       x: dragStart.current.px + (e.clientX - dragStart.current.mx),
       y: dragStart.current.py + (e.clientY - dragStart.current.my),
     });
-  }, [adminMode, getPointerCoords]);
+  }, [adminMode, calibration, getPointerCoords, renderBox.height, renderBox.left, renderBox.top, renderBox.width]);
 
   const onMouseUp = useCallback(() => {
     dragging.current = false;
+
     if (adminMode && draggingMarkerId.current) {
       const moved = movedMarkerDuringDrag.current;
+      const markerId = draggingMarkerId.current;
+      const coords = draggedMarkerCoords.current;
+
       draggingMarkerId.current = null;
       movedMarkerDuringDrag.current = false;
-      if (moved) {
-        persistEntities(markersRef.current);
+      draggedMarkerCoords.current = null;
+
+      if (moved && coords) {
+        const nextMarkers = markersRef.current.map((marker) =>
+          marker.id === markerId
+            ? { ...marker, x: coords.rawX, y: coords.rawY }
+            : marker
+        );
+        setEditableMarkers(nextMarkers);
+        void saveServerConfig({ entities: nextMarkers });
       }
     }
   }, [adminMode]);
@@ -882,6 +899,13 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
               <button
                 key={marker.id}
                 type="button"
+                ref={(node) => {
+                  if (node) {
+                    markerNodeRefs.current[marker.id] = node;
+                  } else {
+                    delete markerNodeRefs.current[marker.id];
+                  }
+                }}
                 onMouseDown={(e) => {
                   if (!adminMode) return;
                   e.preventDefault();
