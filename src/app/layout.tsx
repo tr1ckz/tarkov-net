@@ -6,8 +6,8 @@ import { AppSessionProvider } from "@/components/session-provider";
 import { getSession } from "@/lib/session";
 
 export const metadata: Metadata = {
-  title: "Game Intel Hub",
-  description: "Pick a game and jump into live intelligence and tactical guides",
+  title: "PMall",
+  description: "PMall game intel hub",
   icons: {
     icon: "/logo.png"
   }
@@ -28,10 +28,9 @@ export default async function RootLayout({
             <header className="mb-6 border border-[#2d2d2d] bg-[linear-gradient(90deg,#1a1a1a_0%,#171717_45%,#131313_100%)] p-4">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-3">
-                  <Image src="/logo.png" alt="Game Intel Hub logo" width={64} height={64} className="h-16 w-16 object-contain" priority />
+                  <Image src="/logo.png" alt="PMall logo" width={300} height={96} className="h-14 w-auto object-contain sm:h-16" priority />
                   <div>
-                    <p className="font-display text-xl uppercase tracking-[0.12em] text-[#e2d2af]">Game Intel Hub</p>
-                    <p className="text-xs uppercase tracking-[0.12em] text-[#9a9080]">Tarkov and PUBG tactical intelligence</p>
+                    <p className="font-display text-xl uppercase tracking-[0.12em] text-[#e2d2af]">PMall</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
