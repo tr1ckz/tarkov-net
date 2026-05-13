@@ -16,14 +16,14 @@ export default function HomePage() {
       <section className="grid gap-4 md:grid-cols-2">
         <Link
           href="/tarkov"
-          className="group relative aspect-[16/10] overflow-hidden border border-[#49533a] transition hover:-translate-y-0.5 hover:border-[#8fa070]"
+          className="group relative aspect-[16/10] overflow-hidden border border-[#49533a] bg-[#0f1310] transition hover:-translate-y-0.5 hover:border-[#8fa070]"
         >
           <Image
             src="/tarkov.jpg"
             alt="Escape from Tarkov"
             fill
             sizes="(max-width: 768px) 100vw, 50vw"
-            className="object-cover object-center opacity-85 transition duration-500 group-hover:scale-[1.03]"
+            className="object-contain object-center p-3 opacity-95 transition duration-500 group-hover:scale-[1.02]"
           />
           <div className="absolute inset-0 bg-[linear-gradient(110deg,rgba(8,16,9,0.9)_12%,rgba(9,14,10,0.8)_40%,rgba(6,7,7,0.62)_72%,rgba(6,7,7,0.84)_100%)]" />
 
@@ -41,14 +41,14 @@ export default function HomePage() {
 
         <Link
           href="/pubg"
-          className="group relative aspect-[16/10] overflow-hidden border border-[#4f4330] transition hover:-translate-y-0.5 hover:border-[#d7b67a]"
+          className="group relative aspect-[16/10] overflow-hidden border border-[#4f4330] bg-[#15120d] transition hover:-translate-y-0.5 hover:border-[#d7b67a]"
         >
           <Image
             src="/pubg.avif"
             alt="PUBG"
             fill
             sizes="(max-width: 768px) 100vw, 50vw"
-            className="object-cover object-center opacity-90 transition duration-500 group-hover:scale-[1.03]"
+            className="object-contain object-center p-3 opacity-95 transition duration-500 group-hover:scale-[1.02]"
           />
           <div className="absolute inset-0 bg-[linear-gradient(110deg,rgba(19,14,8,0.9)_10%,rgba(17,13,9,0.78)_39%,rgba(9,8,7,0.58)_74%,rgba(9,8,7,0.84)_100%)]" />
 
