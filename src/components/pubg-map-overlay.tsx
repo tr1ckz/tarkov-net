@@ -1187,10 +1187,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
             alt={`${map.name} map`}
             className="h-full w-full object-contain select-none"
             style={{
-              filter:
-                mapTheme === "dark"
-                  ? "brightness(0.72) contrast(1.05) saturate(0.9)"
-                  : "brightness(1.06) contrast(1.02) saturate(1.08)",
+              filter: "brightness(1.0) contrast(1.0) saturate(1.0)",
             }}
             draggable={false}
             loading="eager"

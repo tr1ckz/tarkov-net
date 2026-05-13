@@ -27,7 +27,7 @@ export default function HomePage() {
           />
           <div className="absolute inset-0 bg-[linear-gradient(110deg,rgba(8,16,9,0.9)_12%,rgba(9,14,10,0.8)_40%,rgba(6,7,7,0.62)_72%,rgba(6,7,7,0.84)_100%)]" />
 
-          <div className="relative z-10 flex min-h-[225px] flex-col justify-end p-5">
+          <div className="relative z-10 flex min-h-[155px] flex-col justify-end p-5">
             <div>
               <p className="text-xs uppercase tracking-[0.12em] text-[#8fa070]">Escape from Tarkov</p>
               <h2 className="font-display text-2xl uppercase tracking-[0.08em] text-[#e2d2af]">Tarkov Intel</h2>
@@ -52,7 +52,7 @@ export default function HomePage() {
           />
           <div className="absolute inset-0 bg-[linear-gradient(110deg,rgba(19,14,8,0.9)_10%,rgba(17,13,9,0.78)_39%,rgba(9,8,7,0.58)_74%,rgba(9,8,7,0.84)_100%)]" />
 
-          <div className="relative z-10 flex min-h-[225px] flex-col justify-end p-5">
+          <div className="relative z-10 flex min-h-[155px] flex-col justify-end p-5">
             <div>
               <p className="text-xs uppercase tracking-[0.12em] text-[#d7b67a]">PlayerUnknown's Battlegrounds</p>
               <h2 className="font-display text-2xl uppercase tracking-[0.08em] text-[#e2d2af]">PUBG Tactical Hub</h2>
