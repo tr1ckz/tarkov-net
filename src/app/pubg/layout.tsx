@@ -1,11 +1,17 @@
+import Image from "next/image";
 import { pubgMaps } from "@/lib/pubg-data";
 
 export default function PubgLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-4">
       <header className="border border-[#2d2d2d] bg-[linear-gradient(120deg,#20180f_0%,#171310_45%,#111_100%)] p-4">
-        <p className="text-xs uppercase tracking-[0.14em] text-[#d7b67a]">PLAYERUNKNOWN'S BATTLEGROUNDS</p>
-        <h1 className="mt-2 font-display text-3xl uppercase tracking-[0.1em] text-[#f1d6aa]">PUBG Maps</h1>
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-[0.14em] text-[#d7b67a]">PLAYERUNKNOWN'S BATTLEGROUNDS</p>
+            <h1 className="mt-2 font-display text-3xl uppercase tracking-[0.1em] text-[#f1d6aa]">PUBG Maps</h1>
+          </div>
+          <Image src="/logo.png" alt="PMall" width={220} height={70} className="h-12 w-auto object-contain sm:h-14" />
+        </div>
       </header>
 
       <div className="flex flex-1 flex-col gap-4 lg:flex-row">
