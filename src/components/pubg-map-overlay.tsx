@@ -2,7 +2,6 @@
 
 import { useMemo, useRef, useState, useCallback, useEffect, type CSSProperties } from "react";
 import type { PubgMapIntel, PubgMapMarker } from "@/lib/pubg-data";
-import { pubgImportedMarkersBySlug } from "@/lib/pubg-map-pois";
 
 type Props = {
   map: PubgMapIntel;
@@ -384,50 +383,6 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
   const draggedMarkerRawY = useRef<number | null>(null);
   const dragPaintFrameId = useRef<number | null>(null);
 
-  const mergedMarkers = useMemo(() => {
-    const existingSecretKeys = new Set(
-      map.markers
-        .filter((m) => m.type === "secret-room")
-        .map((m) => `${Math.round(m.x * 10)}:${Math.round(m.y * 10)}`)
-    );
-    const derived: PubgMapMarker[] = map.secretRooms
-      .map((room, i) => ({
-        id: `secret-room-${map.slug}-${i}`,
-        label: room.name,
-        type: "secret-room" as const,
-        x: room.x,
-        y: room.y,
-        notes: `${room.mapGridArea} — ${room.howToOpen}`,
-      }))
-      .filter(
-        (m) =>
-          !existingSecretKeys.has(`${Math.round(m.x * 10)}:${Math.round(m.y * 10)}`)
-      );
-    const destonKeys: PubgMapMarker[] =
-      map.slug === "deston"
-        ? map.secretRooms.map((room, i) => ({
-            id: `deston-key-${map.slug}-${i}`,
-            label: `${room.name.replace("Security Room", "Keycard Spot")}`,
-            type: "secret-key" as const,
-            x: Math.min(99.5, room.x + 0.35),
-            y: Math.min(99.5, room.y + 0.35),
-            notes: `Key location marker linked to ${room.name}. ${room.howToOpen}`,
-          }))
-        : [];
-
-    const imported = pubgImportedMarkersBySlug[map.slug] ?? [];
-    const base = [...map.markers, ...derived, ...destonKeys];
-    const existing = new Set(base.map((m) => `${m.type}|${Math.round(m.x * 10)}|${Math.round(m.y * 10)}`));
-    const extras = imported.filter((m) => {
-      const key = `${m.type}|${Math.round(m.x * 10)}|${Math.round(m.y * 10)}`;
-      if (existing.has(key)) return false;
-      existing.add(key);
-      return true;
-    });
-
-    return [...base, ...extras];
-  }, [map.markers, map.secretRooms, map.slug]);
-
   const visibleMarkers = useMemo(
     () => editableMarkers.filter((m) => !hiddenCategories.includes(m.type) && activeTypes[m.type]),
     [editableMarkers, activeTypes, hiddenCategories]
@@ -577,7 +532,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
   useEffect(() => {
     setCalibration(getBaseCalibration(map.slug));
     setCapturedPoint(null);
-    setEditableMarkers(mergedMarkers);
+    setEditableMarkers([]);
     setSaveStatus("idle");
     setCategoriesDirty(false);
     setPalette({});
@@ -619,7 +574,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
           setCalibration(payload.calibration);
         }
 
-        if (payload.entities && payload.entities.length) {
+        if (Array.isArray(payload.entities)) {
           setEditableMarkers(payload.entities);
         }
 
@@ -661,7 +616,7 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [map.slug, mergedMarkers]);
+  }, [map.slug]);
 
   useEffect(() => {
     localStorage.setItem(`pubg-map-theme-${map.slug}`, mapTheme);
@@ -734,9 +689,9 @@ export function PubgMapOverlay({ map, isAdmin }: Props) {
   }
 
   function resetEntitiesToDefaults() {
-    setEditableMarkers(mergedMarkers);
+    setEditableMarkers([]);
     setActiveMarkerId(null);
-    void saveServerConfig({ entities: null });
+    void saveServerConfig({ entities: [] });
   }
 
   function resetCalibration() {
