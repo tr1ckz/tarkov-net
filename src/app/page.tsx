@@ -16,7 +16,7 @@ export default function HomePage() {
       <section className="grid gap-4 md:grid-cols-2">
         <Link
           href="/tarkov"
-          className="group relative aspect-[16/10] overflow-hidden border border-[#49533a] bg-[#0f1310] transition hover:-translate-y-0.5 hover:border-[#8fa070]"
+          className="group relative aspect-[16/6] overflow-hidden border border-[#49533a] bg-[#0f1310] transition hover:-translate-y-0.5 hover:border-[#8fa070]"
         >
           <Image
             src="/tarkov.jpg"
@@ -27,12 +27,12 @@ export default function HomePage() {
           />
           <div className="absolute inset-0 bg-[linear-gradient(110deg,rgba(8,16,9,0.9)_12%,rgba(9,14,10,0.8)_40%,rgba(6,7,7,0.62)_72%,rgba(6,7,7,0.84)_100%)]" />
 
-          <div className="relative z-10 flex min-h-[155px] flex-col justify-end p-5">
+          <div className="relative z-10 flex min-h-[110px] flex-col justify-end p-4">
             <div>
               <p className="text-xs uppercase tracking-[0.12em] text-[#8fa070]">Escape from Tarkov</p>
               <h2 className="font-display text-2xl uppercase tracking-[0.08em] text-[#e2d2af]">Tarkov Intel</h2>
             </div>
-            <div className="mt-4 inline-flex w-fit items-center gap-2 border border-[#697e52] bg-black/25 px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#d8cfbe] group-hover:border-[#a6c07f]">
+            <div className="mt-3 inline-flex w-fit items-center gap-2 border border-[#697e52] bg-black/25 px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#d8cfbe] group-hover:border-[#a6c07f]">
               <Crosshair className="h-3.5 w-3.5" />
               Enter Tarkov
             </div>
@@ -41,7 +41,7 @@ export default function HomePage() {
 
         <Link
           href="/pubg"
-          className="group relative aspect-[16/10] overflow-hidden border border-[#4f4330] bg-[#15120d] transition hover:-translate-y-0.5 hover:border-[#d7b67a]"
+          className="group relative aspect-[16/6] overflow-hidden border border-[#4f4330] bg-[#15120d] transition hover:-translate-y-0.5 hover:border-[#d7b67a]"
         >
           <Image
             src="/pubg.avif"
@@ -52,12 +52,12 @@ export default function HomePage() {
           />
           <div className="absolute inset-0 bg-[linear-gradient(110deg,rgba(19,14,8,0.9)_10%,rgba(17,13,9,0.78)_39%,rgba(9,8,7,0.58)_74%,rgba(9,8,7,0.84)_100%)]" />
 
-          <div className="relative z-10 flex min-h-[155px] flex-col justify-end p-5">
+          <div className="relative z-10 flex min-h-[110px] flex-col justify-end p-4">
             <div>
               <p className="text-xs uppercase tracking-[0.12em] text-[#d7b67a]">PlayerUnknown's Battlegrounds</p>
               <h2 className="font-display text-2xl uppercase tracking-[0.08em] text-[#e2d2af]">PUBG Tactical Hub</h2>
             </div>
-            <div className="mt-4 inline-flex w-fit items-center gap-2 border border-[#7f6740] bg-black/25 px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#d8cfbe] group-hover:border-[#e0bd7c]">
+            <div className="mt-3 inline-flex w-fit items-center gap-2 border border-[#7f6740] bg-black/25 px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#d8cfbe] group-hover:border-[#e0bd7c]">
               <MapPinned className="h-3.5 w-3.5" />
               Enter PUBG
             </div>
