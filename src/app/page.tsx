@@ -1,6 +1,5 @@
 import Link from "next/link";
 import Image from "next/image";
-import { Crosshair, MapPinned } from "lucide-react";
 
 export default function HomePage() {
   return (
@@ -23,7 +22,7 @@ export default function HomePage() {
             alt="Escape from Tarkov"
             fill
             sizes="(max-width: 768px) 100vw, 50vw"
-            className="object-contain object-center p-3 opacity-95 transition duration-500 group-hover:scale-[1.02]"
+            className="object-cover object-center opacity-95 transition duration-500 group-hover:scale-[1.02]"
           />
           <div className="absolute inset-0 bg-[linear-gradient(110deg,rgba(8,16,9,0.9)_12%,rgba(9,14,10,0.8)_40%,rgba(6,7,7,0.62)_72%,rgba(6,7,7,0.84)_100%)]" />
 
@@ -31,10 +30,6 @@ export default function HomePage() {
             <div>
               <p className="text-xs uppercase tracking-[0.12em] text-[#8fa070]">Escape from Tarkov</p>
               <h2 className="font-display text-2xl uppercase tracking-[0.08em] text-[#e2d2af]">Tarkov Intel</h2>
-            </div>
-            <div className="mt-3 inline-flex w-fit items-center gap-2 border border-[#697e52] bg-black/25 px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#d8cfbe] group-hover:border-[#a6c07f]">
-              <Crosshair className="h-3.5 w-3.5" />
-              Enter Tarkov
             </div>
           </div>
         </Link>
@@ -48,7 +43,7 @@ export default function HomePage() {
             alt="PUBG"
             fill
             sizes="(max-width: 768px) 100vw, 50vw"
-            className="object-contain object-center p-3 opacity-95 transition duration-500 group-hover:scale-[1.02]"
+            className="object-cover object-center opacity-95 transition duration-500 group-hover:scale-[1.02]"
           />
           <div className="absolute inset-0 bg-[linear-gradient(110deg,rgba(19,14,8,0.9)_10%,rgba(17,13,9,0.78)_39%,rgba(9,8,7,0.58)_74%,rgba(9,8,7,0.84)_100%)]" />
 
@@ -56,10 +51,6 @@ export default function HomePage() {
             <div>
               <p className="text-xs uppercase tracking-[0.12em] text-[#d7b67a]">PlayerUnknown's Battlegrounds</p>
               <h2 className="font-display text-2xl uppercase tracking-[0.08em] text-[#e2d2af]">PUBG Tactical Hub</h2>
-            </div>
-            <div className="mt-3 inline-flex w-fit items-center gap-2 border border-[#7f6740] bg-black/25 px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-[#d8cfbe] group-hover:border-[#e0bd7c]">
-              <MapPinned className="h-3.5 w-3.5" />
-              Enter PUBG
             </div>
           </div>
         </Link>
