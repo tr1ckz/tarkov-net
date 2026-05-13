@@ -47,7 +47,7 @@ export const pubgMaps: PubgMapIntel[] = [
   {
     slug: "erangel",
     name: "Erangel",
-    mapImage: "https://pubg-maps.com/image/erangel/map.jpg",
+    mapImage: "https://raw.githubusercontent.com/pubg/api-assets/master/Assets/Maps/Erangel_Main_High_Res.png",
     sizeKm: "8x8",
     terrain: "Mixed fields, compounds, and ridgelines",
     bestFor: "Balanced squads with strong vehicle rotations",
@@ -223,7 +223,7 @@ export const pubgMaps: PubgMapIntel[] = [
   {
     slug: "miramar",
     name: "Miramar",
-    mapImage: "https://pubg-maps.com/image/miramar/map.jpg",
+    mapImage: "https://raw.githubusercontent.com/pubg/api-assets/master/Assets/Maps/Miramar_Main_High_Res.png",
     sizeKm: "8x8",
     terrain: "Desert hills, long sight-lines, sparse cover",
     bestFor: "Precision teams with DMR/sniper confidence",
@@ -263,7 +263,7 @@ export const pubgMaps: PubgMapIntel[] = [
   {
     slug: "taego",
     name: "Taego",
-    mapImage: "https://pubg-maps.com/image/taego/map.jpg",
+    mapImage: "https://raw.githubusercontent.com/pubg/api-assets/master/Assets/Maps/Taego_Main_High_Res.png",
     sizeKm: "8x8",
     terrain: "Rice fields, towns, and mountain edges",
     bestFor: "Fast loot/opening tempo with key-driven power spikes",
@@ -439,7 +439,7 @@ export const pubgMaps: PubgMapIntel[] = [
   {
     slug: "deston",
     name: "Deston",
-    mapImage: "https://pubg-maps.com/image/deston/map.jpg",
+    mapImage: "https://raw.githubusercontent.com/pubg/api-assets/master/Assets/Maps/Deston_Main_High_Res.png",
     sizeKm: "8x8",
     terrain: "Urban towers, swamps, and coastal lowlands",
     bestFor: "Vertical fighting and aggressive repositioning",
@@ -642,7 +642,7 @@ export const pubgMaps: PubgMapIntel[] = [
   {
     slug: "vikendi",
     name: "Vikendi",
-    mapImage: "https://pubg-maps.com/image/vikendi/map.jpg",
+    mapImage: "https://raw.githubusercontent.com/pubg/api-assets/master/Assets/Maps/Vikendi_Main_High_Res.png",
     sizeKm: "6x6",
     terrain: "Snow, forests, and dense micro-cover",
     bestFor: "Stealth movement and quick compound fights",
@@ -773,7 +773,7 @@ export const pubgMaps: PubgMapIntel[] = [
   {
     slug: "sanhok",
     name: "Sanhok",
-    mapImage: "https://pubg-maps.com/image/sanhok/map.jpg",
+    mapImage: "https://raw.githubusercontent.com/pubg/api-assets/master/Assets/Maps/Sanhok_Main_High_Res.png",
     sizeKm: "4x4",
     terrain: "Jungle, rivers, and dense foliage",
     bestFor: "Fast-paced squads who thrive in close-range fights",
@@ -821,7 +821,7 @@ export const pubgMaps: PubgMapIntel[] = [
   {
     slug: "rondo",
     name: "Rondo",
-    mapImage: "https://pubg-maps.com/image/rondo/map.jpg",
+    mapImage: "https://raw.githubusercontent.com/pubg/api-assets/master/Assets/Maps/Rondo_Main_High_Res.png",
     sizeKm: "8x8",
     terrain: "Bamboo groves, river valleys, and traditional East Asian urban zones",
     bestFor: "Macro-focused squads that favor long rotates and compound control",
@@ -861,7 +861,7 @@ export const pubgMaps: PubgMapIntel[] = [
   {
     slug: "paramo",
     name: "Paramo",
-    mapImage: "https://pubg-maps.com/image/paramo/map.jpg",
+    mapImage: "https://raw.githubusercontent.com/pubg/api-assets/master/Assets/Maps/Paramo_Main_High_Res.png",
     sizeKm: "3x3",
     terrain: "Active volcano highlands with shifting landmarks and lava-adjacent cover",
     bestFor: "Aggressive teams with strong timing and close-range fighting",
@@ -901,7 +901,7 @@ export const pubgMaps: PubgMapIntel[] = [
   {
     slug: "karakin",
     name: "Karakin",
-    mapImage: "https://pubg-maps.com/image/karakin/map.jpg",
+    mapImage: "https://raw.githubusercontent.com/pubg/api-assets/master/Assets/Maps/Karakin_Main_High_Res.png",
     sizeKm: "2x2",
     terrain: "Arid hills, bunkers, and destructible walls",
     bestFor: "Aggressive entry-fraggers who exploit breachable cover",
